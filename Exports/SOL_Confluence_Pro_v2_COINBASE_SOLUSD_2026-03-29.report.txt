@@ -1,0 +1,85 @@
+==================================================================
+  TRADINGVIEW BACKTEST REPORT
+  File      : SOL_Confluence_Pro_v2_COINBASE_SOLUSD_2026-03-29.xlsx
+  Symbol    : COINBASE:SOLUSD  |  Timeframe: D
+  Period    : Apr 18, 2022, 08:00 — Mar 29, 2026, 12:00
+  Capital   : $10,000.00
+==================================================================
+
+── PERFORMANCE SUMMARY ──────────────────────────────────────────
+  Net Profit          : $+323.55  (+3.24%)
+  Gross Profit        : $565.68
+  Gross Loss          : -$242.13
+  Profit Factor       : 2.336
+  Buy & Hold Return   : $-1,502.79  (strategy outperformed)
+  Commission Paid     : $38.72
+
+── TRADES ───────────────────────────────────────────────────────
+  Total Trades        : 19
+  Winners / Losers    : 9 / 10
+  Win Rate            : 47.37%
+  Expected Payoff     : $+17.03 per trade
+
+── RISK / REWARD ────────────────────────────────────────────────
+  Avg Win             : $62.85
+  Avg Loss            : -$24.21
+  Win/Loss Ratio      : 2.60
+  Largest Win         : $+176.64
+  Largest Loss        : $-53.37
+  Max Drawdown (EOB)  : -$83.34
+  Max Drawdown (IB)   : -$90.89
+
+── RISK-ADJUSTED ────────────────────────────────────────────────
+  Sharpe Ratio        : -0.219
+  Sortino Ratio       : -0.400
+
+── LONG vs SHORT ────────────────────────────────────────────────
+  Long  :   8 trades  |  5 wins (62.5%)  |  P&L: $+280.63  |  PF: 4.659
+  Short :  11 trades  |  4 wins (36.4%)  |  P&L: $+42.92  |  PF: 1.259
+
+── STREAKS ──────────────────────────────────────────────────────
+  Max Consec Wins     : 2
+  Max Consec Losses   : 3
+
+── BEST 5 TRADES ────────────────────────────────────────────────
+  1. $ +176.64  2022-05-09 16:00:00   Short Exit
+  2. $ +130.37  2024-02-29 08:00:00   Long Exit
+  3. $ +101.47  2025-07-21 00:00:00   Long Exit
+  4. $  +60.45  2024-02-12 00:00:00   Close entry(s) order Long
+  5. $  +34.06  2023-11-08 16:00:00   Close entry(s) order Long
+
+── WORST 5 TRADES ───────────────────────────────────────────────
+  1. $  -53.37  2024-01-03 08:00:00   Long Exit
+  2. $  -44.63  2022-04-18 16:00:00   Short Exit
+  3. $  -38.18  2023-03-01 08:00:00   Close entry(s) order Short
+  4. $  -29.80  2023-09-28 00:00:00   Short Exit
+  5. $  -18.85  2025-06-21 12:00:00   Close entry(s) order Short
+
+── ALL TRADES (Trade # | P&L | Signal | Date) ───────────────────
+   1. $  -44.63  2022-04-18 16:00:00   Short Exit
+   2. $ +176.64  2022-05-09 16:00:00   Short Exit
+   3. $   +0.80  2022-05-20 20:00:00   Close entry(s) order Short
+   4. $  -38.18  2023-03-01 08:00:00   Close entry(s) order Short
+   5. $  -12.87  2023-05-17 00:00:00   Close entry(s) order Short
+   6. $  -13.42  2023-08-28 16:00:00   Close entry(s) order Short
+   7. $  +30.24  2023-09-03 04:00:00   Close entry(s) order Short
+   8. $  -29.80  2023-09-28 00:00:00   Short Exit
+   9. $  +34.06  2023-11-08 16:00:00   Close entry(s) order Long
+  10. $  -53.37  2024-01-03 08:00:00   Long Exit
+  11. $  +60.45  2024-02-12 00:00:00   Close entry(s) order Long
+  12. $ +130.37  2024-02-29 08:00:00   Long Exit
+  13. $  -15.29  2024-03-26 16:00:00   Close entry(s) order Long
+  14. $   +0.67  2024-09-07 08:00:00   Close entry(s) order Short
+  15. $   -8.04  2025-05-27 20:00:00   Close entry(s) order Long
+  16. $  -18.85  2025-06-21 12:00:00   Close entry(s) order Short
+  17. $ +101.47  2025-07-21 00:00:00   Long Exit
+  18. $  +30.98  2025-08-25 08:00:00   Close entry(s) order Long
+  19. $   -7.68  2025-12-26 20:00:00   Close entry(s) order Short
+
+── EQUITY CURVE (ASCII) ─────────────────────────────────────────
+  ▁▄▄▃▃▃▄▃▄▃▄▇▆▆▆▆███
+  start: $0.00   min: $-44.63   max: $+331.23   final: $+323.55
+
+==================================================================
+  Paste this report to Claude for strategy analysis.
+==================================================================

@@ -1,0 +1,78 @@
+==================================================================
+  TRADINGVIEW BACKTEST REPORT
+  File      : SOL_Confluence_Pro_v3.6_COINBASE_SOLUSD_2026-03-29.xlsx
+  Symbol    : COINBASE:SOLUSD  |  Timeframe: 240
+  Period    : Jan 18, 2025, 18:00 — Mar 29, 2026, 15:00
+  Capital   : $100.00
+==================================================================
+
+── PERFORMANCE SUMMARY ──────────────────────────────────────────
+  Net Profit          : $-0.58  (-0.58%)
+  Gross Profit        : $2.49
+  Gross Loss          : -$3.07
+  Profit Factor       : 0.812
+  Buy & Hold Return   : $-67.34  (strategy outperformed)
+  Commission Paid     : $0.60
+
+── TRADES ───────────────────────────────────────────────────────
+  Total Trades        : 12
+  Winners / Losers    : 6 / 6
+  Win Rate            : 50.00%
+  Expected Payoff     : $-0.05 per trade
+
+── RISK / REWARD ────────────────────────────────────────────────
+  Avg Win             : $0.42
+  Avg Loss            : -$0.51
+  Win/Loss Ratio      : 0.81
+  Largest Win         : $+1.37
+  Largest Loss        : $-0.77
+  Max Drawdown (EOB)  : -$2.45
+  Max Drawdown (IB)   : -$2.75
+
+── RISK-ADJUSTED ────────────────────────────────────────────────
+  Sharpe Ratio        : -0.345
+  Sortino Ratio       : -0.382
+
+── LONG vs SHORT ────────────────────────────────────────────────
+  Long  :  12 trades  |  6 wins (50.0%)  |  P&L: $-0.58  |  PF: 0.812
+  Short :   0 trades  |  0 wins (0.0%)  |  P&L: $+0.00
+
+── STREAKS ──────────────────────────────────────────────────────
+  Max Consec Wins     : 2
+  Max Consec Losses   : 4
+
+── BEST 5 TRADES ────────────────────────────────────────────────
+  1. $   +1.37  2025-01-19 05:00:00   Long Exit
+  2. $   +0.62  2025-09-12 00:00:00   Long Exit
+  3. $   +0.27  2025-08-10 02:00:00   Long Exit
+  4. $   +0.10  2026-01-13 16:00:00   Long Exit
+  5. $   +0.09  2025-10-05 08:00:00   Long Exit
+
+── WORST 5 TRADES ───────────────────────────────────────────────
+  1. $   -0.77  2025-04-14 15:00:00   Long Exit
+  2. $   -0.58  2025-06-11 21:00:00   Long Exit
+  3. $   -0.56  2025-06-30 23:00:00   Long Exit
+  4. $   -0.46  2025-04-21 11:00:00   Long Exit
+  5. $   -0.40  2025-09-05 14:00:00   Long Exit
+
+── ALL TRADES (Trade # | P&L | Signal | Date) ───────────────────
+   1. $   +1.37  2025-01-19 05:00:00   Long Exit
+   2. $   -0.77  2025-04-14 15:00:00   Long Exit
+   3. $   -0.46  2025-04-21 11:00:00   Long Exit
+   4. $   -0.58  2025-06-11 21:00:00   Long Exit
+   5. $   -0.56  2025-06-30 23:00:00   Long Exit
+   6. $   +0.05  2025-07-09 14:00:00   Long Exit
+   7. $   +0.27  2025-08-10 02:00:00   Long Exit
+   8. $   -0.40  2025-09-05 14:00:00   Long Exit
+   9. $   +0.62  2025-09-12 00:00:00   Long Exit
+  10. $   +0.09  2025-10-05 08:00:00   Long Exit
+  11. $   -0.31  2026-01-11 17:00:00   Long Exit
+  12. $   +0.10  2026-01-13 16:00:00   Long Exit
+
+── EQUITY CURVE (ASCII) ─────────────────────────────────────────
+  █▆▄▃▁▁▂▁▃▃▂▂
+  start: $0.00   min: $-1.08   max: $+1.37   final: $-0.58
+
+==================================================================
+  Paste this report to Claude for strategy analysis.
+==================================================================

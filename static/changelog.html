@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHANGELOG // TRINITY TRADING BOT</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+<style>
+:root {
+  --black: #000000;
+  --green: #00FF41;
+  --green-dim: #00AA2B;
+  --green-dark: #003B00;
+  --red: #FF2222;
+  --yellow: #FFD700;
+  --aqua: #00FFFF;
+  --orange: #FF8C00;
+  --mono: 'Share Tech Mono', monospace;
+  --vt: 'VT323', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--black);
+  color: var(--green);
+  font-family: var(--mono);
+  padding: 32px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+  pointer-events: none;
+  z-index: 9999;
+}
+
+h1 {
+  font-family: var(--vt);
+  font-size: 2.5rem;
+  color: var(--green);
+  text-shadow: 0 0 20px var(--green);
+  letter-spacing: 4px;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  font-size: .7rem;
+  color: var(--green-dim);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 32px;
+}
+
+.back-link {
+  display: inline-block;
+  color: var(--green-dim);
+  text-decoration: none;
+  font-size: .75rem;
+  letter-spacing: 2px;
+  margin-bottom: 24px;
+  transition: color .15s;
+}
+.back-link:hover { color: var(--green); text-shadow: 0 0 8px var(--green); }
+
+.version-block {
+  border: 1px solid var(--green-dark);
+  margin-bottom: 20px;
+  background: rgba(0,5,0,0.85);
+}
+
+.version-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--green-dark);
+  cursor: pointer;
+  transition: background .15s;
+}
+.version-header:hover { background: rgba(0,255,65,0.03); }
+
+.version-tag {
+  font-family: var(--vt);
+  font-size: 1.4rem;
+  color: var(--green);
+  letter-spacing: 2px;
+}
+
+.version-date {
+  font-size: .7rem;
+  color: var(--green-dim);
+  letter-spacing: 2px;
+}
+
+.version-status {
+  font-size: .65rem;
+  letter-spacing: 2px;
+  padding: 3px 10px;
+  border: 1px solid;
+  text-transform: uppercase;
+}
+.status-active { color: var(--green); border-color: var(--green); }
+.status-tested { color: var(--aqua); border-color: var(--aqua); }
+.status-superseded { color: var(--green-dim); border-color: var(--green-dark); }
+
+.version-body {
+  padding: 16px 18px;
+  font-size: .8rem;
+  line-height: 1.6;
+}
+
+.version-body ul {
+  list-style: none;
+  padding: 0;
+}
+
+.version-body li {
+  padding: 3px 0;
+  padding-left: 16px;
+  position: relative;
+}
+.version-body li::before {
+  content: '>';
+  position: absolute;
+  left: 0;
+  color: var(--green-dim);
+}
+
+.change-type {
+  display: inline-block;
+  font-size: .6rem;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border: 1px solid;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.type-feature { color: var(--aqua); border-color: var(--aqua); }
+.type-fix { color: var(--red); border-color: var(--red); }
+.type-perf { color: var(--yellow); border-color: var(--yellow); }
+.type-infra { color: var(--orange); border-color: var(--orange); }
+.type-refactor { color: #AA88FF; border-color: #AA88FF; }
+
+.metrics-row {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--green-dark);
+  flex-wrap: wrap;
+}
+
+.metric {
+  font-size: .7rem;
+}
+.metric-label { color: var(--green-dim); }
+.metric-value { color: var(--green); font-family: var(--vt); font-size: .9rem; }
+.metric-value.good { color: var(--green); }
+.metric-value.warn { color: var(--yellow); }
+.metric-value.bad { color: var(--red); }
+
+.section-divider {
+  text-align: center;
+  color: var(--green-dark);
+  font-size: .7rem;
+  letter-spacing: 8px;
+  margin: 28px 0 20px;
+}
+
+footer {
+  margin-top: 40px;
+  padding-top: 16px;
+  border-top: 1px solid var(--green-dark);
+  font-size: .65rem;
+  color: var(--green-dim);
+  letter-spacing: 2px;
+  text-align: center;
+}
+footer a { color: var(--green-dim); text-decoration: none; }
+footer a:hover { color: var(--green); }
+</style>
+</head>
+<body>
+
+<a href="/" class="back-link">[ &lt; BACK TO DASHBOARD ]</a>
+
+<h1>CHANGELOG</h1>
+<div class="subtitle">Trinity Trading Bot // Full Disclosure of All Changes</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-divider">-- ACTIVE DEPLOYMENT --</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">v3.5 (1H) + v2 (Daily)</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-active">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Multi-timeframe deployment: 1H (v3.5) + Daily (v2) running simultaneously</li>
+      <li><span class="change-type type-feature">feature</span> Created indicator_1h_v3.5.pine &mdash; alert indicator based on strategy_v3.5.pine</li>
+      <li><span class="change-type type-feature">feature</span> Created indicator_daily_v2.pine &mdash; alert indicator based on strategy_v2.pine</li>
+      <li><span class="change-type type-feature">feature</span> Both indicators fire webhook alerts to the same bot endpoint</li>
+      <li><span class="change-type type-infra">infra</span> Added changelog page accessible from dashboard</li>
+      <li><span class="change-type type-infra">infra</span> Updated dashboard strategy display for multi-timeframe</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">1H Strategy: </span><span class="metric-value">v3.5</span></div>
+      <div class="metric"><span class="metric-label">Daily Strategy: </span><span class="metric-value">v2</span></div>
+      <div class="metric"><span class="metric-label">1H Backtest PF: </span><span class="metric-value warn">0.982</span></div>
+      <div class="metric"><span class="metric-label">Daily Backtest PF: </span><span class="metric-value good">2.336</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-divider">-- STRATEGY OPTIMIZATION HISTORY --</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.7</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Single variable test: v3.5 with TP lowered from 3.5x to 3.0x ATR</li>
+      <li><span class="change-type type-perf">perf</span> Result: Lower TP clipped winners still running &mdash; confirmed v3.5 TP is optimal</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">18</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value">44.4%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.920</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value warn">1.15</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.6</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Breakeven delayed to 1.3x ATR, TP lowered to 3.0x, ADX rising required</li>
+      <li><span class="change-type type-perf">perf</span> Result: Rising ADX filter too restrictive, cut good trades. Delayed breakeven let losses run</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">12</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value">50.0%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.812</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value bad">0.81</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.5</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-active">best 1H</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> "Better Entries, Not Better Exits" &mdash; shifted focus from exit tuning to entry quality</li>
+      <li><span class="change-type type-feature">feature</span> Added ADX(14) > 20 trend filter &mdash; only trade in trending markets</li>
+      <li><span class="change-type type-perf">perf</span> Min confluence raised to 5 (from 4) &mdash; proven edge from v2 Daily backtest</li>
+      <li><span class="change-type type-perf">perf</span> Position size increased to 25% (from 10%) &mdash; bigger bets on stronger signals</li>
+      <li><span class="change-type type-perf">perf</span> First version with positive R:R (1.23:1) and PF near breakeven</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">18</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value">44.4%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value warn">0.982</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value good">1.23</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.4</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> "Lock Profits Early" &mdash; tighter trail (0.8x), lower TP (3.0x), earlier breakeven</li>
+      <li><span class="change-type type-perf">perf</span> Result: Tighter trail clipped winners too aggressively, avg win dropped to $0.14</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">58</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value">46.6%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.739</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value bad">0.85</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.3</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Hybrid of v3.1 (51% WR) + v3.2 (good R:R)</li>
+      <li><span class="change-type type-perf">perf</span> SL 1.5x ATR from v3.1, trail activation 2.0x from v3.2, breakeven 1.5x ATR</li>
+      <li><span class="change-type type-perf">perf</span> Bear close threshold raised to 6/8 &mdash; let SL/trail handle normal exits</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">84</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value">44.0%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.797</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value warn">1.00</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.2</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Tighter SL (1.2x ATR), wider TP (4.5x), added breakeven stop at 1.0x ATR</li>
+      <li><span class="change-type type-perf">perf</span> Result: SL too tight killed win rate (31%) &mdash; not enough room for normal price action</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">87</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value bad">31.0%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.741</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3.1</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Added trailing stop (activate 1.5x ATR, offset 1.0x ATR)</li>
+      <li><span class="change-type type-perf">perf</span> Stricter close conditions (bear >= 5), removed EMA crossunder close, min 6-bar hold</li>
+      <li><span class="change-type type-perf">perf</span> Best win rate achieved (51.1%) but avg win < avg loss (inverted R:R)</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">88</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value good">51.1%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value warn">0.835</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value bad">0.78</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v3</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> First 1H timeframe optimization from v2 Daily</li>
+      <li><span class="change-type type-perf">perf</span> Confluence lowered to 4, vol spike 1.5x, HTF changed to 4H EMA50</li>
+      <li><span class="change-type type-perf">perf</span> Shorts disabled, initial capital set to $100</li>
+      <li><span class="change-type type-perf">perf</span> Result: 164 trades, 29.9% WR &mdash; too many premature exits from noise</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">164</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value bad">29.9%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.710</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Strategy v2 (Daily)</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-active">active daily</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Confluence >= 5, vol spike 2.0x, HTF Daily EMA200, bear market gate</li>
+      <li><span class="change-type type-feature">feature</span> Added Banker Fund Flow (L3) and MACD Divergence (L2) indicators</li>
+      <li><span class="change-type type-perf">perf</span> Excellent PF 2.336 on Daily but only 19 trades over 4 years (~5/year)</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">19</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value good">63.2%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value good">2.336</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════ -->
+<div class="section-divider">-- INFRASTRUCTURE --</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Backtest Analyzer Tool</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-tested">tool</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> tools/analyze_backtest.py &mdash; parses TradingView .xlsx exports</li>
+      <li><span class="change-type type-feature">feature</span> Multi-sheet Excel parsing (Performance, Trades, Risk, Properties)</li>
+      <li><span class="change-type type-feature">feature</span> Generates formatted report with R:R, equity curve, best/worst trades</li>
+      <li><span class="change-type type-fix">fix</span> Fixed shebang to use venv Python for openpyxl dependency</li>
+    </ul>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Health Check System</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-tested">infra</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> healthcheck.sh &mdash; checks bot /health endpoint every 15 minutes</li>
+      <li><span class="change-type type-feature">feature</span> Auto-restart in visible Terminal.app window via osascript</li>
+      <li><span class="change-type type-infra">infra</span> macOS launchd agent for automated scheduling</li>
+    </ul>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Dashboard Updates</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-tested">infra</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-infra">infra</span> Updated Claude Pro $20 &rarr; Claude Max $100/mo</li>
+      <li><span class="change-type type-infra">infra</span> Monthly operating costs: $133.95 (TradingView $33.95 + Claude Max $100)</li>
+      <li><span class="change-type type-feature">feature</span> Live animated waveforms for API connection status</li>
+      <li><span class="change-type type-feature">feature</span> Multi-timeframe strategy info display</li>
+      <li><span class="change-type type-feature">feature</span> Changelog link added to navigation</li>
+    </ul>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Telegram Interactive Commands</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
+    </div>
+    <span class="version-status status-live">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Two-way Telegram command handler &mdash; monitor and control bot remotely</li>
+      <li><span class="change-type type-feature">feature</span> /status, /wallet, /apis, /trades, /today, /pnl commands for real-time data</li>
+      <li><span class="change-type type-feature">feature</span> /start and /stop commands for remote bot control</li>
+      <li><span class="change-type type-feature">feature</span> /apis checks 7 systems: Bot API, Jupiter, Solana RPC, Telegram, Claude, NewsAPI, DB</li>
+      <li><span class="change-type type-infra">infra</span> Cooperative polling with 409 conflict handling for MCP plugin coexistence</li>
+      <li><span class="change-type type-infra">infra</span> Security: commands only respond to configured chat_id</li>
+    </ul>
+  </div>
+</div>
+
+<footer>
+  TRINITY TRADING BOT &nbsp;|&nbsp;
+  <a href="/">DASHBOARD</a> &nbsp;|&nbsp;
+  CLAUDE AI + JUPITER DEX + SOLANA
+</footer>
+
+</body>
+</html>

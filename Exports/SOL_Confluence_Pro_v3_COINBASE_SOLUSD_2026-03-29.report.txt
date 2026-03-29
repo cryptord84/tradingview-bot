@@ -1,0 +1,230 @@
+==================================================================
+  TRADINGVIEW BACKTEST REPORT
+  File      : SOL_Confluence_Pro_v3_COINBASE_SOLUSD_2026-03-29.xlsx
+  Symbol    : COINBASE:SOLUSD  |  Timeframe: 240
+  Period    : Jan 15, 2025, 21:00 — Mar 29, 2026, 13:00
+  Capital   : $100.00
+==================================================================
+
+── PERFORMANCE SUMMARY ──────────────────────────────────────────
+  Net Profit          : $-4.11  (-4.11%)
+  Gross Profit        : $10.07
+  Gross Loss          : -$14.18
+  Profit Factor       : 0.710
+  Buy & Hold Return   : $-59.56  (strategy outperformed)
+  Commission Paid     : $3.18
+
+── TRADES ───────────────────────────────────────────────────────
+  Total Trades        : 164
+  Winners / Losers    : 49 / 115
+  Win Rate            : 29.88%
+  Expected Payoff     : $-0.03 per trade
+
+── RISK / REWARD ────────────────────────────────────────────────
+  Avg Win             : $0.21
+  Avg Loss            : -$0.12
+  Win/Loss Ratio      : 1.67
+  Largest Win         : $+0.50
+  Largest Loss        : $-0.28
+  Max Drawdown (EOB)  : -$4.47
+  Max Drawdown (IB)   : -$4.50
+
+── RISK-ADJUSTED ────────────────────────────────────────────────
+  Sharpe Ratio        : -0.912
+  Sortino Ratio       : -0.694
+
+── LONG vs SHORT ────────────────────────────────────────────────
+  Long  : 164 trades  |  49 wins (29.9%)  |  P&L: $-4.10  |  PF: 0.710
+  Short :   0 trades  |  0 wins (0.0%)  |  P&L: $+0.00
+
+── STREAKS ──────────────────────────────────────────────────────
+  Max Consec Wins     : 3
+  Max Consec Losses   : 8
+
+── BEST 5 TRADES ────────────────────────────────────────────────
+  1. $   +0.50  2025-01-18 08:00:00   Long Exit
+  2. $   +0.39  2025-05-14 08:00:00   Close entry(s) order Long
+  3. $   +0.39  2025-08-27 18:00:00   Long Exit
+  4. $   +0.38  2025-07-18 05:00:00   Long Exit
+  5. $   +0.37  2025-04-12 20:00:00   Long Exit
+
+── WORST 5 TRADES ───────────────────────────────────────────────
+  1. $   -0.28  2025-01-22 23:00:00   Long Exit
+  2. $   -0.28  2025-01-23 21:00:00   Long Exit
+  3. $   -0.24  2025-04-14 15:00:00   Long Exit
+  4. $   -0.23  2025-04-10 15:00:00   Long Exit
+  5. $   -0.22  2025-05-23 22:00:00   Long Exit
+
+── ALL TRADES (Trade # | P&L | Signal | Date) ───────────────────
+   1. $   -0.17  2025-01-16 08:00:00   Long Exit
+   2. $   -0.19  2025-01-16 13:00:00   Long Exit
+   3. $   -0.05  2025-01-17 18:00:00   Close entry(s) order Long
+   4. $   +0.50  2025-01-18 08:00:00   Long Exit
+   5. $   -0.13  2025-01-19 15:00:00   Close entry(s) order Long
+   6. $   +0.02  2025-01-22 09:00:00   Close entry(s) order Long
+   7. $   -0.14  2025-01-22 17:00:00   Close entry(s) order Long
+   8. $   -0.28  2025-01-22 23:00:00   Long Exit
+   9. $   -0.28  2025-01-23 21:00:00   Long Exit
+  10. $   -0.02  2025-01-25 21:00:00   Close entry(s) order Long
+  11. $   -0.17  2025-03-20 15:00:00   Long Exit
+  12. $   -0.11  2025-03-23 17:00:00   Long Exit
+  13. $   +0.20  2025-03-24 03:00:00   Long Exit
+  14. $   +0.29  2025-03-24 11:00:00   Long Exit
+  15. $   -0.08  2025-03-25 22:00:00   Close entry(s) order Long
+  16. $   -0.23  2025-04-10 15:00:00   Long Exit
+  17. $   +0.03  2025-04-12 01:00:00   Close entry(s) order Long
+  18. $   +0.37  2025-04-12 20:00:00   Long Exit
+  19. $   -0.06  2025-04-13 20:00:00   Close entry(s) order Long
+  20. $   -0.13  2025-04-14 10:00:00   Close entry(s) order Long
+  21. $   -0.24  2025-04-14 15:00:00   Long Exit
+  22. $   -0.19  2025-04-16 17:00:00   Long Exit
+  23. $   -0.11  2025-04-17 00:00:00   Close entry(s) order Long
+  24. $   -0.06  2025-04-17 20:00:00   Close entry(s) order Long
+  25. $   +0.22  2025-04-19 03:00:00   Long Exit
+  26. $   -0.12  2025-04-20 06:00:00   Long Exit
+  27. $   -0.09  2025-04-21 03:00:00   Close entry(s) order Long
+  28. $   -0.12  2025-04-21 16:00:00   Close entry(s) order Long
+  29. $   +0.30  2025-04-22 21:00:00   Long Exit
+  30. $   -0.19  2025-04-24 02:00:00   Long Exit
+  31. $   +0.30  2025-04-25 01:00:00   Long Exit
+  32. $   -0.12  2025-04-25 03:00:00   Close entry(s) order Long
+  33. $   -0.10  2025-04-25 13:00:00   Close entry(s) order Long
+  34. $   -0.17  2025-04-25 15:00:00   Long Exit
+  35. $   -0.03  2025-04-28 13:00:00   Close entry(s) order Long
+  36. $   -0.14  2025-04-29 21:00:00   Long Exit
+  37. $   -0.14  2025-05-01 17:00:00   Long Exit
+  38. $   -0.11  2025-05-02 17:00:00   Long Exit
+  39. $   -0.08  2025-05-07 20:00:00   Close entry(s) order Long
+  40. $   +0.26  2025-05-08 12:00:00   Long Exit
+  41. $   -0.16  2025-05-11 00:00:00   Long Exit
+  42. $   +0.10  2025-05-12 14:00:00   Long Exit
+  43. $   +0.39  2025-05-14 08:00:00   Close entry(s) order Long
+  44. $   -0.20  2025-05-15 19:00:00   Long Exit
+  45. $   -0.13  2025-05-18 17:00:00   Long Exit
+  46. $   -0.16  2025-05-21 17:00:00   Long Exit
+  47. $   -0.04  2025-05-22 02:00:00   Close entry(s) order Long
+  48. $   -0.16  2025-05-23 06:00:00   Long Exit
+  49. $   -0.17  2025-05-23 11:00:00   Long Exit
+  50. $   -0.22  2025-05-23 22:00:00   Long Exit
+  51. $   -0.13  2025-05-27 14:00:00   Long Exit
+  52. $   +0.26  2025-06-09 23:00:00   Long Exit
+  53. $   +0.06  2025-06-11 10:00:00   Close entry(s) order Long
+  54. $   -0.11  2025-06-11 14:00:00   Close entry(s) order Long
+  55. $   -0.14  2025-06-12 15:00:00   Long Exit
+  56. $   -0.10  2025-06-16 13:00:00   Close entry(s) order Long
+  57. $   -0.15  2025-06-16 22:00:00   Long Exit
+  58. $   -0.14  2025-06-25 08:00:00   Long Exit
+  59. $   -0.14  2025-06-25 14:00:00   Long Exit
+  60. $   +0.22  2025-06-28 17:00:00   Long Exit
+  61. $   +0.22  2025-06-30 15:00:00   Long Exit
+  62. $   -0.01  2025-07-02 18:00:00   Close entry(s) order Long
+  63. $   -0.13  2025-07-03 14:00:00   Long Exit
+  64. $   -0.09  2025-07-07 01:00:00   Close entry(s) order Long
+  65. $   -0.03  2025-07-07 04:00:00   Close entry(s) order Long
+  66. $   -0.11  2025-07-07 12:00:00   Long Exit
+  67. $   -0.10  2025-07-07 20:00:00   Close entry(s) order Long
+  68. $   +0.05  2025-07-08 20:00:00   Close entry(s) order Long
+  69. $   -0.04  2025-07-09 07:00:00   Close entry(s) order Long
+  70. $   -0.11  2025-07-09 17:00:00   Long Exit
+  71. $   +0.25  2025-07-10 02:00:00   Long Exit
+  72. $   +0.23  2025-07-10 21:00:00   Long Exit
+  73. $   -0.05  2025-07-11 21:00:00   Close entry(s) order Long
+  74. $   +0.10  2025-07-13 14:00:00   Close entry(s) order Long
+  75. $   -0.13  2025-07-14 15:00:00   Long Exit
+  76. $   +0.19  2025-07-16 02:00:00   Close entry(s) order Long
+  77. $   +0.28  2025-07-16 16:00:00   Long Exit
+  78. $   +0.38  2025-07-18 05:00:00   Long Exit
+  79. $   -0.05  2025-07-18 19:00:00   Close entry(s) order Long
+  80. $   +0.13  2025-07-20 18:00:00   Close entry(s) order Long
+  81. $   +0.34  2025-07-21 14:00:00   Long Exit
+  82. $   -0.20  2025-07-22 03:00:00   Long Exit
+  83. $   +0.01  2025-07-28 00:00:00   Close entry(s) order Long
+  84. $   -0.15  2025-07-28 07:00:00   Long Exit
+  85. $   -0.14  2025-08-08 14:00:00   Long Exit
+  86. $   -0.08  2025-08-09 14:00:00   Close entry(s) order Long
+  87. $   -0.15  2025-08-10 05:00:00   Long Exit
+  88. $   -0.14  2025-08-11 07:00:00   Long Exit
+  89. $   +0.28  2025-08-12 16:00:00   Long Exit
+  90. $   +0.34  2025-08-13 02:00:00   Long Exit
+  91. $   -0.07  2025-08-17 13:00:00   Close entry(s) order Long
+  92. $   -0.13  2025-08-17 23:00:00   Long Exit
+  93. $   -0.16  2025-08-21 15:00:00   Long Exit
+  94. $   -0.18  2025-08-23 12:00:00   Long Exit
+  95. $   -0.12  2025-08-24 08:00:00   Close entry(s) order Long
+  96. $   -0.15  2025-08-24 19:00:00   Long Exit
+  97. $   -0.22  2025-08-25 04:00:00   Long Exit
+  98. $   +0.39  2025-08-27 18:00:00   Long Exit
+  99. $   -0.16  2025-09-02 15:00:00   Long Exit
+  100. $   -0.10  2025-09-03 17:00:00   Close entry(s) order Long
+  101. $   -0.13  2025-09-05 14:00:00   Long Exit
+  102. $   +0.05  2025-09-07 22:00:00   Close entry(s) order Long
+  103. $   -0.12  2025-09-08 11:00:00   Long Exit
+  104. $   -0.12  2025-09-09 14:00:00   Long Exit
+  105. $   +0.26  2025-09-10 13:00:00   Long Exit
+  106. $   -0.13  2025-09-11 13:00:00   Long Exit
+  107. $   +0.27  2025-09-12 12:00:00   Long Exit
+  108. $   -0.01  2025-09-14 12:00:00   Close entry(s) order Long
+  109. $   +0.11  2025-09-18 21:00:00   Close entry(s) order Long
+  110. $   +0.30  2025-10-02 23:00:00   Long Exit
+  111. $   -0.06  2025-10-03 22:00:00   Close entry(s) order Long
+  112. $   -0.03  2025-10-05 04:00:00   Close entry(s) order Long
+  113. $   +0.02  2025-10-06 15:00:00   Close entry(s) order Long
+  114. $   -0.15  2025-10-24 13:00:00   Long Exit
+  115. $   -0.06  2025-10-26 00:00:00   Close entry(s) order Long
+  116. $   -0.08  2025-10-26 11:00:00   Close entry(s) order Long
+  117. $   +0.20  2025-10-27 01:00:00   Long Exit
+  118. $   -0.14  2025-10-28 14:00:00   Long Exit
+  119. $   -0.10  2025-11-10 15:00:00   Close entry(s) order Long
+  120. $   -0.19  2025-11-11 04:00:00   Long Exit
+  121. $   -0.02  2025-11-25 12:00:00   Close entry(s) order Long
+  122. $   -0.17  2025-11-25 19:00:00   Long Exit
+  123. $   +0.32  2025-11-26 18:00:00   Long Exit
+  124. $   -0.14  2025-11-28 16:00:00   Long Exit
+  125. $   -0.15  2025-12-04 17:00:00   Long Exit
+  126. $   -0.15  2025-12-08 15:00:00   Long Exit
+  127. $   +0.12  2025-12-28 23:00:00   Long Exit
+  128. $   -0.08  2025-12-30 21:00:00   Close entry(s) order Long
+  129. $   -0.05  2025-12-31 19:00:00   Close entry(s) order Long
+  130. $   -0.08  2026-01-02 02:00:00   Close entry(s) order Long
+  131. $   -0.10  2026-01-02 11:00:00   Long Exit
+  132. $   +0.03  2026-01-04 19:00:00   Close entry(s) order Long
+  133. $   -0.01  2026-01-05 05:00:00   Close entry(s) order Long
+  134. $   +0.01  2026-01-05 17:00:00   Close entry(s) order Long
+  135. $   -0.06  2026-01-06 01:00:00   Close entry(s) order Long
+  136. $   -0.14  2026-01-06 16:00:00   Long Exit
+  137. $   +0.29  2026-01-09 03:00:00   Long Exit
+  138. $   -0.05  2026-01-09 18:00:00   Close entry(s) order Long
+  139. $   +0.04  2026-01-11 14:00:00   Close entry(s) order Long
+  140. $   -0.07  2026-01-11 20:00:00   Close entry(s) order Long
+  141. $   +0.21  2026-01-12 03:00:00   Long Exit
+  142. $   +0.25  2026-01-13 22:00:00   Long Exit
+  143. $   -0.16  2026-01-13 23:00:00   Long Exit
+  144. $   -0.06  2026-01-14 18:00:00   Close entry(s) order Long
+  145. $   -0.06  2026-01-28 19:00:00   Close entry(s) order Long
+  146. $   +0.04  2026-02-15 00:00:00   Close entry(s) order Long
+  147. $   -0.18  2026-02-15 17:00:00   Long Exit
+  148. $   -0.16  2026-02-17 14:00:00   Long Exit
+  149. $   -0.12  2026-02-21 20:00:00   Long Exit
+  150. $   +0.30  2026-02-25 15:00:00   Long Exit
+  151. $   -0.21  2026-03-02 17:00:00   Long Exit
+  152. $   -0.20  2026-03-04 03:00:00   Long Exit
+  153. $   +0.05  2026-03-05 00:00:00   Close entry(s) order Long
+  154. $   -0.20  2026-03-05 15:00:00   Long Exit
+  155. $   -0.14  2026-03-10 00:00:00   Close entry(s) order Long
+  156. $   -0.17  2026-03-10 18:00:00   Long Exit
+  157. $   -0.17  2026-03-11 15:00:00   Long Exit
+  158. $   -0.08  2026-03-12 14:00:00   Close entry(s) order Long
+  159. $   -0.10  2026-03-13 03:00:00   Close entry(s) order Long
+  160. $   -0.16  2026-03-13 15:00:00   Long Exit
+  161. $   +0.20  2026-03-15 22:00:00   Long Exit
+  162. $   +0.30  2026-03-16 21:00:00   Long Exit
+  163. $   -0.09  2026-03-17 20:00:00   Close entry(s) order Long
+  164. $   -0.13  2026-03-26 02:00:00   Long Exit
+
+── EQUITY CURVE (ASCII) ─────────────────────────────────────────
+  ███▇▇▇▇▆▇▆▇▆▅▆▆▅▅▄▄▃▄▄▃▃▄▄▅▆▅▄▅▅▄▄▄▄▄▅▄▄▄▄▃▃▃▂▃▄▃▃
+  start: $0.00   min: $-4.38   max: $+0.09   final: $-4.10
+
+==================================================================
+  Paste this report to Claude for strategy analysis.
+==================================================================
