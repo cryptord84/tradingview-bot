@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOL Bot Cheatsheet</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --border: #334155; --accent: #38bdf8; --green: #22c55e; --red: #ef4444; --yellow: #eab308; }
+        body { background: var(--bg); color: #e2e8f0; font-family: 'Inter', system-ui, sans-serif; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+        h2 { color: var(--accent); font-size: 1rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem; }
+        h3 { color: #cbd5e1; font-size: .875rem; font-weight: 600; margin: .75rem 0 .4rem; }
+        code, pre { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+        .cmd { background: #0f172a; border: 1px solid #475569; border-radius: 6px; padding: 8px 12px; font-size: .8rem; color: #86efac; display: block; margin: 4px 0; white-space: pre-wrap; word-break: break-all; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .7rem; font-weight: 600; }
+        .badge-green { background: #14532d; color: var(--green); }
+        .badge-blue { background: #1e3a5f; color: var(--accent); }
+        .badge-yellow { background: #422006; color: var(--yellow); }
+        .badge-red { background: #450a0a; color: var(--red); }
+        .badge-gray { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+        table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+        th { text-align: left; padding: 8px 10px; color: #64748b; font-weight: 600; border-bottom: 1px solid var(--border); }
+        td { padding: 7px 10px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+        .step-num { width: 24px; height: 24px; border-radius: 50%; background: #1d4ed8; color: white; font-size: .75rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .flow-arrow { color: #475569; text-align: center; font-size: 1.2rem; padding: 4px 0; }
+        .flow-box { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: .8rem; text-align: center; }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .toc a { color: #94a3b8; font-size: .8rem; }
+        .toc a:hover { color: var(--accent); }
+        .warn { background: #422006; border: 1px solid #92400e; border-radius: 8px; padding: 10px 14px; font-size: .8rem; color: #fcd34d; }
+        .tip { background: #0c2a1a; border: 1px solid #166534; border-radius: 8px; padding: 10px 14px; font-size: .8rem; color: #86efac; }
+    </style>
+</head>
+<body class="min-h-screen">
+
+<header class="flex items-center justify-between px-6 py-4 border-b border-slate-700 sticky top-0 bg-slate-900 z-10">
+    <div class="flex items-center gap-3">
+        <a href="/" class="text-slate-400 hover:text-white text-sm">← Dashboard</a>
+        <span class="text-slate-600">/</span>
+        <span class="font-bold">SOL Bot Cheatsheet</span>
+    </div>
+    <span class="text-xs text-slate-500">Last updated: 2026-03-28</span>
+</header>
+
+<main class="max-w-6xl mx-auto p-6 space-y-6">
+
+    <!-- TOC -->
+    <div class="card p-5">
+        <h2>📋 Contents</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 toc">
+            <a href="#architecture">🏗 Architecture</a>
+            <a href="#startup">🚀 Startup Order</a>
+            <a href="#signal-flow">🔄 Signal Flow</a>
+            <a href="#pine">🌲 Pine Script</a>
+            <a href="#claude">🤖 Claude AI</a>
+            <a href="#jupiter">⚡ Jupiter</a>
+            <a href="#risk">🛡 Risk Settings</a>
+            <a href="#telegram">📱 Telegram</a>
+            <a href="#dashboard">📊 Dashboard</a>
+            <a href="#test-plan">🧪 Test Plan</a>
+            <a href="#troubleshoot">🔧 Troubleshoot</a>
+            <a href="#security">🔒 Security</a>
+        </div>
+    </div>
+
+    <!-- Architecture -->
+    <div class="card p-5" id="architecture">
+        <h2>🏗 System Architecture</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+                <h3>Files</h3>
+                <table>
+                    <tr><td><code class="text-yellow-300">main.py</code></td><td class="text-slate-400">FastAPI app entry point</td></tr>
+                    <tr><td><code class="text-yellow-300">strategy.pine</code></td><td class="text-slate-400">TradingView Pine Script v5</td></tr>
+                    <tr><td><code class="text-yellow-300">config.yaml</code></td><td class="text-slate-400">All settings (never commit)</td></tr>
+                    <tr><td><code class="text-yellow-300">.env</code></td><td class="text-slate-400">Wallet password (never commit)</td></tr>
+                    <tr><td><code class="text-yellow-300">data/trades.db</code></td><td class="text-slate-400">SQLite trade log</td></tr>
+                    <tr><td><code class="text-yellow-300">logs/bot.log</code></td><td class="text-slate-400">Rotating log file</td></tr>
+                    <tr><td><code class="text-yellow-300">static/index.html</code></td><td class="text-slate-400">Dashboard UI</td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Services</h3>
+                <table>
+                    <tr><td><code class="text-blue-300">trade_engine.py</code></td><td class="text-slate-400">Main orchestrator</td></tr>
+                    <tr><td><code class="text-blue-300">claude_decision.py</code></td><td class="text-slate-400">AI decision layer</td></tr>
+                    <tr><td><code class="text-blue-300">jupiter_client.py</code></td><td class="text-slate-400">DEX swap execution</td></tr>
+                    <tr><td><code class="text-blue-300">wallet_service.py</code></td><td class="text-slate-400">Solana wallet + balance</td></tr>
+                    <tr><td><code class="text-blue-300">telegram_service.py</code></td><td class="text-slate-400">Push notifications</td></tr>
+                    <tr><td><code class="text-blue-300">news_service.py</code></td><td class="text-slate-400">Geo-risk headlines</td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Routers (API)</h3>
+                <table>
+                    <tr><td><code class="text-green-300">POST /webhook</code></td><td class="text-slate-400">TradingView alerts</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/stats</code></td><td class="text-slate-400">Dashboard stats</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/trades</code></td><td class="text-slate-400">Trade history</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/price</code></td><td class="text-slate-400">Live SOL price</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/settings</code></td><td class="text-slate-400">Current risk config</td></tr>
+                    <tr><td><code class="text-green-300">POST /api/settings</code></td><td class="text-slate-400">Update risk config</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/export/csv</code></td><td class="text-slate-400">Tax CSV download</td></tr>
+                    <tr><td><code class="text-green-300">GET /health</code></td><td class="text-slate-400">Health check</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="warn">⚠️ Never commit <code>config.yaml</code>, <code>.env</code>, or <code>data/</code> to git. The <code>.gitignore</code> excludes them already.</div>
+    </div>
+
+    <!-- Startup Order -->
+    <div class="card p-5" id="startup">
+        <h2>🚀 Startup Order</h2>
+        <div class="space-y-2">
+            <div class="flex items-start gap-3">
+                <div class="step-num">1</div>
+                <div class="flex-1">
+                    <p class="text-sm font-semibold mb-1">Activate virtual environment</p>
+                    <code class="cmd">cd ~/Documents/Claude/Projects/tradingview-bot
+source venv/bin/activate</code>
+                </div>
+            </div>
+            <div class="flex items-start gap-3">
+                <div class="step-num">2</div>
+                <div class="flex-1">
+                    <p class="text-sm font-semibold mb-1">Verify config exists</p>
+                    <code class="cmd">ls config.yaml .env   # Both must exist</code>
+                </div>
+            </div>
+            <div class="flex items-start gap-3">
+                <div class="step-num">3</div>
+                <div class="flex-1">
+                    <p class="text-sm font-semibold mb-1">Start the bot</p>
+                    <code class="cmd">python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload</code>
+                    <p class="text-xs text-slate-400 mt-1">Watch for: <span class="text-green-400">Bot initialized successfully</span></p>
+                </div>
+            </div>
+            <div class="flex items-start gap-3">
+                <div class="step-num">4</div>
+                <div class="flex-1">
+                    <p class="text-sm font-semibold mb-1">Expose webhook publicly (new terminal tab)</p>
+                    <code class="cmd">ngrok http 8000
+# OR
+cloudflared tunnel --url http://localhost:8000</code>
+                    <p class="text-xs text-slate-400 mt-1">Copy the <code>https://xxxx.ngrok.io</code> URL → paste into TradingView alert webhook field</p>
+                </div>
+            </div>
+            <div class="flex items-start gap-3">
+                <div class="step-num">5</div>
+                <div class="flex-1">
+                    <p class="text-sm font-semibold mb-1">Open dashboard</p>
+                    <code class="cmd">open http://localhost:8000</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-4">
+            <h3>Shutdown</h3>
+            <code class="cmd">Ctrl+C   # in the uvicorn terminal</code>
+        </div>
+
+        <div class="mt-4">
+            <h3>Run without auto-reload (production)</h3>
+            <code class="cmd">python -m uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1</code>
+        </div>
+    </div>
+
+    <!-- Signal Flow -->
+    <div class="card p-5" id="signal-flow">
+        <h2>🔄 Signal Flow (end-to-end)</h2>
+        <div class="grid grid-cols-1 md:grid-cols-7 gap-1 items-center text-xs">
+            <div class="flow-box bg-purple-900 border-purple-700">📈 TradingView<br><span class="text-slate-400">Pine Script fires alert</span></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box bg-blue-900 border-blue-700">🌐 POST /webhook<br><span class="text-slate-400">Secret validated, rate checked</span></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box bg-indigo-900 border-indigo-700">🤖 Claude AI<br><span class="text-slate-400">EXECUTE / REJECT / MODIFY</span></div>
+            <div class="flow-arrow">→</div>
+            <div class="flow-box bg-green-900 border-green-700">⚡ Jupiter DEX<br><span class="text-slate-400">Quote → Sign → Send</span></div>
+        </div>
+        <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <div class="tip">✅ <strong>EXECUTE</strong>: Trade goes through at suggested size/leverage (capped by risk limits)</div>
+            <div class="warn">🔧 <strong>MODIFY</strong>: Claude reduces size or leverage, then executes</div>
+            <div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:10px 14px;color:#ef4444;">❌ <strong>REJECT</strong>: No trade. Logged. Telegram notified.</div>
+        </div>
+
+        <h3 class="mt-4">Duplicate Signal Protection</h3>
+        <p class="text-sm text-slate-400">Same signal_type + symbol + price within <code>duplicate_window_seconds</code> (default 30s) is silently dropped.</p>
+
+        <h3>Low Balance Shutdown</h3>
+        <p class="text-sm text-slate-400">If SOL balance &lt; <code>low_balance_shutdown_sol</code>, all signals are rejected before reaching Claude.</p>
+    </div>
+
+    <!-- Pine Script -->
+    <div class="card p-5" id="pine">
+        <h2>🌲 Pine Script — Indicators & Confluence</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>7 Confluence Indicators</h3>
+                <table>
+                    <tr><th>#</th><th>Indicator</th><th>Bull Condition</th></tr>
+                    <tr><td>1</td><td>EMA/SMA Ribbon</td><td>9 &gt; 21 &gt; 50, price &gt; SMA200</td></tr>
+                    <tr><td>2</td><td>RSI (14)</td><td>Cross above 30 or rising 40–65</td></tr>
+                    <tr><td>3</td><td>MACD</td><td>Histogram positive &amp; rising</td></tr>
+                    <tr><td>4</td><td>Supertrend</td><td>Direction = bullish</td></tr>
+                    <tr><td>5</td><td>Bollinger Bands</td><td>Price near lower band, bouncing</td></tr>
+                    <tr><td>6</td><td>VWAP + Ichimoku</td><td>Price above VWAP &amp; above cloud</td></tr>
+                    <tr><td>7</td><td>Fibonacci</td><td>Near 0.382/0.5/0.618 support</td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Signal Requirements</h3>
+                <table>
+                    <tr><td>Min confluence</td><td><span class="badge badge-blue">≥ 4/7 indicators</span></td></tr>
+                    <tr><td>Volume</td><td><span class="badge badge-blue">Spike &gt; 1.5× MA</span></td></tr>
+                    <tr><td>HTF filter</td><td><span class="badge badge-blue">4H EMA trend match</span></td></tr>
+                    <tr><td>Alert frequency</td><td><span class="badge badge-yellow">Once per bar close</span></td></tr>
+                </table>
+
+                <h3 class="mt-3">Confidence → Leverage → Size</h3>
+                <table>
+                    <tr><th>Confidence</th><th>Leverage</th><th>Size</th></tr>
+                    <tr><td><span class="badge badge-green">≥ 85%</span></td><td>5x</td><td>15%</td></tr>
+                    <tr><td><span class="badge badge-blue">≥ 70%</span></td><td>3x</td><td>10%</td></tr>
+                    <tr><td><span class="badge badge-yellow">≥ 55%</span></td><td>2x</td><td>7%</td></tr>
+                    <tr><td><span class="badge badge-gray">&lt; 55%</span></td><td>1x</td><td>5%</td></tr>
+                </table>
+
+                <h3 class="mt-3">Webhook JSON Payload</h3>
+                <code class="cmd">{
+  "secret": "...",
+  "signal_type": "BUY|SELL|CLOSE",
+  "symbol": "SOLUSDT",
+  "entry_price_estimate": 150.50,
+  "confidence_score": 75,
+  "suggested_leverage": 3,
+  "suggested_position_size_percent": 10,
+  "bull_score": 5,
+  "bear_score": 1,
+  "rsi": 45.2,
+  "atr": 3.5,
+  "timeframe": "60"
+}</code>
+            </div>
+        </div>
+    </div>
+
+    <!-- Claude AI -->
+    <div class="card p-5" id="claude">
+        <h2>🤖 Claude AI Decision Layer</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>Mode Config (<code>config.yaml</code>)</h3>
+                <table>
+                    <tr><th>Mode</th><th>How</th><th>Cost</th></tr>
+                    <tr><td><span class="badge badge-green">cli</span></td><td>Uses <code>claude --print</code> (Claude Code auth)</td><td>Free (uses your subscription)</td></tr>
+                    <tr><td><span class="badge badge-blue">api</span></td><td>Anthropic API key required</td><td>Per token (~$0.003/decision)</td></tr>
+                </table>
+                <code class="cmd mt-2">claude:
+  mode: "cli"          # or "api"
+  cli_path: "claude"   # path to claude binary
+  timeout_seconds: 60</code>
+
+                <h3 class="mt-3">Claude receives</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li>Full TradingView signal</li>
+                    <li>Live wallet balance (SOL + USD)</li>
+                    <li>SOL market data (price, 24h change, volume)</li>
+                    <li>Latest news headlines (NewsAPI / Tavily)</li>
+                    <li>All risk parameters</li>
+                </ul>
+            </div>
+            <div>
+                <h3>Geo-Risk Levels</h3>
+                <table>
+                    <tr><th>Level</th><th>Action</th></tr>
+                    <tr><td><span class="badge badge-green">LOW</span></td><td>Trade normally</td></tr>
+                    <tr><td><span class="badge badge-yellow">MODERATE</span></td><td>Reduce size 30–50%</td></tr>
+                    <tr><td><span class="badge badge-red">HIGH</span></td><td>Reduce size 50–80%</td></tr>
+                    <tr><td><span class="badge badge-red">EXTREME</span></td><td>REJECT all, go flat</td></tr>
+                </table>
+
+                <h3 class="mt-3">Claude Response JSON</h3>
+                <code class="cmd">{
+  "decision": "EXECUTE",
+  "reasoning": "Strong confluence...",
+  "modified_size_percent": null,
+  "modified_leverage": null,
+  "modified_order_type": null,
+  "limit_price": null,
+  "risk_score": 3,
+  "geo_risk_note": null
+}</code>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jupiter -->
+    <div class="card p-5" id="jupiter">
+        <h2>⚡ Jupiter DEX Execution</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>Swap Flow</h3>
+                <div class="space-y-1 text-sm">
+                    <div class="flow-box">1. GET /quote → best route across all Solana DEXs</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-box">2. POST /swap → serialized transaction</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-box">3. Sign with Phantom keypair (solders)</div>
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-box">4. sendTransaction → Solana RPC</div>
+                </div>
+                <h3 class="mt-3">Token Addresses</h3>
+                <table>
+                    <tr><td>SOL</td><td><code class="text-xs">So11111111111111111111111111112</code></td></tr>
+                    <tr><td>USDC</td><td><code class="text-xs">EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v</code></td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Key Config</h3>
+                <table>
+                    <tr><th>Setting</th><th>Default</th><th>Notes</th></tr>
+                    <tr><td>slippage_bps</td><td>100</td><td>1% max slippage</td></tr>
+                    <tr><td>priority_fee_lamports</td><td>50000</td><td>~0.00005 SOL tip</td></tr>
+                    <tr><td>RPC</td><td>mainnet-beta</td><td>Use paid RPC in production</td></tr>
+                </table>
+                <h3 class="mt-3">Verify TX</h3>
+                <code class="cmd">https://solscan.io/tx/YOUR_TX_SIGNATURE</code>
+                <div class="tip mt-2">💡 TX signatures appear in Telegram notifications and the dashboard trade table.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Risk Settings -->
+    <div class="card p-5" id="risk">
+        <h2>🛡 Risk Management Settings</h2>
+        <table>
+            <tr><th>Setting</th><th>Current (Testing)</th><th>Production Example</th><th>Description</th></tr>
+            <tr><td><code>max_purchase_sol</code></td><td>0.05</td><td>2.0</td><td>Max SOL per trade</td></tr>
+            <tr><td><code>max_purchase_usd</code></td><td>$20</td><td>$200</td><td>Max USD per trade</td></tr>
+            <tr><td><code>max_leverage</code></td><td>1x</td><td>3x</td><td>Hard cap on leverage</td></tr>
+            <tr><td><code>max_position_size_percent</code></td><td>10%</td><td>15%</td><td>Max % of wallet per trade</td></tr>
+            <tr><td><code>risk_per_trade_percent</code></td><td>2%</td><td>2%</td><td>Max risk per trade</td></tr>
+            <tr><td><code>low_balance_shutdown_sol</code></td><td>0.05</td><td>0.5</td><td>Auto-shutdown threshold</td></tr>
+            <tr><td><code>low_balance_shutdown_usd</code></td><td>$20</td><td>$50</td><td>USD shutdown threshold</td></tr>
+            <tr><td><code>daily_loss_limit_percent</code></td><td>10%</td><td>10%</td><td>Stop for the day at X% loss</td></tr>
+            <tr><td><code>max_open_positions</code></td><td>1</td><td>3</td><td>Concurrent positions</td></tr>
+            <tr><td><code>geo_risk.weight</code></td><td>0.7</td><td>0.7</td><td>0=ignore geo, 1=max influence</td></tr>
+        </table>
+        <div class="mt-3 tip">💡 Settings can be updated live in the Dashboard → Risk Settings panel without restarting the bot.</div>
+    </div>
+
+    <!-- Telegram -->
+    <div class="card p-5" id="telegram">
+        <h2>📱 Telegram Notifications</h2>
+        <table>
+            <tr><th>Event</th><th>Toggle</th><th>Contains</th></tr>
+            <tr><td>Webhook received</td><td><code>webhook_received</code></td><td>Signal type, price, confidence</td></tr>
+            <tr><td>Claude decision</td><td><code>claude_decision</code></td><td>EXECUTE/REJECT/MODIFY + reasoning + risk score</td></tr>
+            <tr><td>Trade executed</td><td><code>trade_executed</code></td><td>TX signature, amount, price, fees, new balance</td></tr>
+            <tr><td>Errors</td><td><code>errors</code></td><td>Exception message + context</td></tr>
+            <tr><td>Daily summary</td><td><code>daily_summary</code></td><td>Trades, win rate, P&L, balance</td></tr>
+        </table>
+        <h3>Setup (if not done)</h3>
+        <code class="cmd"># 1. Message @BotFather → /newbot → get token
+# 2. Message your bot once
+# 3. Get your chat_id:
+curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="card p-5" id="dashboard">
+        <h2>📊 Dashboard</h2>
+        <table>
+            <tr><th>URL</th><th>Description</th></tr>
+            <tr><td><a href="/">http://localhost:8000</a></td><td>Main dashboard</td></tr>
+            <tr><td><a href="/cheatsheet">http://localhost:8000/cheatsheet</a></td><td>This cheatsheet</td></tr>
+            <tr><td><a href="/docs">http://localhost:8000/docs</a></td><td>Auto-generated API docs (Swagger)</td></tr>
+            <tr><td><a href="/api/stats">http://localhost:8000/api/stats</a></td><td>Raw stats JSON</td></tr>
+            <tr><td><a href="/api/trades">http://localhost:8000/api/trades</a></td><td>Trade history JSON</td></tr>
+            <tr><td><a href="/api/export/csv">http://localhost:8000/api/export/csv</a></td><td>Download tax CSV</td></tr>
+            <tr><td><a href="/health">http://localhost:8000/health</a></td><td>Health check</td></tr>
+        </table>
+        <div class="mt-3 tip">💡 To redesign the dashboard, copy the prompt in <code>GOOGLE_STITCH_PROMPT.md</code> into <a href="https://stitch.withgoogle.com" target="_blank">stitch.withgoogle.com</a>.</div>
+    </div>
+
+    <!-- Test Plan -->
+    <div class="card p-5" id="test-plan">
+        <h2>🧪 Test Plan</h2>
+
+        <h3>Phase 1 — Infrastructure (no wallet needed)</h3>
+        <table>
+            <tr><th>#</th><th>Test</th><th>Command</th><th>Expected</th></tr>
+            <tr>
+                <td>1.1</td>
+                <td>Bot starts</td>
+                <td><code>uvicorn main:app ...</code></td>
+                <td><span class="badge badge-green">Bot initialized successfully</span></td>
+            </tr>
+            <tr>
+                <td>1.2</td>
+                <td>Health check</td>
+                <td><code>curl localhost:8000/health</code></td>
+                <td><span class="badge badge-green">{"status":"healthy"}</span></td>
+            </tr>
+            <tr>
+                <td>1.3</td>
+                <td>Dashboard loads</td>
+                <td>Open <a href="/">localhost:8000</a></td>
+                <td><span class="badge badge-green">UI renders with -- values</span></td>
+            </tr>
+            <tr>
+                <td>1.4</td>
+                <td>Invalid secret rejected</td>
+                <td>Send webhook with wrong secret</td>
+                <td><span class="badge badge-red">403 Forbidden</span></td>
+            </tr>
+            <tr>
+                <td>1.5</td>
+                <td>Rate limit works</td>
+                <td>Send 11 webhooks in 60s</td>
+                <td><span class="badge badge-yellow">429 on 11th request</span></td>
+            </tr>
+        </table>
+
+        <h3 class="mt-4">Phase 2 — Claude Decision Layer</h3>
+        <table>
+            <tr><th>#</th><th>Test</th><th>How</th><th>Expected</th></tr>
+            <tr>
+                <td>2.1</td>
+                <td>Claude CLI reachable</td>
+                <td><code>claude --print "say hi"</code></td>
+                <td><span class="badge badge-green">Response printed</span></td>
+            </tr>
+            <tr>
+                <td>2.2</td>
+                <td>Low confidence rejected</td>
+                <td>Send webhook with <code>confidence_score: 30</code></td>
+                <td><span class="badge badge-red">decision: REJECT</span></td>
+            </tr>
+            <tr>
+                <td>2.3</td>
+                <td>High confidence executes</td>
+                <td>Send webhook with <code>confidence_score: 85</code></td>
+                <td><span class="badge badge-green">decision: EXECUTE or MODIFY</span></td>
+            </tr>
+            <tr>
+                <td>2.4</td>
+                <td>Telegram notification</td>
+                <td>Any webhook with correct secret</td>
+                <td><span class="badge badge-green">Message received in Telegram</span></td>
+            </tr>
+        </table>
+
+        <h3 class="mt-4">Phase 3 — Wallet & Jupiter (requires funded wallet)</h3>
+        <table>
+            <tr><th>#</th><th>Test</th><th>How</th><th>Expected</th></tr>
+            <tr>
+                <td>3.1</td>
+                <td>Wallet balance reads</td>
+                <td><code>curl localhost:8000/api/stats</code></td>
+                <td><span class="badge badge-green">wallet_balance_sol > 0</span></td>
+            </tr>
+            <tr>
+                <td>3.2</td>
+                <td>Low balance shutdown</td>
+                <td>Set <code>low_balance_shutdown_sol: 999</code> temporarily</td>
+                <td><span class="badge badge-yellow">status: shutdown</span></td>
+            </tr>
+            <tr>
+                <td>3.3</td>
+                <td>Full BUY flow (small)</td>
+                <td>Send BUY webhook, confidence 85, size 5%</td>
+                <td><span class="badge badge-green">TX signature returned, Solscan confirms</span></td>
+            </tr>
+            <tr>
+                <td>3.4</td>
+                <td>Duplicate signal blocked</td>
+                <td>Send identical webhook twice within 30s</td>
+                <td><span class="badge badge-yellow">Second: status: duplicate</span></td>
+            </tr>
+            <tr>
+                <td>3.5</td>
+                <td>Trade appears in dashboard</td>
+                <td>Check <a href="/">localhost:8000</a> after 3.3</td>
+                <td><span class="badge badge-green">Row in trade history</span></td>
+            </tr>
+            <tr>
+                <td>3.6</td>
+                <td>CSV export</td>
+                <td><a href="/api/export/csv">localhost:8000/api/export/csv</a></td>
+                <td><span class="badge badge-green">CSV downloads with trade row</span></td>
+            </tr>
+        </table>
+
+        <h3 class="mt-4">Test Webhook Commands</h3>
+        <code class="cmd"># BUY - high confidence (should EXECUTE)
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"YOUR_SECRET","signal_type":"BUY","symbol":"SOLUSDT","entry_price_estimate":150.50,"confidence_score":85,"suggested_leverage":2,"suggested_position_size_percent":5,"bull_score":6,"bear_score":1,"rsi":45.2,"atr":3.5,"timeframe":"60"}'
+
+# BUY - low confidence (should REJECT)
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"YOUR_SECRET","signal_type":"BUY","symbol":"SOLUSDT","entry_price_estimate":150.50,"confidence_score":30,"suggested_leverage":1,"suggested_position_size_percent":5,"bull_score":2,"bear_score":5,"rsi":65.0,"atr":3.5,"timeframe":"60"}'
+
+# CLOSE signal
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"secret":"YOUR_SECRET","signal_type":"CLOSE","symbol":"SOLUSDT","entry_price_estimate":150.50,"confidence_score":0,"suggested_leverage":1,"suggested_position_size_percent":0,"bull_score":1,"bear_score":6,"rsi":72.0,"atr":3.5,"timeframe":"60"}'</code>
+    </div>
+
+    <!-- Troubleshoot -->
+    <div class="card p-5" id="troubleshoot">
+        <h2>🔧 Troubleshooting</h2>
+        <table>
+            <tr><th>Error</th><th>Cause</th><th>Fix</th></tr>
+            <tr><td><code>No module named 'httpx'</code></td><td>venv not activated or packages not installed</td><td><code>source venv/bin/activate &amp;&amp; pip install -r requirements.txt</code></td></tr>
+            <tr><td><code>config.yaml not found</code></td><td>Forgot to copy example</td><td><code>cp config.yaml.example config.yaml</code></td></tr>
+            <tr><td><code>Invalid secret</code> on webhook</td><td>Secret mismatch</td><td>Check <code>config.yaml → webhook.secret</code> matches curl/TradingView</td></tr>
+            <tr><td><code>Balance too low: 0.0000 SOL</code></td><td>Wallet not funded or key wrong</td><td>Fund wallet; verify <code>encrypted_private_key</code> in config</td></tr>
+            <tr><td><code>Claude CLI not found</code></td><td>claude not installed or not in PATH</td><td><code>npm install -g @anthropic-ai/claude-code</code> then re-authenticate</td></tr>
+            <tr><td><code>Claude CLI timed out</code></td><td>Claude taking too long</td><td>Increase <code>claude.timeout_seconds</code> in config.yaml</td></tr>
+            <tr><td>Telegram silent</td><td>Bot token or chat_id wrong</td><td>Re-run <code>getUpdates</code> API call to get correct chat_id</td></tr>
+            <tr><td>TradingView webhook not firing</td><td>Alert not set to "Once Per Bar Close"</td><td>Edit alert → change trigger mode</td></tr>
+            <tr><td><code>Transaction failed: ...</code></td><td>Insufficient SOL for fees or slippage</td><td>Add more SOL; increase <code>slippage_bps</code> to 200</td></tr>
+            <tr><td>ngrok URL expired</td><td>Free ngrok resets on restart</td><td>Use <code>ngrok config add-authtoken</code> for static domain, or switch to cloudflared</td></tr>
+        </table>
+
+        <h3>View live logs</h3>
+        <code class="cmd">tail -f logs/bot.log</code>
+
+        <h3>Check database directly</h3>
+        <code class="cmd">sqlite3 data/trades.db "SELECT * FROM trades ORDER BY timestamp DESC LIMIT 10;"</code>
+    </div>
+
+    <!-- Security -->
+    <div class="card p-5" id="security">
+        <h2>🔒 Security Checklist</h2>
+        <div class="space-y-2 text-sm">
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span><code>config.yaml</code> and <code>.env</code> are in <code>.gitignore</code> ✓ (already set)</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Wallet private key is encrypted (not stored raw)</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Trading wallet is separate from your main wallet</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Wallet is funded with only what you're willing to risk</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Bot is exposed via ngrok/cloudflare tunnel (not raw port forward)</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Webhook secret is a long random string (32+ hex chars)</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>You have NOT pasted config.yaml contents into any AI chat or public forum</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Low balance shutdown threshold is set appropriately</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Daily loss limit is configured</span></label>
+            <label class="flex items-center gap-3 cursor-pointer"><input type="checkbox" class="w-4 h-4"> <span>Leverage is set to 1x during testing</span></label>
+        </div>
+        <div class="warn mt-4">⚠️ For larger amounts (&gt;$1000), use a Ledger hardware wallet. Keep only trading capital in the hot wallet.</div>
+    </div>
+
+</main>
+
+<footer class="text-center text-xs text-slate-500 py-4 mt-4 border-t border-slate-800">
+    TradingView SOL Bot v1.0 Cheatsheet &mdash; <a href="/">← Back to Dashboard</a>
+</footer>
+
+</body>
+</html>

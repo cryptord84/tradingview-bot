@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRINITY TRADING BOT // SOL</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --black: #000000;
+  --green: #00FF41;
+  --green-dim: #00AA2B;
+  --green-dark: #003B00;
+  --green-mid: #00DE3A;
+  --green-glow: rgba(0,255,65,0.15);
+  --green-glow-strong: rgba(0,255,65,0.35);
+  --red: #FF2222;
+  --yellow: #FFD700;
+  --mono: 'Share Tech Mono', monospace;
+  --vt: 'VT323', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--black);
+  color: var(--green);
+  font-family: var(--mono);
+  overflow-x: hidden;
+  cursor: crosshair;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.08) 2px,
+    rgba(0,0,0,0.08) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Matrix rain canvas */
+#matrix-rain {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0.04;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── HERO ── */
+.hero {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--green-dim);
+  display: flex;
+  background-image: url('/static/Matrix.png');
+  background-repeat: repeat;
+  background-size: 180px auto;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+.hero-img {
+  width: auto;
+  height: 100%;
+  object-fit: contain;
+  object-position: left center;
+  filter: grayscale(100%) brightness(0.45) sepia(100%) hue-rotate(80deg) saturate(800%);
+  display: block;
+  flex-shrink: 0;
+}
+
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to right,
+    rgba(0,0,0,0.1) 0%,
+    rgba(0,0,0,0.7) 40%,
+    rgba(0,0,0,0.97) 100%
+  );
+  pointer-events: none;
+}
+
+.hero-content {
+  position: absolute;
+  bottom: 0; left: 0; right: 0; top: 0;
+  padding: 28px 32px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.hero-title {
+  font-family: var(--vt);
+  font-size: 3.5rem;
+  line-height: 1;
+  color: var(--green);
+  text-shadow: 0 0 20px var(--green), 0 0 60px rgba(0,255,65,0.4);
+  letter-spacing: 4px;
+}
+
+.hero-subtitle {
+  font-size: .7rem;
+  color: var(--green-dim);
+  letter-spacing: 3px;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.hero-time {
+  font-family: var(--vt);
+  font-size: 2rem;
+  color: var(--green-dim);
+  text-align: right;
+  letter-spacing: 2px;
+}
+
+.hero-sol-price {
+  font-size: .75rem;
+  color: var(--green);
+  text-align: right;
+  letter-spacing: 2px;
+}
+
+/* ── BOT CONTROL BAR ── */
+.control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 32px;
+  background: rgba(0,255,65,0.03);
+  border-bottom: 1px solid var(--green-dark);
+  position: relative;
+  z-index: 1;
+}
+
+.control-left {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+.uptime-label {
+  font-size: .7rem;
+  color: var(--green-dim);
+  letter-spacing: 2px;
+}
+
+.uptime-val {
+  font-size: .85rem;
+  color: var(--green);
+}
+
+.status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.dot-active { background: var(--green); box-shadow: 0 0 8px var(--green); animation: blink 1.5s infinite; }
+.dot-stopped { background: var(--red); box-shadow: 0 0 8px var(--red); }
+.dot-warn { background: var(--yellow); box-shadow: 0 0 8px var(--yellow); }
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+.btn-toggle {
+  font-family: var(--mono);
+  font-size: .75rem;
+  letter-spacing: 2px;
+  padding: 8px 24px;
+  border: 1px solid var(--green);
+  background: transparent;
+  color: var(--green);
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all .2s;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-toggle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--green);
+  transform: translateX(-100%);
+  transition: transform .2s;
+  z-index: -1;
+}
+
+.btn-toggle:hover { color: var(--black); }
+.btn-toggle:hover::before { transform: translateX(0); }
+
+.btn-toggle.stopped {
+  border-color: var(--red);
+  color: var(--red);
+}
+.btn-toggle.stopped::before { background: var(--red); }
+.btn-toggle.stopped:hover { color: var(--black); }
+
+.nav-links {
+  display: flex;
+  gap: 20px;
+  font-size: .7rem;
+  letter-spacing: 2px;
+}
+
+.nav-links a {
+  color: var(--green-dim);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: color .15s;
+}
+.nav-links a:hover { color: var(--green); text-shadow: 0 0 8px var(--green); }
+
+/* ── MAIN GRID ── */
+main {
+  position: relative;
+  z-index: 1;
+  padding: 24px 32px;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: auto;
+  gap: 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ── CARD ── */
+.card {
+  border: 1px solid var(--green-dark);
+  background: rgba(0,5,0,0.85);
+  padding: 18px 20px;
+  position: relative;
+  transition: border-color .2s, box-shadow .2s;
+}
+
+.card:hover {
+  border-color: var(--green-dim);
+  box-shadow: 0 0 16px rgba(0,255,65,0.08), inset 0 0 20px rgba(0,255,65,0.03);
+}
+
+.card::before {
+  content: attr(data-label);
+  position: absolute;
+  top: -9px; left: 14px;
+  background: var(--black);
+  padding: 0 6px;
+  font-size: .6rem;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+  text-transform: uppercase;
+}
+
+/* ── WALLET CARD (full width) ── */
+.card-wallet { grid-column: 1 / -1; }
+
+.wallet-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 20px;
+}
+
+.wallet-item {}
+.wallet-item-label {
+  font-size: .6rem;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.wallet-item-value {
+  font-family: var(--vt);
+  font-size: 2.2rem;
+  color: var(--green);
+  text-shadow: 0 0 12px rgba(0,255,65,0.5);
+  line-height: 1;
+}
+
+.wallet-item-sub {
+  font-size: .65rem;
+  color: var(--green-dim);
+  margin-top: 3px;
+  letter-spacing: 1px;
+}
+
+.wallet-divider {
+  width: 1px;
+  background: var(--green-dark);
+  align-self: stretch;
+}
+
+/* ── STAT VALUE ── */
+.stat-val {
+  font-family: var(--vt);
+  font-size: 2rem;
+  line-height: 1.1;
+  text-shadow: 0 0 10px rgba(0,255,65,0.4);
+}
+
+.stat-label {
+  font-size: .6rem;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.stat-sub {
+  font-size: .65rem;
+  color: var(--green-dim);
+  margin-top: 4px;
+}
+
+.green { color: var(--green); }
+.red { color: var(--red); }
+.yellow { color: var(--yellow); }
+.dim { color: var(--green-dim); }
+
+/* ── COMPONENT STATUS ── */
+.card-status { grid-column: 1 / -1; }
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 10px;
+}
+
+.status-component {
+  border: 1px solid var(--green-dark);
+  padding: 12px;
+  text-align: center;
+  transition: all .2s;
+}
+
+.status-component.ok { border-color: var(--green-dark); }
+.status-component.ok:hover { border-color: var(--green); box-shadow: 0 0 10px rgba(0,255,65,0.1); }
+.status-component.err { border-color: #3B0000; background: rgba(255,34,34,0.03); }
+
+.sc-icon { font-size: 1.4rem; margin-bottom: 6px; }
+.sc-name { font-size: .6rem; letter-spacing: 2px; color: var(--green-dim); text-transform: uppercase; margin-bottom: 4px; }
+.sc-status { font-size: .65rem; }
+.sc-detail { font-size: .55rem; color: var(--green-dim); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── CHARTS ── */
+.card-chart { grid-column: span 2; }
+.card-donut { grid-column: span 1; }
+
+/* ── TRADES TABLE ── */
+.card-trades { grid-column: 1 / -1; }
+
+table { width: 100%; border-collapse: collapse; font-size: .72rem; }
+th {
+  text-align: left;
+  padding: 8px 10px;
+  color: var(--green-dim);
+  font-size: .6rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--green-dark);
+}
+td { padding: 8px 10px; border-bottom: 1px solid rgba(0,60,0,0.3); font-family: var(--mono); }
+tr:hover td { background: rgba(0,255,65,0.03); }
+
+.tx-link { color: var(--green-dim); text-decoration: none; font-size: .65rem; }
+.tx-link:hover { color: var(--green); }
+
+/* ── SETTINGS ── */
+.card-settings { grid-column: span 1; }
+
+.settings-grid { display: flex; flex-direction: column; gap: 10px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; }
+.setting-label { font-size: .65rem; color: var(--green-dim); letter-spacing: 1px; }
+
+input[type=number] {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--green-dark);
+  color: var(--green);
+  font-family: var(--mono);
+  font-size: .8rem;
+  width: 80px;
+  text-align: right;
+  padding: 2px 4px;
+  outline: none;
+  transition: border-color .2s;
+}
+input[type=number]:focus { border-color: var(--green); }
+
+.btn-save {
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px;
+  background: transparent;
+  border: 1px solid var(--green-dark);
+  color: var(--green-dim);
+  font-family: var(--mono);
+  font-size: .7rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .2s;
+}
+.btn-save:hover { border-color: var(--green); color: var(--green); background: rgba(0,255,65,0.05); }
+
+/* ── SECTION HEADER ── */
+.section-title {
+  font-size: .65rem;
+  letter-spacing: 3px;
+  color: var(--green-dim);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.section-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--green-dark);
+}
+
+/* glitch on hover for title */
+@keyframes glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 1px); clip-path: inset(40% 0 50% 0); }
+  40% { transform: translate(2px, -1px); clip-path: inset(60% 0 20% 0); }
+  60% { transform: translate(-1px, 0); clip-path: inset(10% 0 80% 0); }
+  80% { transform: translate(1px, 1px); clip-path: inset(80% 0 10% 0); }
+  100% { transform: translate(0); }
+}
+
+.hero-title:hover { animation: glitch .3s steps(1) forwards; }
+
+/* chart canvas */
+canvas { max-height: 200px; }
+
+/* scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--green-dark); }
+::-webkit-scrollbar-thumb:hover { background: var(--green-dim); }
+
+/* footer */
+footer {
+  position: relative; z-index: 1;
+  text-align: center;
+  padding: 20px;
+  font-size: .6rem;
+  letter-spacing: 3px;
+  color: var(--green-dark);
+  border-top: 1px solid var(--green-dark);
+}
+
+footer a { color: var(--green-dim); text-decoration: none; }
+footer a:hover { color: var(--green); }
+
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; padding: 16px; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-settings { grid-column: 1; }
+  .wallet-grid { grid-template-columns: 1fr 1fr; }
+  .status-grid { grid-template-columns: repeat(4,1fr); }
+  .hero-title { font-size: 2.2rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- Matrix Digital Rain -->
+<canvas id="matrix-rain"></canvas>
+
+<!-- ── HERO ── -->
+<div class="hero">
+  <img src="/static/trinity.jpg" alt="Trinity" class="hero-img">
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <div>
+      <div class="hero-title">TRINITY TRADING BOT</div>
+      <div class="hero-subtitle">Autonomous Trading System &nbsp;▸&nbsp; TradingView + Claude AI + Jupiter DEX</div>
+    </div>
+    <div>
+      <div class="hero-time" id="live-clock">00:00:00</div>
+      <div class="hero-sol-price">SOL &nbsp;<span id="sol-price-hero">$---</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── CONTROL BAR ── -->
+<div class="control-bar">
+  <div class="control-left">
+    <div>
+      <span class="status-dot dot-active" id="bot-dot"></span>
+      <span id="bot-state-label" style="font-size:.75rem;letter-spacing:2px;">SYSTEM ACTIVE</span>
+    </div>
+    <div>
+      <span class="uptime-label">UPTIME &nbsp;</span>
+      <span class="uptime-val" id="uptime-display">--:--:--</span>
+    </div>
+  </div>
+  <button class="btn-toggle" id="toggle-btn" onclick="toggleBot()">[ STOP SYSTEM ]</button>
+  <div class="nav-links">
+    <a href="/cheatsheet">[ CHEATSHEET ]</a>
+    <a href="/docs">[ API DOCS ]</a>
+    <a href="/api/export/csv">[ EXPORT CSV ]</a>
+  </div>
+</div>
+
+<!-- ── MAIN ── -->
+<main>
+
+  <!-- WALLET -->
+  <div class="card card-wallet" data-label="// WALLET STATUS">
+    <div class="wallet-grid">
+      <div class="wallet-item">
+        <div class="wallet-item-label">SOL Balance</div>
+        <div class="wallet-item-value" id="w-sol">--</div>
+        <div class="wallet-item-sub" id="w-sol-usd">$-- USD</div>
+      </div>
+      <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">USDC Balance</div>
+        <div class="wallet-item-value" id="w-usdc">--</div>
+        <div class="wallet-item-sub">USDC · Solana</div>
+      </div>
+      <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">Today P&amp;L</div>
+        <div class="wallet-item-value" id="w-today-pnl">$--</div>
+        <div class="wallet-item-sub" id="w-total-pnl">Total: $--</div>
+      </div>
+      <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">Win Rate</div>
+        <div class="wallet-item-value" id="w-winrate">--%</div>
+        <div class="wallet-item-sub" id="w-wl">-- W &nbsp;/&nbsp; -- L &nbsp;·&nbsp; -- trades</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMPONENT STATUS -->
+  <div class="card card-status" data-label="// SYSTEM STATUS">
+    <div class="status-grid" id="status-grid">
+      <!-- populated by JS -->
+    </div>
+  </div>
+
+  <!-- P&L CHART -->
+  <div class="card card-chart" data-label="// P&L CURVE">
+    <canvas id="pnl-chart"></canvas>
+  </div>
+
+  <!-- DISTRIBUTION -->
+  <div class="card card-donut" data-label="// SIGNAL MIX">
+    <canvas id="dist-chart"></canvas>
+  </div>
+
+  <!-- TRADE HISTORY -->
+  <div class="card card-trades" data-label="// TRADE LOG">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Recent Executions</span>
+      <button onclick="loadTrades()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+    </div>
+    <div style="overflow-x:auto;max-height:320px;overflow-y:auto;">
+      <table>
+        <thead style="position:sticky;top:0;background:#000500;">
+          <tr>
+            <th>Timestamp</th>
+            <th>Type</th>
+            <th>Symbol</th>
+            <th>Action</th>
+            <th>Amount SOL</th>
+            <th>Price USD</th>
+            <th>P&amp;L</th>
+            <th>Confidence</th>
+            <th>TX</th>
+          </tr>
+        </thead>
+        <tbody id="trades-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="card card-settings" data-label="// RISK PARAMETERS">
+    <div class="settings-grid">
+      <div class="setting-row"><span class="setting-label">Max Purchase (SOL)</span><input type="number" id="set-max-sol" step="0.1"></div>
+      <div class="setting-row"><span class="setting-label">Max Purchase (USD)</span><input type="number" id="set-max-usd" step="10"></div>
+      <div class="setting-row"><span class="setting-label">Max Leverage</span><input type="number" id="set-max-lev" min="1" max="20"></div>
+      <div class="setting-row"><span class="setting-label">Max Position Size %</span><input type="number" id="set-max-pos"></div>
+      <div class="setting-row"><span class="setting-label">Risk Per Trade %</span><input type="number" id="set-risk-pct" step="0.5"></div>
+      <div class="setting-row"><span class="setting-label">Low Balance SOL</span><input type="number" id="set-low-bal" step="0.05"></div>
+      <div class="setting-row"><span class="setting-label">Daily Loss Limit %</span><input type="number" id="set-daily-loss"></div>
+      <div class="setting-row"><span class="setting-label">Geo Risk Weight</span><input type="number" id="set-geo-wt" min="0" max="1" step="0.1"></div>
+    </div>
+    <button class="btn-save" onclick="saveSettings()">[ WRITE PARAMETERS ]</button>
+  </div>
+
+</main>
+
+<footer>
+  MATRIX // SOL TRADING SYSTEM v1.0 &nbsp;▸&nbsp;
+  <a href="/cheatsheet">CHEATSHEET</a> &nbsp;▸&nbsp;
+  CLAUDE AI + JUPITER DEX + SOLANA
+</footer>
+
+<script>
+const API = window.location.origin;
+let pnlChart, distChart, botActive = true;
+
+// ── MATRIX RAIN ──
+(function(){
+  const canvas = document.getElementById('matrix-rain');
+  const ctx = canvas.getContext('2d');
+  const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let cols, drops;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    cols = Math.floor(canvas.width / 16);
+    drops = Array(cols).fill(1);
+  }
+
+  function draw() {
+    ctx.fillStyle = 'rgba(0,0,0,0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#00FF41';
+    ctx.font = '14px Share Tech Mono';
+    drops.forEach((y, i) => {
+      const char = chars[Math.floor(Math.random() * chars.length)];
+      ctx.fillText(char, i * 16, y * 16);
+      if (y * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    });
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  setInterval(draw, 50);
+})();
+
+// ── CLOCK ──
+function updateClock() {
+  const now = new Date();
+  document.getElementById('live-clock').textContent =
+    now.toLocaleTimeString('en-US', {hour12: false});
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// ── SAFE DOM ──
+function setText(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+function setClass(id, cls) {
+  const el = document.getElementById(id);
+  if (el) el.className = cls;
+}
+
+function createCell(text, cls) {
+  const td = document.createElement('td');
+  td.textContent = text;
+  if (cls) td.className = cls;
+  return td;
+}
+
+function createLinkCell(text, href) {
+  const td = document.createElement('td');
+  if (!text || text === '--') { td.textContent = '--'; td.className = 'dim'; return td; }
+  const a = document.createElement('a');
+  a.textContent = text;
+  a.href = href;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.className = 'tx-link';
+  td.appendChild(a);
+  return td;
+}
+
+// ── STATS ──
+async function loadStats() {
+  try {
+    const r = await fetch(`${API}/api/stats`);
+    const d = await r.json();
+
+    setText('sol-price-hero', `$${(d.sol_price_usd||0).toFixed(2)}`);
+
+    setText('w-sol', `${(d.wallet_balance_sol||0).toFixed(4)}`);
+    setText('w-sol-usd', `$${((d.wallet_balance_sol||0) * (d.sol_price_usd||0)).toFixed(2)} USD`);
+    setText('w-usdc', `$${(d.wallet_balance_usdc||0).toFixed(2)}`);
+
+    const todayPnl = d.today_pnl_usd || 0;
+    setText('w-today-pnl', `${todayPnl >= 0 ? '+' : ''}$${todayPnl.toFixed(2)}`);
+    setClass('w-today-pnl', `wallet-item-value ${todayPnl >= 0 ? 'green' : 'red'}`);
+
+    const totalPnl = d.total_pnl_usd || 0;
+    setText('w-total-pnl', `Total: ${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`);
+
+    setText('w-winrate', `${(d.win_rate||0).toFixed(1)}%`);
+    setClass('w-winrate', `wallet-item-value ${(d.win_rate||0) >= 50 ? 'green' : 'red'}`);
+    setText('w-wl', `${d.winning_trades||0} W  /  ${d.losing_trades||0} L  ·  ${d.total_trades||0} trades`);
+  } catch(e) { console.error('Stats error:', e); }
+}
+
+// ── SYSTEM STATUS ──
+const COMPONENT_ICONS = {
+  database: '🗄', wallet: '👛', price_feed: '📈',
+  jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰'
+};
+
+async function loadSystemStatus() {
+  try {
+    const [sysR, botR] = await Promise.all([
+      fetch(`${API}/api/system/status`),
+      fetch(`${API}/api/bot/status`)
+    ]);
+    const sys = await sysR.json();
+    const bot = await botR.json();
+
+    // Update bot state
+    botActive = sys.bot_active;
+    updateBotUI(botActive);
+    setText('uptime-display', sys.uptime || '--:--:--');
+
+    // Render component grid
+    const grid = document.getElementById('status-grid');
+    grid.textContent = '';
+
+    Object.entries(sys.components).forEach(([key, comp]) => {
+      const div = document.createElement('div');
+      div.className = `status-component ${comp.ok ? 'ok' : 'err'}`;
+
+      const icon = document.createElement('div');
+      icon.className = 'sc-icon';
+      icon.textContent = COMPONENT_ICONS[key] || '?';
+
+      const name = document.createElement('div');
+      name.className = 'sc-name';
+      name.textContent = comp.label || key;
+
+      const status = document.createElement('div');
+      status.className = 'sc-status';
+      status.textContent = comp.ok ? '● ONLINE' : '● OFFLINE';
+      status.style.color = comp.ok ? 'var(--green)' : 'var(--red)';
+
+      const detail = document.createElement('div');
+      detail.className = 'sc-detail';
+      detail.textContent = comp.detail || comp.error || '';
+      detail.style.color = comp.ok ? 'var(--green-dim)' : 'var(--red)';
+      detail.style.opacity = '0.7';
+
+      div.appendChild(icon);
+      div.appendChild(name);
+      div.appendChild(status);
+      div.appendChild(detail);
+      grid.appendChild(div);
+    });
+  } catch(e) { console.error('Status error:', e); }
+}
+
+function updateBotUI(active) {
+  const dot = document.getElementById('bot-dot');
+  const label = document.getElementById('bot-state-label');
+  const btn = document.getElementById('toggle-btn');
+  if (active) {
+    dot.className = 'status-dot dot-active';
+    label.textContent = 'SYSTEM ACTIVE';
+    btn.textContent = '[ STOP SYSTEM ]';
+    btn.className = 'btn-toggle';
+  } else {
+    dot.className = 'status-dot dot-stopped';
+    label.textContent = 'SYSTEM HALTED';
+    btn.textContent = '[ START SYSTEM ]';
+    btn.className = 'btn-toggle stopped';
+  }
+}
+
+async function toggleBot() {
+  try {
+    const endpoint = botActive ? '/api/bot/stop' : '/api/bot/start';
+    const r = await fetch(`${API}${endpoint}`, { method: 'POST' });
+    const d = await r.json();
+    botActive = d.active !== undefined ? d.active : !botActive;
+    updateBotUI(botActive);
+  } catch(e) { console.error('Toggle error:', e); }
+}
+
+// ── TRADES ──
+async function loadTrades() {
+  try {
+    const r = await fetch(`${API}/api/trades?limit=50`);
+    const d = await r.json();
+    const tbody = document.getElementById('trades-table');
+    tbody.textContent = '';
+    const pnlData = [];
+
+    d.trades.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.appendChild(createCell(new Date(t.timestamp).toLocaleString(), 'dim'));
+
+      const typeCell = createCell(t.signal_type);
+      typeCell.style.color = t.signal_type === 'BUY' ? 'var(--green)' : t.signal_type === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+      typeCell.style.fontWeight = '700';
+      tr.appendChild(typeCell);
+
+      tr.appendChild(createCell(t.symbol));
+      const actionCell = createCell(t.action);
+      actionCell.style.color = t.action === 'EXECUTE' ? 'var(--green)' : t.action === 'REJECT' ? 'var(--red)' : 'var(--yellow)';
+      tr.appendChild(actionCell);
+
+      tr.appendChild(createCell((t.amount_sol || 0).toFixed(4)));
+      tr.appendChild(createCell(`$${(t.price_usd || 0).toFixed(2)}`));
+
+      const pnl = t.pnl_usd || 0;
+      const pnlCell = createCell(pnl !== null ? `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}` : '--');
+      pnlCell.style.color = pnl > 0 ? 'var(--green)' : pnl < 0 ? 'var(--red)' : 'var(--green-dim)';
+      tr.appendChild(pnlCell);
+
+      tr.appendChild(createCell(`${t.confidence_score || 0}%`, 'dim'));
+
+      const txShort = t.tx_id ? `${t.tx_id.slice(0,8)}...` : '--';
+      const txHref = t.tx_id ? `https://solscan.io/tx/${t.tx_id}` : '#';
+      tr.appendChild(createLinkCell(txShort, txHref));
+
+      tbody.appendChild(tr);
+      if (t.action === 'EXECUTE') pnlData.push({ time: t.timestamp, pnl });
+    });
+
+    updateCharts(pnlData, d.trades);
+  } catch(e) { console.error('Trades error:', e); }
+}
+
+// ── CHARTS ──
+const chartDefaults = {
+  color: '#00FF41',
+  plugins: { legend: { display: false } },
+};
+Chart.defaults.color = '#00AA2B';
+Chart.defaults.borderColor = '#003B00';
+
+function updateCharts(pnlData, trades) {
+  const reversed = [...pnlData].reverse();
+  const labels = reversed.map(p => new Date(p.time).toLocaleDateString());
+  let cum = 0;
+  const vals = reversed.map(p => { cum += p.pnl; return cum; });
+
+  if (pnlChart) pnlChart.destroy();
+  pnlChart = new Chart(document.getElementById('pnl-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: vals,
+        borderColor: '#00FF41',
+        backgroundColor: 'rgba(0,255,65,0.06)',
+        fill: true,
+        tension: 0.4,
+        pointRadius: 2,
+        pointBackgroundColor: '#00FF41',
+        borderWidth: 1.5,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#00AA2B', maxTicksLimit: 6, font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#001200' } },
+        y: { ticks: { color: '#00AA2B', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#001200' } }
+      }
+    }
+  });
+
+  const buys = trades.filter(t => t.signal_type === 'BUY' && t.action === 'EXECUTE').length;
+  const sells = trades.filter(t => t.signal_type === 'SELL' && t.action === 'EXECUTE').length;
+  const closes = trades.filter(t => t.signal_type === 'CLOSE').length;
+  const rejects = trades.filter(t => t.action === 'REJECT').length;
+
+  if (distChart) distChart.destroy();
+  distChart = new Chart(document.getElementById('dist-chart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['BUY', 'SELL', 'CLOSE', 'REJECT'],
+      datasets: [{
+        data: [buys, sells, closes, rejects],
+        backgroundColor: ['#00FF41', '#FF2222', '#FFD700', '#003B00'],
+        borderColor: '#000500',
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      cutout: '70%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#00AA2B', font: { family: 'Share Tech Mono', size: 10 }, padding: 12, boxWidth: 10 }
+        }
+      }
+    }
+  });
+}
+
+// ── SETTINGS ──
+async function loadSettings() {
+  try {
+    const r = await fetch(`${API}/api/settings`);
+    const d = await r.json();
+    document.getElementById('set-max-sol').value = d.risk?.max_purchase_sol ?? 0.05;
+    document.getElementById('set-max-usd').value = d.risk?.max_purchase_usd ?? 20;
+    document.getElementById('set-max-lev').value = d.risk?.max_leverage ?? 1;
+    document.getElementById('set-max-pos').value = d.risk?.max_position_size_percent ?? 10;
+    document.getElementById('set-risk-pct').value = d.risk?.risk_per_trade_percent ?? 2;
+    document.getElementById('set-low-bal').value = d.risk?.low_balance_shutdown_sol ?? 0.05;
+    document.getElementById('set-daily-loss').value = d.risk?.daily_loss_limit_percent ?? 10;
+    document.getElementById('set-geo-wt').value = d.geo_risk?.weight ?? 0.7;
+  } catch(e) { console.error('Settings error:', e); }
+}
+
+async function saveSettings() {
+  try {
+    const body = {
+      max_purchase_sol: parseFloat(document.getElementById('set-max-sol').value),
+      max_purchase_usd: parseFloat(document.getElementById('set-max-usd').value),
+      max_leverage: parseInt(document.getElementById('set-max-lev').value),
+      max_position_size_percent: parseFloat(document.getElementById('set-max-pos').value),
+      risk_per_trade_percent: parseFloat(document.getElementById('set-risk-pct').value),
+      low_balance_shutdown_sol: parseFloat(document.getElementById('set-low-bal').value),
+      daily_loss_limit_percent: parseFloat(document.getElementById('set-daily-loss').value),
+      geo_risk_weight: parseFloat(document.getElementById('set-geo-wt').value),
+    };
+    const r = await fetch(`${API}/api/settings`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const btn = document.querySelector('.btn-save');
+    if (r.ok) {
+      btn.textContent = '[ PARAMETERS WRITTEN ]';
+      btn.style.color = 'var(--green)';
+      setTimeout(() => { btn.textContent = '[ WRITE PARAMETERS ]'; btn.style.color = ''; }, 2000);
+    }
+  } catch(e) { console.error('Save error:', e); }
+}
+
+// ── INIT ──
+loadStats();
+loadTrades();
+loadSettings();
+loadSystemStatus();
+
+setInterval(loadStats, 30000);
+setInterval(loadTrades, 60000);
+setInterval(loadSystemStatus, 20000);
+</script>
+</body>
+</html>

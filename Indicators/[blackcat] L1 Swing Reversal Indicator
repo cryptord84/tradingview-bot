@@ -1,0 +1,87 @@
+// ____  __    ___   ________ ___________  ___________ __  ____ ___ 
+   // / __ )/ /   /   | / ____/ //_/ ____/   |/_  __<  / // / / __ |__ \
+  // / __  / /   / /| |/ /   / ,< / /   / /| | / /  / / // /_/ / / __/ /
+ // / /_/ / /___/ ___ / /___/ /| / /___/ ___ |/ /  / /__  __/ /_/ / __/ 
+// /_____/_____/_/  |_\____/_/ |_\____/_/  |_/_/  /_/  /_/  \____/____/                                              
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © blackcat1402
+//@version=5
+indicator('[blackcat] L1 Swing Reversal Indicator', overlay=true)
+
+// Inputs
+sma_length1 = input(5, title='SMA1')
+sma_length2 = input(10, title='SMA2')
+sma_length3 = input(20, title='SMA3')
+sma_length4 = input(60, title='SMA4')
+overbought_threshold = input(79, title='Overbought Threshold')
+oversold_threshold = input(80, title='Oversold Threshold')
+
+// Function to detect bottom swing reversal
+detect_bottom_swing(price, low_price, high_price, oversold_threshold) =>
+    swing_range = ta.highest(high_price, 8) - ta.lowest(low_price, 8)
+    if swing_range != 0
+        relative_position = (price - ta.lowest(low_price, 8)) / swing_range * 100
+        smoothed_position = ta.ema(relative_position, 3)
+        normalized_position = (smoothed_position - 50) * 2
+        if ta.crossover(normalized_position, -oversold_threshold)
+            price - low_price
+        else
+            na
+    else
+        na
+
+// Function to calculate smoothed average
+calculate_smoothed_average(source, length, weight) =>
+    sum = 0.0
+    smoothed_value = 0.0
+    sum := nz(sum[1]) - nz(source[length]) + source
+    moving_average = na(source[length]) ? na : sum / length
+    smoothed_value := na(moving_average[1]) ? moving_average : (source * weight + smoothed_value[1] * (length - weight)) / length
+    smoothed_value
+
+
+// Function to retrieve recent value
+get_recent_value(values, length) =>
+    result = float(na)
+    if length >= 1
+        for i = 0 to length by 1
+            if na(result) or not na(values[i])
+                result := values[i]
+                result
+    result
+
+
+// Function to detect top swing reversal
+detect_top_swing(price, previous_price, overbought_threshold) =>
+    price_difference = math.max(price - previous_price, 0)
+    absolute_difference = math.abs(price - previous_price)
+    smoothed_difference = calculate_smoothed_average(price_difference, 7, 1) / calculate_smoothed_average(absolute_difference, 7, 1) * 100
+    if smoothed_difference < get_recent_value(smoothed_difference, 1) and smoothed_difference > overbought_threshold
+        price - high
+    else
+        na
+
+// Calculate moving averages
+ma5 = ta.sma(close, sma_length1)
+ma10 = ta.sma(close, sma_length2)
+ma20 = ta.sma(close, sma_length3)
+ma60 = ta.sma(close, sma_length4)
+
+// Detect bottom and top swings
+bottom_signal = detect_bottom_swing(close, low, high, oversold_threshold)
+top_signal = detect_top_swing(close, get_recent_value(close, 1), overbought_threshold)
+
+// Plot signals and moving averages
+plotarrow(bottom_signal, colorup=color.new(color.yellow, 0))
+plotarrow(top_signal, colordown=color.new(color.fuchsia, 0))
+
+plot(ma5, color=color.new(color.white, 0))
+plot(ma10, color=color.new(color.yellow, 0))
+plot(ma20, color=color.new(color.fuchsia, 0))
+plot(ma60, color=color.new(color.lime, 0))
+
+// Add alerts
+alertcondition(bottom_signal != na, title='Bottom Swing Detected', message='Potential bottom swing reversal detected')
+alertcondition(top_signal != na, title='Top Swing Detected', message='Potential top swing reversal detected')
+

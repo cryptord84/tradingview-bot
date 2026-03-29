@@ -1,0 +1,332 @@
+// =============================================================================
+// SOL Multi-Indicator Confluence Strategy v2.0
+// Professional-grade strategy for SOL/USDT with webhook alerts
+// Compatible with TradingView Pine Script v5
+// =============================================================================
+
+//@version=5
+strategy("SOL Confluence Pro", overlay=true, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10, initial_capital=10000, slippage=3, commission_type=strategy.commission.percent,
+     commission_value=0.1, pyramiding=0, calc_on_every_tick=false)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// --- Webhook Settings ---
+grp_wh = "Webhook Settings"
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret", group=grp_wh)
+min_confluence = input.int(4, "Min Confluence Score (of 7)", minval=2, maxval=7, group=grp_wh)
+
+// --- EMA/SMA Ribbon ---
+grp_ma = "Moving Averages"
+ema_fast = input.int(9, "EMA Fast", group=grp_ma)
+ema_mid = input.int(21, "EMA Mid", group=grp_ma)
+ema_slow = input.int(50, "EMA Slow", group=grp_ma)
+sma_200 = input.int(200, "SMA 200", group=grp_ma)
+
+// --- RSI ---
+grp_rsi = "RSI"
+rsi_len = input.int(14, "RSI Length", group=grp_rsi)
+rsi_ob = input.float(70, "RSI Overbought", group=grp_rsi)
+rsi_os = input.float(30, "RSI Oversold", group=grp_rsi)
+
+// --- MACD ---
+grp_macd = "MACD"
+macd_fast = input.int(12, "MACD Fast", group=grp_macd)
+macd_slow = input.int(26, "MACD Slow", group=grp_macd)
+macd_signal = input.int(9, "MACD Signal", group=grp_macd)
+
+// --- Supertrend ---
+grp_st = "Supertrend"
+st_factor = input.float(3.0, "Supertrend Factor", group=grp_st)
+st_atr_len = input.int(10, "Supertrend ATR Length", group=grp_st)
+
+// --- Bollinger Bands ---
+grp_bb = "Bollinger Bands"
+bb_len = input.int(20, "BB Length", group=grp_bb)
+bb_mult = input.float(2.0, "BB Multiplier", group=grp_bb)
+
+// --- VWAP ---
+grp_vwap = "VWAP"
+use_vwap = input.bool(true, "Use VWAP", group=grp_vwap)
+
+// --- Ichimoku ---
+grp_ichi = "Ichimoku Cloud"
+ichi_tenkan = input.int(9, "Tenkan-sen", group=grp_ichi)
+ichi_kijun = input.int(26, "Kijun-sen", group=grp_ichi)
+ichi_senkou_b = input.int(52, "Senkou Span B", group=grp_ichi)
+
+// --- Volume ---
+grp_vol = "Volume"
+vol_ma_len = input.int(20, "Volume MA Length", group=grp_vol)
+vol_spike_mult = input.float(1.5, "Volume Spike Multiplier", group=grp_vol)
+
+// --- Higher Timeframe ---
+grp_htf = "Higher Timeframe Filter"
+htf_tf = input.timeframe("240", "HTF Timeframe", group=grp_htf)
+htf_ema_len = input.int(50, "HTF EMA Length", group=grp_htf)
+
+// --- Risk Management ---
+grp_risk = "Risk Management"
+sl_atr_mult = input.float(2.0, "Stop Loss ATR Multiplier", group=grp_risk)
+tp_atr_mult = input.float(3.0, "Take Profit ATR Multiplier", group=grp_risk)
+risk_per_trade = input.float(2.0, "Risk Per Trade %", minval=0.5, maxval=10, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// --- Moving Averages ---
+ema9 = ta.ema(close, ema_fast)
+ema21 = ta.ema(close, ema_mid)
+ema50 = ta.ema(close, ema_slow)
+sma200 = ta.sma(close, sma_200)
+
+// --- RSI ---
+rsi_val = ta.rsi(close, rsi_len)
+
+// --- MACD ---
+[macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// --- Supertrend ---
+[st_line, st_dir] = ta.supertrend(st_factor, st_atr_len)
+
+// --- Bollinger Bands ---
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+
+// --- VWAP (use previous bar's confirmed value to avoid repainting) ---
+vwap_val = use_vwap ? ta.vwap(hlc3)[1] : close[1]
+
+// --- Ichimoku ---
+tenkan = (ta.highest(high, ichi_tenkan) + ta.lowest(low, ichi_tenkan)) / 2
+kijun = (ta.highest(high, ichi_kijun) + ta.lowest(low, ichi_kijun)) / 2
+senkou_a = (tenkan + kijun) / 2
+senkou_b = (ta.highest(high, ichi_senkou_b) + ta.lowest(low, ichi_senkou_b)) / 2
+cloud_top = math.max(senkou_a[26], senkou_b[26])
+cloud_bottom = math.min(senkou_a[26], senkou_b[26])
+
+// --- Volume ---
+vol_ma = ta.sma(volume, vol_ma_len)
+vol_spike = volume > vol_ma * vol_spike_mult
+
+// --- ATR for SL/TP ---
+atr_val = ta.atr(14)
+
+// --- Higher Timeframe Filter (barmerge.lookahead_off prevents repainting) ---
+htf_ema = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_ema_len)[1], lookahead=barmerge.lookahead_off)
+htf_close = request.security(syminfo.tickerid, htf_tf, close[1], lookahead=barmerge.lookahead_off)
+htf_bullish = htf_close > htf_ema
+htf_bearish = htf_close < htf_ema
+
+// --- Fibonacci Levels (using recent swing high/low - 50 bars) ---
+fib_lookback = 50
+swing_high = ta.highest(high, fib_lookback)
+swing_low = ta.lowest(low, fib_lookback)
+fib_range = swing_high - swing_low
+fib_382 = swing_high - fib_range * 0.382
+fib_500 = swing_high - fib_range * 0.500
+fib_618 = swing_high - fib_range * 0.618
+near_fib_support = (close <= fib_618 * 1.01 and close >= fib_618 * 0.99) or
+                   (close <= fib_500 * 1.01 and close >= fib_500 * 0.99) or
+                   (close <= fib_382 * 1.01 and close >= fib_382 * 0.99)
+
+// =============================================================================
+// CONFLUENCE SCORING (7 indicators)
+// =============================================================================
+
+// 1. EMA Ribbon (bullish: 9 > 21 > 50, price > 200 SMA)
+ema_bull = ema9 > ema21 and ema21 > ema50 and close > sma200
+ema_bear = ema9 < ema21 and ema21 < ema50 and close < sma200
+
+// 2. RSI (bullish: crossing above OS or in 40-65 zone; bearish: crossing below OB or in 35-60 zone with decline)
+rsi_bull = ta.crossover(rsi_val, rsi_os) or (rsi_val > 40 and rsi_val < 65 and rsi_val > rsi_val[1])
+rsi_bear = ta.crossunder(rsi_val, rsi_ob) or (rsi_val < 60 and rsi_val > 35 and rsi_val < rsi_val[1])
+
+// 3. MACD (bullish: histogram positive and rising; bearish: negative and falling)
+macd_bull = macd_hist > 0 and macd_hist > macd_hist[1]
+macd_bear = macd_hist < 0 and macd_hist < macd_hist[1]
+
+// 4. Supertrend
+st_bull = st_dir < 0
+st_bear = st_dir > 0
+
+// 5. Bollinger Bands (bullish: price near lower band bouncing; bearish: price near upper band rejecting)
+bb_bull = close < bb_mid and close > bb_lower and close > close[1]
+bb_bear = close > bb_mid and close < bb_upper and close < close[1]
+
+// 6. VWAP + Ichimoku combined
+vwap_ichi_bull = close > vwap_val and close > cloud_top
+vwap_ichi_bear = close < vwap_val and close < cloud_bottom
+
+// 7. Fibonacci support/resistance awareness
+fib_bull = near_fib_support and close > close[1]
+fib_bear = near_fib_support and close < close[1]
+
+// --- Confluence Scores ---
+bull_score = (ema_bull ? 1 : 0) + (rsi_bull ? 1 : 0) + (macd_bull ? 1 : 0) +
+             (st_bull ? 1 : 0) + (bb_bull ? 1 : 0) + (vwap_ichi_bull ? 1 : 0) + (fib_bull ? 1 : 0)
+
+bear_score = (ema_bear ? 1 : 0) + (rsi_bear ? 1 : 0) + (macd_bear ? 1 : 0) +
+             (st_bear ? 1 : 0) + (bb_bear ? 1 : 0) + (vwap_ichi_bear ? 1 : 0) + (fib_bear ? 1 : 0)
+
+// =============================================================================
+// SIGNAL GENERATION
+// =============================================================================
+
+// Require: confluence >= min_confluence + volume spike + HTF trend alignment
+long_signal = bull_score >= min_confluence and vol_spike and htf_bullish
+short_signal = bear_score >= min_confluence and vol_spike and htf_bearish
+
+// Close conditions
+close_long = bear_score >= 3 or ta.crossunder(ema9, ema50) or st_dir > 0
+close_short = bull_score >= 3 or ta.crossover(ema9, ema50) or st_dir < 0
+
+// --- Confidence Score (0-100) ---
+long_confidence = math.min(100, math.round(bull_score / 7.0 * 60 + (vol_spike ? 20 : 0) + (htf_bullish ? 20 : 0)))
+short_confidence = math.min(100, math.round(bear_score / 7.0 * 60 + (vol_spike ? 20 : 0) + (htf_bearish ? 20 : 0)))
+
+// --- Suggested Leverage (based on confidence) ---
+calc_leverage(conf) =>
+    conf >= 85 ? 5 : conf >= 70 ? 3 : conf >= 55 ? 2 : 1
+
+// --- Suggested Position Size % ---
+calc_size(conf) =>
+    conf >= 85 ? 15.0 : conf >= 70 ? 10.0 : conf >= 55 ? 7.0 : 5.0
+
+// =============================================================================
+// STRATEGY EXECUTION (for backtesting)
+// =============================================================================
+
+// Track position state
+var bool in_long = false
+var bool in_short = false
+
+if long_signal and not in_long
+    sl = close - atr_val * sl_atr_mult
+    tp = close + atr_val * tp_atr_mult
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=sl, limit=tp)
+    in_long := true
+    in_short := false
+
+if short_signal and not in_short
+    sl = close + atr_val * sl_atr_mult
+    tp = close - atr_val * tp_atr_mult
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=sl, limit=tp)
+    in_short := true
+    in_long := false
+
+if close_long and in_long
+    strategy.close("Long")
+    in_long := false
+
+if close_short and in_short
+    strategy.close("Short")
+    in_short := false
+
+// =============================================================================
+// WEBHOOK ALERT JSON PAYLOADS
+// =============================================================================
+
+// Build JSON payloads for alerts
+long_json = '{"secret":"' + webhook_secret + '","signal_type":"BUY","symbol":"' + syminfo.ticker +
+     '","entry_price_estimate":' + str.tostring(close) +
+     ',"confidence_score":' + str.tostring(long_confidence) +
+     ',"suggested_leverage":' + str.tostring(calc_leverage(long_confidence)) +
+     ',"suggested_position_size_percent":' + str.tostring(calc_size(long_confidence)) +
+     ',"bull_score":' + str.tostring(bull_score) +
+     ',"bear_score":' + str.tostring(bear_score) +
+     ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+     ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+     ',"timeframe":"' + timeframe.period + '"}'
+
+short_json = '{"secret":"' + webhook_secret + '","signal_type":"SELL","symbol":"' + syminfo.ticker +
+     '","entry_price_estimate":' + str.tostring(close) +
+     ',"confidence_score":' + str.tostring(short_confidence) +
+     ',"suggested_leverage":' + str.tostring(calc_leverage(short_confidence)) +
+     ',"suggested_position_size_percent":' + str.tostring(calc_size(short_confidence)) +
+     ',"bull_score":' + str.tostring(bull_score) +
+     ',"bear_score":' + str.tostring(bear_score) +
+     ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+     ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+     ',"timeframe":"' + timeframe.period + '"}'
+
+close_json = '{"secret":"' + webhook_secret + '","signal_type":"CLOSE","symbol":"' + syminfo.ticker +
+     '","entry_price_estimate":' + str.tostring(close) +
+     ',"confidence_score":0' +
+     ',"suggested_leverage":1' +
+     ',"suggested_position_size_percent":0' +
+     ',"bull_score":' + str.tostring(bull_score) +
+     ',"bear_score":' + str.tostring(bear_score) +
+     ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+     ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+     ',"timeframe":"' + timeframe.period + '"}'
+
+// --- Alerts ---
+if long_signal and not in_long[1]
+    alert(long_json, alert.freq_once_per_bar_close)
+
+if short_signal and not in_short[1]
+    alert(short_json, alert.freq_once_per_bar_close)
+
+if (close_long and in_long[1]) or (close_short and in_short[1])
+    alert(close_json, alert.freq_once_per_bar_close)
+
+// =============================================================================
+// VISUAL OVERLAYS
+// =============================================================================
+
+// EMA Ribbon
+plot(ema9, "EMA 9", color=color.new(color.lime, 30), linewidth=1)
+plot(ema21, "EMA 21", color=color.new(color.yellow, 30), linewidth=1)
+plot(ema50, "EMA 50", color=color.new(color.orange, 30), linewidth=2)
+plot(sma200, "SMA 200", color=color.new(color.red, 30), linewidth=2)
+
+// Supertrend
+plot(st_line, "Supertrend", color=st_dir < 0 ? color.green : color.red, linewidth=2, style=plot.style_linebr)
+
+// Bollinger Bands
+p_bb_upper = plot(bb_upper, "BB Upper", color=color.new(color.blue, 70))
+p_bb_lower = plot(bb_lower, "BB Lower", color=color.new(color.blue, 70))
+fill(p_bb_upper, p_bb_lower, color=color.new(color.blue, 92))
+
+// VWAP
+plot(use_vwap ? vwap_val : na, "VWAP", color=color.new(color.purple, 30), linewidth=2)
+
+// Ichimoku Cloud
+p_senkou_a = plot(senkou_a, "Senkou A", color=color.new(color.green, 80), offset=26)
+p_senkou_b = plot(senkou_b, "Senkou B", color=color.new(color.red, 80), offset=26)
+fill(p_senkou_a, p_senkou_b, color=senkou_a > senkou_b ? color.new(color.green, 92) : color.new(color.red, 92))
+
+// Fibonacci Levels
+plot(fib_382, "Fib 0.382", color=color.new(color.gray, 60), style=plot.style_circles)
+plot(fib_500, "Fib 0.500", color=color.new(color.gray, 60), style=plot.style_circles)
+plot(fib_618, "Fib 0.618", color=color.new(color.gray, 60), style=plot.style_circles)
+
+// Signal Markers
+plotshape(long_signal and not in_long[1], "BUY Signal", shape.triangleup, location.belowbar, color.lime, size=size.normal)
+plotshape(short_signal and not in_short[1], "SELL Signal", shape.triangledown, location.abovebar, color.red, size=size.normal)
+plotshape((close_long and in_long[1]) or (close_short and in_short[1]), "CLOSE Signal", shape.xcross, location.belowbar, color.yellow, size=size.small)
+
+// --- Info Table ---
+var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.islast
+    table.cell(info, 0, 0, "Bull Score", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 0, str.tostring(bull_score) + "/7", text_color=bull_score >= min_confluence ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 1, "Bear Score", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(bear_score) + "/7", text_color=bear_score >= min_confluence ? color.red : color.gray, text_size=size.small)
+    table.cell(info, 0, 2, "RSI", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(math.round(rsi_val, 1)), text_color=rsi_val > rsi_ob ? color.red : rsi_val < rsi_os ? color.lime : color.white, text_size=size.small)
+    table.cell(info, 0, 3, "Vol Spike", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 3, vol_spike ? "YES" : "NO", text_color=vol_spike ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 4, "HTF Trend", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 4, htf_bullish ? "BULL" : "BEAR", text_color=htf_bullish ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 5, "Supertrend", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 5, st_dir < 0 ? "BULL" : "BEAR", text_color=st_dir < 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 6, "Confidence", text_color=color.white, text_size=size.small)
+    best_conf = bull_score > bear_score ? long_confidence : short_confidence
+    table.cell(info, 1, 6, str.tostring(best_conf) + "%", text_color=best_conf >= 70 ? color.lime : best_conf >= 50 ? color.yellow : color.gray, text_size=size.small)
+    table.cell(info, 0, 7, "Min Confluence", text_color=color.white, text_size=size.small)
+    table.cell(info, 1, 7, str.tostring(min_confluence) + "/7", text_color=color.white, text_size=size.small)

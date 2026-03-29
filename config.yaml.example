@@ -1,0 +1,120 @@
+# =============================================================================
+# TradingView SOL Bot - Configuration
+# Copy to config.yaml and fill in your values
+# =============================================================================
+
+# --- Server ---
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  log_level: "INFO"             # DEBUG, INFO, WARNING, ERROR
+
+# --- Webhook Security ---
+webhook:
+  secret: "YOUR_TRADINGVIEW_WEBHOOK_SECRET"   # Must match Pine Script secret
+  rate_limit_per_minute: 10
+  duplicate_window_seconds: 30                # Ignore duplicate signals within this window
+
+# --- Claude AI Decision Layer ---
+claude:
+  mode: "cli"                                 # "cli" = Claude Code CLI (no API key needed)
+                                              # "api" = Anthropic API (requires api_key)
+  api_key: ""                                 # Only needed if mode: "api"
+  model: "claude-sonnet-4-6-20250514"         # Used for API mode; CLI uses your default model
+  max_tokens: 1024
+  temperature: 0.3                            # Only used in API mode
+  timeout_seconds: 60                         # CLI can be slower than API
+  cli_path: "claude"                          # Path to claude binary (or full path e.g. /usr/local/bin/claude)
+
+# --- Solana Wallet ---
+wallet:
+  # Private key is encrypted. Run: python -m app.utils.encrypt_key to generate
+  encrypted_private_key: ""
+  encryption_password_env: "WALLET_ENCRYPTION_PASSWORD"   # Read from .env
+  rpc_url: "https://api.mainnet-beta.solana.com"
+  # For better performance, use a paid RPC:
+  # rpc_url: "https://solana-mainnet.g.alchemy.com/v2/YOUR_KEY"
+  # rpc_url: "https://your-helius-rpc.helius-rpc.com/?api-key=YOUR_KEY"
+
+# --- Jupiter DEX ---
+jupiter:
+  api_base: "https://quote-api.jup.ag/v6"
+  # Token addresses
+  sol_mint: "So11111111111111111111111111111111111111112"
+  usdc_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+  # Trading parameters
+  slippage_bps: 100               # 1% = 100 bps
+  priority_fee_lamports: 50000    # Priority fee for faster inclusion
+  max_auto_slippage: true
+  # Perpetuals (Jupiter Perps)
+  perps_enabled: false
+  perps_api_base: "https://perp-api.jup.ag"
+
+# --- Risk Management ---
+risk:
+  max_purchase_sol: 5.0           # Max SOL per single trade
+  max_purchase_usd: 500.0         # Max USD per single trade
+  max_leverage: 5                 # Cap leverage regardless of signal
+  max_position_size_percent: 15   # Max % of wallet per trade
+  risk_per_trade_percent: 2.0     # Max risk per trade
+  low_balance_shutdown_sol: 0.5   # Stop trading if balance below this
+  low_balance_shutdown_usd: 50.0
+  daily_loss_limit_percent: 10.0  # Stop trading after X% daily loss
+  max_open_positions: 3
+  cooldown_between_trades_seconds: 60
+
+# --- Geopolitical Risk Weight ---
+geo_risk:
+  enabled: true
+  weight: 0.7                     # 0.0 (ignore) to 1.0 (max influence)
+  reduce_size_on_high_risk: 0.5   # Reduce position size by 50% on high geo risk
+  go_flat_on_extreme_risk: true   # Close all positions on extreme events
+
+# --- News API ---
+news:
+  provider: "newsapi"             # "newsapi" or "tavily"
+  newsapi_key: "YOUR_NEWSAPI_KEY"
+  tavily_api_key: ""              # Alternative: Tavily API
+  check_interval_minutes: 15
+  keywords:
+    - "crypto regulation"
+    - "solana"
+    - "SEC crypto"
+    - "federal reserve"
+    - "interest rate"
+    - "geopolitical crisis"
+    - "war"
+    - "sanctions crypto"
+
+# --- Telegram Notifications ---
+telegram:
+  enabled: true
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  chat_id: "YOUR_TELEGRAM_CHAT_ID"
+  send_on:
+    webhook_received: true
+    claude_decision: true
+    trade_executed: true
+    errors: true
+    daily_summary: true
+
+# --- Dashboard ---
+dashboard:
+  enabled: true
+  # API keys for chart data
+  birdeye_api_key: ""             # Optional: for on-chain data
+  coingecko_enabled: true         # Free price data fallback
+
+# --- Database ---
+database:
+  path: "data/trades.db"
+  csv_backup_dir: "data/csv_backups"
+  csv_backup_daily: true
+
+# --- Logging ---
+logging:
+  file: "logs/bot.log"
+  max_size_mb: 50
+  backup_count: 5
+  console: true

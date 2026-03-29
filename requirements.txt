@@ -1,0 +1,29 @@
+# TradingView SOL Bot - Minimal Dependencies
+# Tested on Python 3.11+ / macOS Sequoia
+
+# Web framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Solana
+solders==0.21.0
+solana==0.35.0
+
+# Anthropic Claude API
+anthropic==0.42.0
+
+# HTTP client
+httpx==0.28.1
+
+# Config & env
+pyyaml==6.0.2
+python-dotenv==1.0.1
+
+# Encryption for wallet key
+cryptography==44.0.0
+
+# Validation (included with FastAPI)
+pydantic==2.10.4
+
+# Base58 encoding
+base58==2.1.1

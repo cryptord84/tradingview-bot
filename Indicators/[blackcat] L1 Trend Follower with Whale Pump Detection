@@ -1,0 +1,65 @@
+//@version=5
+indicator('[blackcat] L1 Trend Follower with Whale Pump Detection', overlay=false)
+
+// Function to find the last non-NaN value in an array
+find_last_non_nan(values, length) =>
+    result = float(na)
+    if length >= 1
+        for i = 0 to length by 1
+            if na(result) or not na(values[i])
+                result := values[i]
+                result
+    result
+
+// Function to calculate a weighted simple average
+weighted_simple_average(src, length, weight) =>
+    sumf = 0.0
+    ma = 0.0
+    out = 0.0
+    sumf := nz(sumf[1]) - nz(src[length]) + src
+    ma := na(src[length]) ? na : sumf / length
+    out := na(out[1]) ? ma : (src * weight + out[1] * (length - weight)) / length
+    out
+
+// Function to calculate the trend follower algorithm
+calculate_trend_follower(close, low, high) =>
+    lowest_low = find_last_non_nan(low, 1)
+    low_variability = weighted_simple_average(math.abs(low - lowest_low), 3, 1) / weighted_simple_average(math.max(low - lowest_low, 0), 3, 1) * 100
+    smoothed_variability = ta.ema(close * 1.2 ? low_variability * 10 : low_variability / 10, 3)
+    lowest_low_30 = ta.lowest(low, 30)
+    highest_smoothed_variability_30 = ta.highest(smoothed_variability, 30)
+    lowest_1 = ta.lowest(low, 58)
+    is_lowest_low_58 = lowest_1 ? 1 : 0
+    smoothed_whale_pump = ta.ema(low <= lowest_low_30 ? (smoothed_variability + highest_smoothed_variability_30 * 2) / 2 : 0, 3) / 618 * is_lowest_low_58
+    whale_pump_signal = smoothed_whale_pump > 100 ? 100 : smoothed_whale_pump
+    lowest_low_75 = ta.lowest(low, 75)
+    highest_high_75 = ta.highest(high, 75)
+    price_range = (highest_high_75 - lowest_low_75) / 100
+    smoothed_price_range = weighted_simple_average(close - lowest_low_75 - price_range, 20, 1)
+    adjusted_price_range = 3 * smoothed_price_range - 2 * weighted_simple_average(smoothed_price_range, 15, 1)
+    rsi_like_indicator = (close - ta.lowest(low, 27)) / (ta.highest(high, 27) - ta.lowest(low, 27)) * 100
+    smoothed_rsi_like_indicator = weighted_simple_average(rsi_like_indicator, 3, 1)
+    trend_follower = ta.alma((close - ta.sma(close, 40)) / ta.sma(close, 40) * 100, 5, 0.85, 6) * 10
+    [trend_follower, whale_pump_signal]
+
+// Calculate trend follower
+[trend_follower, whale_pump_signal] = calculate_trend_follower(close, low, high)
+
+// Plot trend follower
+plot_follower = plot(trend_follower, color=color.new(color.white, 0), linewidth=1)
+plot_previous_follower = plot(trend_follower[2], color=color.new(color.yellow, 0), linewidth=1)
+fill(plot_follower, plot_previous_follower, color=trend_follower > trend_follower[2] ? color.yellow : color.fuchsia, transp=0)
+
+// Whale pump detector
+plotcandle(0, whale_pump_signal, 0, whale_pump_signal, color=whale_pump_signal > 0 ? color.yellow : na)
+
+// Crossunder zero zone for sell in red
+plotcandle(-5, 5, -5, 5, color=ta.crossunder(trend_follower, 16.5) ? color.red : na, bordercolor=na)
+plotcandle(-5, 5, -5, 5, color=ta.crossunder(trend_follower, 40) ? color.red : na, bordercolor=na)
+plotcandle(-5, 5, -5, 5, color=ta.crossunder(trend_follower, 20) ? color.red : na, bordercolor=na)
+
+// Crossover zero zone for buy in green
+plotcandle(-5, 5, -5, 5, color=ta.crossover(trend_follower, 16.5) ? color.green : na, bordercolor=na)
+plotcandle(-5, 5, -5, 5, color=ta.crossover(trend_follower, 40) ? color.green : na, bordercolor=na)
+plotcandle(-5, 5, -5, 5, color=ta.crossover(trend_follower, 20) ? color.green : na, bordercolor=na)
+

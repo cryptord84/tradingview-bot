@@ -1,0 +1,94 @@
+// ____  __    ___   ________ ___________  ___________ __  ____ ___ 
+   // / __ )/ /   /   | / ____/ //_/ ____/   |/_  __<  / // / / __ |__ \
+  // / __  / /   / /| |/ /   / ,< / /   / /| | / /  / / // /_/ / / __/ /
+ // / /_/ / /___/ ___ / /___/ /| / /___/ ___ |/ /  / /__  __/ /_/ / __/ 
+// /_____/_____/_/  |_\____/_/ |_\____/_/  |_/_/  /_/  /_/  \____/____/                                              
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © blackcat1402
+//@version=5
+indicator('[blackcat] L1 Enhanced Awesome Oscillator', 'L1_EAO', overlay=false, max_bars_back=5000)
+
+// Function to calculate the Awesome Oscillator with enhanced features
+calculate_enhanced_awesome_oscillator(source, short_length, long_length, smoothing_length) =>
+    smoothed_short = ta.sma(source, short_length)
+    smoothed_long = ta.sma(source, long_length)
+    awesome_oscillator = (smoothed_short - smoothed_long) * 100
+    smoothed_ao = ta.sma(awesome_oscillator, smoothing_length)
+    bbd = awesome_oscillator - smoothed_ao
+    bbda = ta.sma(bbd, 5)
+    [bbd, bbda]
+
+// Function to detect crossover conditions
+detect_crossover(condition, length) =>
+    count = 0
+    for i = 1 to length by 1
+        if condition[i - 1]
+            count += 1
+            count
+    count
+
+// Function to check for recent occurrences
+check_occurrence(condition, length) =>
+    detect_crossover(condition, length) != 0 ? 1 : 0
+
+// Function to calculate the Choppiness Index
+calculate_choppiness_index(source, length, threshold) =>
+    cid_str = math.sum(source, length)
+    cid_ltl = ta.lowest(low < close[1] ? low : close[1], length)
+    cid_hth = ta.highest(high > close[1] ? high : close[1], length)
+    cid_height = cid_hth - cid_ltl
+    cid_dif = 100 * (math.log10(cid_str / cid_height) / math.log10(length)) - 50
+    cid_dea = ta.sma(cid_dif, 144)
+    cid_def = cid_dif - cid_dea
+    cid_deau = cid_dea + threshold
+    cid_deal = cid_dea - threshold
+    cid_filt = cid_dif <= cid_dif[1] and cid_dif < cid_deau or cid_dif >= cid_dif[1] and cid_dif < cid_dea or cid_dif <= cid_deau and cid_dif >= cid_deal and ta.sma(cid_dif, 3) < ta.sma(cid_dif, 3)[1]
+    cid_filt
+
+// Function to generate trading signals
+generate_signals(bbd, cid_filt) =>
+    short_signal = ta.lowest(bbd, 4) > 0 and bbd < bbd[1] and bbd[1] > bbd[2] and bbd[2] > bbd[3] and cid_filt
+
+    long_signal = ta.highest(bbd, 4) < 0 and bbd > bbd[1] and bbd[1] < bbd[2] and bbd[2] < bbd[3] and cid_filt
+
+    [long_signal, short_signal]
+
+// Alert functions
+alert_buy() =>
+    alert('BUY Signal', alert.freq_once_per_bar)
+
+alert_sell() =>
+    alert('SELL Signal', alert.freq_once_per_bar)
+
+// Parameters
+cid_length = input(8, title='Length')
+cid_threshold = input(18, title='Threshold')
+
+// Calculate indicators
+[bbd, bbda] = calculate_enhanced_awesome_oscillator(hlc3, 5, 13, 3)
+cid_filt = calculate_choppiness_index(hlc3, cid_length, cid_threshold)
+[long_signal, short_signal] = generate_signals(bbd, cid_filt)
+
+// Plot signals
+plotcandle(bbd, 0, bbd, 0, color=bbd >= bbd[1] ? color.new(color.yellow, 0) : na)
+plotcandle(bbd, 0, bbd, 0, color=bbd < bbd[1] ? color.new(color.fuchsia, 0) : na)
+
+// Background color
+bgcolor(color=long_signal ? color.lime : color.gray, transp=70)
+
+// Horizontal line
+hline(0)
+
+// Labels
+if long_signal
+    label.new(bar_index, bbd, 'BUY', color=color.new(color.green, 50), textcolor=color.white, style=label.style_label_up, yloc=yloc.price, size=size.small)
+else if short_signal
+    label.new(bar_index, bbd, 'SELL', color=color.new(color.red, 50), textcolor=color.white, style=label.style_label_down, yloc=yloc.price, size=size.small)
+
+// Alerts
+if long_signal
+    alert_buy()
+else if short_signal
+    alert_sell()
+
