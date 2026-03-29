@@ -39,7 +39,7 @@ wallet:
 
 # --- Jupiter DEX ---
 jupiter:
-  api_base: "https://quote-api.jup.ag/v6"
+  api_base: "https://lite-api.jup.ag/swap/v1"
   # Token addresses
   sol_mint: "So11111111111111111111111111111111111111112"
   usdc_mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"

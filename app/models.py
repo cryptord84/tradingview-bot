@@ -88,5 +88,10 @@ class SettingsUpdate(BaseModel):
     max_position_size_percent: Optional[float] = None
     risk_per_trade_percent: Optional[float] = None
     low_balance_shutdown_sol: Optional[float] = None
+    low_balance_shutdown_usd: Optional[float] = None
     daily_loss_limit_percent: Optional[float] = None
+    max_open_positions: Optional[int] = None
+    cooldown_between_trades_seconds: Optional[int] = None
+    slippage_bps: Optional[int] = None
+    priority_fee_lamports: Optional[int] = None
     geo_risk_weight: Optional[float] = None

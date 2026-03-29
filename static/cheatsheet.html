@@ -352,7 +352,7 @@ cloudflared tunnel --url http://localhost:8000</code>
 
     <!-- Telegram -->
     <div class="card p-5" id="telegram">
-        <h2>📱 Telegram Notifications</h2>
+        <h2>📱 Telegram Notifications &amp; Commands</h2>
         <table>
             <tr><th>Event</th><th>Toggle</th><th>Contains</th></tr>
             <tr><td>Webhook received</td><td><code>webhook_received</code></td><td>Signal type, price, confidence</td></tr>
@@ -361,6 +361,22 @@ cloudflared tunnel --url http://localhost:8000</code>
             <tr><td>Errors</td><td><code>errors</code></td><td>Exception message + context</td></tr>
             <tr><td>Daily summary</td><td><code>daily_summary</code></td><td>Trades, win rate, P&L, balance</td></tr>
         </table>
+        <h3>Interactive Commands</h3>
+        <p>Send these commands directly to the bot in Telegram for real-time monitoring:</p>
+        <table>
+            <tr><th>Command</th><th>Description</th><th>Returns</th></tr>
+            <tr><td><code>/help</code></td><td>List available commands</td><td>All commands with descriptions</td></tr>
+            <tr><td><code>/status</code></td><td>Bot health &amp; uptime</td><td>Active state, API health, uptime, strategy, win rate</td></tr>
+            <tr><td><code>/wallet</code></td><td>Wallet balances</td><td>SOL balance, USD value, USDC balance, total USD</td></tr>
+            <tr><td><code>/apis</code></td><td>Check all API connections</td><td>Status of Bot API, Jupiter, Solana RPC, Telegram, Claude, NewsAPI, DB</td></tr>
+            <tr><td><code>/trades</code></td><td>Recent trades</td><td>Last 5 executed trades with signal, amount, price, P&amp;L</td></tr>
+            <tr><td><code>/today</code></td><td>Today's activity</td><td>Today's trade count, P&amp;L, and trade list</td></tr>
+            <tr><td><code>/pnl</code></td><td>P&amp;L summary</td><td>Total P&amp;L, today P&amp;L, win rate, monthly costs</td></tr>
+            <tr><td><code>/start</code></td><td>Start the bot</td><td>Activates signal processing</td></tr>
+            <tr><td><code>/stop</code></td><td>Stop the bot</td><td>Pauses signal processing</td></tr>
+        </table>
+        <div class="mt-3 tip">💡 Commands only respond to the configured <code>chat_id</code> — messages from other chats are ignored for security.</div>
+
         <h3>Setup (if not done)</h3>
         <code class="cmd"># 1. Message @BotFather → /newbot → get token
 # 2. Message your bot once
@@ -380,6 +396,7 @@ curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
             <tr><td><a href="/api/trades">http://localhost:8000/api/trades</a></td><td>Trade history JSON</td></tr>
             <tr><td><a href="/api/export/csv">http://localhost:8000/api/export/csv</a></td><td>Download tax CSV</td></tr>
             <tr><td><a href="/health">http://localhost:8000/health</a></td><td>Health check</td></tr>
+            <tr><td><a href="/changelog">http://localhost:8000/changelog</a></td><td>Strategy changelog</td></tr>
         </table>
         <div class="mt-3 tip">💡 To redesign the dashboard, copy the prompt in <code>GOOGLE_STITCH_PROMPT.md</code> into <a href="https://stitch.withgoogle.com" target="_blank">stitch.withgoogle.com</a>.</div>
     </div>

@@ -96,9 +96,14 @@ async def get_settings():
     """Get current risk/trading settings."""
     risk = get("risk")
     geo = get("geo_risk")
+    jupiter = get("jupiter")
     return {
         "risk": risk,
         "geo_risk": geo,
+        "jupiter": {
+            "slippage_bps": jupiter.get("slippage_bps", 100),
+            "priority_fee_lamports": jupiter.get("priority_fee_lamports", 50000),
+        },
     }
 
 
@@ -120,6 +125,8 @@ async def update_settings(updates: SettingsUpdate):
     for key, val in update_dict.items():
         if key == "geo_risk_weight":
             cfg.setdefault("geo_risk", {})["weight"] = val
+        elif key in ("slippage_bps", "priority_fee_lamports"):
+            cfg.setdefault("jupiter", {})[key] = val
         elif key in cfg.get("risk", {}):
             cfg["risk"][key] = val
 
@@ -206,7 +213,15 @@ async def system_status():
     # 4. Jupiter Swap API (quote endpoint ping)
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get("https://quote-api.jup.ag/v6/tokens")
+            resp = await client.get(
+                    "https://lite-api.jup.ag/swap/v1/quote",
+                    params={
+                        "inputMint": "So11111111111111111111111111111111111111112",
+                        "outputMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                        "amount": "1000000",
+                        "slippageBps": "50",
+                    },
+                )
             results["jupiter"] = {"ok": resp.status_code < 500, "label": "Jupiter DEX", "detail": f"HTTP {resp.status_code}"}
     except Exception as e:
         results["jupiter"] = {"ok": False, "label": "Jupiter DEX", "error": err(e)}

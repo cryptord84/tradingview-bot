@@ -343,19 +343,47 @@ main {
 
 .status-component {
   border: 1px solid var(--green-dark);
-  padding: 12px;
+  padding: 10px 10px 8px;
   text-align: center;
-  transition: all .2s;
+  transition: border-color .3s, box-shadow .3s;
+  position: relative;
+  overflow: hidden;
 }
 
 .status-component.ok { border-color: var(--green-dark); }
-.status-component.ok:hover { border-color: var(--green); box-shadow: 0 0 10px rgba(0,255,65,0.1); }
+.status-component.ok:hover { border-color: var(--green); box-shadow: 0 0 14px rgba(0,255,65,0.12); }
 .status-component.err { border-color: #3B0000; background: rgba(255,34,34,0.03); }
 
-.sc-icon { font-size: 1.4rem; margin-bottom: 6px; }
-.sc-name { font-size: .6rem; letter-spacing: 2px; color: var(--green-dim); text-transform: uppercase; margin-bottom: 4px; }
-.sc-status { font-size: .65rem; }
-.sc-detail { font-size: .55rem; color: var(--green-dim); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Flash animation when component goes online */
+@keyframes connect-flash {
+  0%   { box-shadow: 0 0 0 0 rgba(0,255,65,0); background: rgba(0,255,65,0); }
+  20%  { box-shadow: 0 0 20px 4px rgba(0,255,65,0.5); background: rgba(0,255,65,0.08); }
+  100% { box-shadow: 0 0 0 0 rgba(0,255,65,0); background: rgba(0,0,0,0); }
+}
+.status-component.flash { animation: connect-flash 0.8s ease-out forwards; }
+
+/* Scan line sweep on connect */
+@keyframes scan-sweep {
+  0%   { transform: translateX(-100%); opacity: 0.6; }
+  100% { transform: translateX(100%); opacity: 0; }
+}
+.status-component::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 50%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(0,255,65,0.15), transparent);
+  transform: translateX(-100%);
+  pointer-events: none;
+}
+.status-component.sweep::after { animation: scan-sweep 0.6s ease-out forwards; }
+
+.sc-icon { font-size: 1.3rem; margin-bottom: 4px; }
+.sc-name { font-size: .55rem; letter-spacing: 2px; color: var(--green-dim); text-transform: uppercase; margin-bottom: 3px; }
+.sc-status { font-size: .6rem; }
+.sc-detail { font-size: .52rem; color: var(--green-dim); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-wave { display: block; margin: 5px auto 0; opacity: 0.9; }
+.sc-ping { font-size: .48rem; color: var(--green-dim); margin-top: 3px; letter-spacing: 1px; opacity: 0.6; }
 
 /* ── CHARTS ── */
 .card-chart { grid-column: span 2; }
@@ -381,9 +409,25 @@ tr:hover td { background: rgba(0,255,65,0.03); }
 .tx-link:hover { color: var(--green); }
 
 /* ── SETTINGS ── */
-.card-settings { grid-column: span 1; }
+.card-settings { grid-column: span 2; }
 
-.settings-grid { display: flex; flex-direction: column; gap: 10px; }
+.settings-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.settings-group-title {
+  font-size: .55rem;
+  letter-spacing: 3px;
+  color: var(--green);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--green-dark);
+}
+
+.settings-grid { display: flex; flex-direction: column; gap: 8px; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; }
 .setting-label { font-size: .65rem; color: var(--green-dim); letter-spacing: 1px; }
 
@@ -417,6 +461,34 @@ input[type=number]:focus { border-color: var(--green); }
   transition: all .2s;
 }
 .btn-save:hover { border-color: var(--green); color: var(--green); background: rgba(0,255,65,0.05); }
+
+/* ── COST TRACKER ── */
+.card-costs { grid-column: span 1; }
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0,60,0,0.3);
+}
+.cost-row:last-child { border-bottom: none; }
+
+.cost-name { font-size: .65rem; color: var(--green-dim); letter-spacing: 1px; }
+.cost-value { font-family: var(--vt); font-size: 1.1rem; color: var(--green); }
+.cost-period { font-size: .55rem; color: var(--green-dim); letter-spacing: 1px; }
+
+.cost-total-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0 0;
+  margin-top: 8px;
+  border-top: 1px solid var(--green-dim);
+}
+.cost-total-label { font-size: .6rem; letter-spacing: 2px; color: var(--green); text-transform: uppercase; }
+.cost-total-value { font-family: var(--vt); font-size: 1.6rem; color: var(--yellow); text-shadow: 0 0 10px rgba(255,215,0,0.3); }
+.cost-note { font-size: .55rem; color: var(--green-dim); margin-top: 8px; letter-spacing: 1px; }
 
 /* ── SECTION HEADER ── */
 .section-title {
@@ -473,7 +545,8 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-settings { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-settings,.card-costs { grid-column: 1; }
+  .settings-columns { grid-template-columns: 1fr; }
   .wallet-grid { grid-template-columns: 1fr 1fr; }
   .status-grid { grid-template-columns: repeat(4,1fr); }
   .hero-title { font-size: 2.2rem; }
@@ -515,6 +588,7 @@ footer a:hover { color: var(--green); }
   </div>
   <button class="btn-toggle" id="toggle-btn" onclick="toggleBot()">[ STOP SYSTEM ]</button>
   <div class="nav-links">
+    <a href="/changelog">[ CHANGELOG ]</a>
     <a href="/cheatsheet">[ CHEATSHEET ]</a>
     <a href="/docs">[ API DOCS ]</a>
     <a href="/api/export/csv">[ EXPORT CSV ]</a>
@@ -598,23 +672,97 @@ footer a:hover { color: var(--green); }
 
   <!-- SETTINGS -->
   <div class="card card-settings" data-label="// RISK PARAMETERS">
-    <div class="settings-grid">
-      <div class="setting-row"><span class="setting-label">Max Purchase (SOL)</span><input type="number" id="set-max-sol" step="0.1"></div>
-      <div class="setting-row"><span class="setting-label">Max Purchase (USD)</span><input type="number" id="set-max-usd" step="10"></div>
-      <div class="setting-row"><span class="setting-label">Max Leverage</span><input type="number" id="set-max-lev" min="1" max="20"></div>
-      <div class="setting-row"><span class="setting-label">Max Position Size %</span><input type="number" id="set-max-pos"></div>
-      <div class="setting-row"><span class="setting-label">Risk Per Trade %</span><input type="number" id="set-risk-pct" step="0.5"></div>
-      <div class="setting-row"><span class="setting-label">Low Balance SOL</span><input type="number" id="set-low-bal" step="0.05"></div>
-      <div class="setting-row"><span class="setting-label">Daily Loss Limit %</span><input type="number" id="set-daily-loss"></div>
-      <div class="setting-row"><span class="setting-label">Geo Risk Weight</span><input type="number" id="set-geo-wt" min="0" max="1" step="0.1"></div>
+    <div class="settings-columns">
+      <div>
+        <div class="settings-group-title">Trade Limits</div>
+        <div class="settings-grid">
+          <div class="setting-row"><span class="setting-label">Max Trade (SOL)</span><input type="number" id="set-max-sol" step="0.01"></div>
+          <div class="setting-row"><span class="setting-label">Max Trade (USD)</span><input type="number" id="set-max-usd" step="1"></div>
+          <div class="setting-row"><span class="setting-label">Max Leverage</span><input type="number" id="set-max-lev" min="1" max="20"></div>
+          <div class="setting-row"><span class="setting-label">Max Position Size %</span><input type="number" id="set-max-pos" step="1"></div>
+          <div class="setting-row"><span class="setting-label">Max Open Positions</span><input type="number" id="set-max-open" min="1" max="10"></div>
+          <div class="setting-row"><span class="setting-label">Risk Per Trade %</span><input type="number" id="set-risk-pct" step="0.5"></div>
+        </div>
+        <div class="settings-group-title" style="margin-top:14px;">Safety Limits</div>
+        <div class="settings-grid">
+          <div class="setting-row"><span class="setting-label">Min Balance SOL</span><input type="number" id="set-low-bal" step="0.01"></div>
+          <div class="setting-row"><span class="setting-label">Min Balance USDC</span><input type="number" id="set-low-bal-usd" step="1"></div>
+          <div class="setting-row"><span class="setting-label">Daily Loss Limit %</span><input type="number" id="set-daily-loss" step="1"></div>
+          <div class="setting-row"><span class="setting-label">Cooldown (sec)</span><input type="number" id="set-cooldown" min="0" step="10"></div>
+        </div>
+      </div>
+      <div>
+        <div class="settings-group-title">DEX Parameters</div>
+        <div class="settings-grid">
+          <div class="setting-row"><span class="setting-label">Slippage (bps)</span><input type="number" id="set-slippage" min="1" max="500" step="10"></div>
+          <div class="setting-row"><span class="setting-label">Priority Fee (lamports)</span><input type="number" id="set-priority-fee" min="0" step="5000"></div>
+        </div>
+        <div class="settings-group-title" style="margin-top:14px;">Geo Risk</div>
+        <div class="settings-grid">
+          <div class="setting-row"><span class="setting-label">Geo Risk Weight</span><input type="number" id="set-geo-wt" min="0" max="1" step="0.1"></div>
+        </div>
+      </div>
     </div>
     <button class="btn-save" onclick="saveSettings()">[ WRITE PARAMETERS ]</button>
+  </div>
+
+  <!-- COST TRACKER -->
+  <div class="card card-costs" data-label="// OPERATING COSTS">
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">TradingView Pro</div>
+        <div class="cost-period">monthly subscription</div>
+      </div>
+      <div class="cost-value">$33.95</div>
+    </div>
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">Claude Max</div>
+        <div class="cost-period">monthly subscription</div>
+      </div>
+      <div class="cost-value">$100.00</div>
+    </div>
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">Solana TX Fees</div>
+        <div class="cost-period">~0.000005 SOL per tx</div>
+      </div>
+      <div class="cost-value dim" style="font-size:.85rem;">&lt;$0.01</div>
+    </div>
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">Jupiter DEX</div>
+        <div class="cost-period">no platform fee</div>
+      </div>
+      <div class="cost-value dim" style="font-size:.85rem;">$0.00</div>
+    </div>
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">NewsAPI</div>
+        <div class="cost-period">free tier · 100 req/day</div>
+      </div>
+      <div class="cost-value dim" style="font-size:.85rem;">$0.00</div>
+    </div>
+    <div class="cost-row">
+      <div>
+        <div class="cost-name">Hosting / VPS</div>
+        <div class="cost-period">local machine · no cost</div>
+      </div>
+      <div class="cost-value dim" style="font-size:.85rem;">$0.00</div>
+    </div>
+    <div class="cost-total-row">
+      <span class="cost-total-label">Monthly Total</span>
+      <span class="cost-total-value">$133.95</span>
+    </div>
+    <div class="cost-note">Break-even: ~$134/mo profit to cover operating costs</div>
   </div>
 
 </main>
 
 <footer>
-  MATRIX // SOL TRADING SYSTEM v1.0 &nbsp;▸&nbsp;
+  TRINITY TRADING BOT &nbsp;▸&nbsp;
+  STRATEGY: 1H v3.5 + DAILY v2 &nbsp;▸&nbsp;
+  <a href="/changelog">CHANGELOG</a> &nbsp;▸&nbsp;
   <a href="/cheatsheet">CHEATSHEET</a> &nbsp;▸&nbsp;
   CLAUDE AI + JUPITER DEX + SOLANA
 </footer>
@@ -725,6 +873,117 @@ const COMPONENT_ICONS = {
   jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰'
 };
 
+// Per-component waveform characteristics — each one looks distinct
+const WAVE_PROFILES = {
+  database:   { speed: 0.04, amp: 4,  pattern: 'square'  },
+  wallet:     { speed: 0.07, amp: 5,  pattern: 'ecg'     },
+  price_feed: { speed: 0.12, amp: 6,  pattern: 'sine'    },
+  jupiter:    { speed: 0.10, amp: 7,  pattern: 'spiky'   },
+  claude:     { speed: 0.06, amp: 4,  pattern: 'neural'  },
+  telegram:   { speed: 0.09, amp: 5,  pattern: 'pulse'   },
+  news:       { speed: 0.05, amp: 4,  pattern: 'sine'    },
+};
+
+const waveStates = {};   // key → { ctx, buf, phase, isOnline }
+let waveRafId = null;
+const prevOnlineState = {};  // track transitions for flash effect
+
+function buildWaveSample(profile, phase, isOnline) {
+  if (!isOnline) return 0 + (Math.random() - 0.5) * 0.6;  // near-flat static
+  const { amp, pattern } = profile;
+  switch (pattern) {
+    case 'ecg': {
+      const c = (phase * 2) % (Math.PI * 2);
+      if (c < 0.2)        return -amp * 1.8;
+      if (c < 0.35)       return  amp * 2.2;
+      if (c < 0.5)        return -amp * 0.5;
+      return Math.sin(phase * 0.3) * amp * 0.3;
+    }
+    case 'square': {
+      return Math.sign(Math.sin(phase)) * amp * 0.7 + (Math.random() - 0.5) * 0.8;
+    }
+    case 'spiky': {
+      const base = Math.sin(phase) * amp * 0.4;
+      const spike = Math.random() > 0.93 ? (Math.random() - 0.5) * amp * 3 : 0;
+      return base + spike;
+    }
+    case 'neural': {
+      return (Math.sin(phase) * amp * 0.5 +
+              Math.sin(phase * 2.3) * amp * 0.3 +
+              Math.sin(phase * 5.1) * amp * 0.15);
+    }
+    case 'pulse': {
+      const t = (phase * 1.5) % (Math.PI * 2);
+      return t < 0.4 ? amp * 1.4 : Math.sin(phase * 0.4) * amp * 0.2;
+    }
+    default:
+      return Math.sin(phase) * amp;
+  }
+}
+
+function tickWaves() {
+  Object.keys(waveStates).forEach(key => {
+    const s = waveStates[key];
+    if (!s) return;
+    const { ctx, buf, profile } = s;
+    const W = ctx.canvas.width, H = ctx.canvas.height, mid = H / 2;
+
+    s.phase += profile.speed;
+    const sample = buildWaveSample(profile, s.phase, s.isOnline);
+    buf.push(mid - sample);
+    if (buf.length > W) buf.shift();
+
+    ctx.clearRect(0, 0, W, H);
+
+    if (s.isOnline) {
+      // Glow pass
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(0,255,65,0.18)';
+      ctx.lineWidth = 3;
+      buf.forEach((y, x) => x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+      ctx.stroke();
+      // Sharp pass
+      ctx.beginPath();
+      ctx.strokeStyle = '#00FF41';
+      ctx.lineWidth = 1;
+      buf.forEach((y, x) => x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y));
+      ctx.stroke();
+      // Leading dot
+      if (buf.length > 0) {
+        ctx.beginPath();
+        ctx.fillStyle = '#00FF41';
+        ctx.arc(buf.length - 1, buf[buf.length - 1], 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      // Dead flatline with faint red
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(255,34,34,0.35)';
+      ctx.lineWidth = 1;
+      buf.forEach((y, x) => x === 0 ? ctx.moveTo(x, mid) : ctx.lineTo(x, mid));
+      ctx.stroke();
+    }
+  });
+  waveRafId = requestAnimationFrame(tickWaves);
+}
+
+function initComponentWave(key, canvas, isOnline) {
+  if (waveStates[key]) {
+    // Reuse existing buffer, just update online state
+    waveStates[key].isOnline = isOnline;
+    waveStates[key].ctx = canvas.getContext('2d');
+    return;
+  }
+  const profile = WAVE_PROFILES[key] || { speed: 0.07, amp: 5, pattern: 'sine' };
+  waveStates[key] = {
+    ctx: canvas.getContext('2d'),
+    buf: new Array(canvas.width).fill(canvas.height / 2),
+    phase: Math.random() * Math.PI * 2,
+    isOnline,
+    profile,
+  };
+}
+
 async function loadSystemStatus() {
   try {
     const [sysR, botR] = await Promise.all([
@@ -734,44 +993,94 @@ async function loadSystemStatus() {
     const sys = await sysR.json();
     const bot = await botR.json();
 
-    // Update bot state
     botActive = sys.bot_active;
     updateBotUI(botActive);
     setText('uptime-display', sys.uptime || '--:--:--');
 
-    // Render component grid
     const grid = document.getElementById('status-grid');
-    grid.textContent = '';
+    const pingTime = new Date().toLocaleTimeString('en-US', {hour12: false});
+
+    // Preserve existing tiles so wave buffers survive refreshes
+    const existingTiles = {};
+    grid.querySelectorAll('[data-comp]').forEach(el => {
+      existingTiles[el.dataset.comp] = el;
+    });
 
     Object.entries(sys.components).forEach(([key, comp]) => {
-      const div = document.createElement('div');
-      div.className = `status-component ${comp.ok ? 'ok' : 'err'}`;
+      const wasOnline = prevOnlineState[key];
+      const isOnline = comp.ok;
+      const justConnected = isOnline && !wasOnline && wasOnline !== undefined;
+      prevOnlineState[key] = isOnline;
 
-      const icon = document.createElement('div');
-      icon.className = 'sc-icon';
-      icon.textContent = COMPONENT_ICONS[key] || '?';
+      let tile = existingTiles[key];
+      if (!tile) {
+        // Build tile
+        tile = document.createElement('div');
+        tile.dataset.comp = key;
 
-      const name = document.createElement('div');
-      name.className = 'sc-name';
-      name.textContent = comp.label || key;
+        const icon = document.createElement('div');
+        icon.className = 'sc-icon';
+        icon.textContent = COMPONENT_ICONS[key] || '◈';
+        tile.appendChild(icon);
 
-      const status = document.createElement('div');
-      status.className = 'sc-status';
-      status.textContent = comp.ok ? '● ONLINE' : '● OFFLINE';
-      status.style.color = comp.ok ? 'var(--green)' : 'var(--red)';
+        const name = document.createElement('div');
+        name.className = 'sc-name';
+        name.textContent = comp.label || key;
+        tile.appendChild(name);
 
-      const detail = document.createElement('div');
-      detail.className = 'sc-detail';
+        const statusEl = document.createElement('div');
+        statusEl.className = 'sc-status sc-status-text';
+        tile.appendChild(statusEl);
+
+        const detail = document.createElement('div');
+        detail.className = 'sc-detail sc-detail-text';
+        tile.appendChild(detail);
+
+        // Waveform canvas
+        const wc = document.createElement('canvas');
+        wc.className = 'sc-wave';
+        wc.width = 90; wc.height = 26;
+        tile.appendChild(wc);
+
+        const ping = document.createElement('div');
+        ping.className = 'sc-ping sc-ping-text';
+        tile.appendChild(ping);
+
+        grid.appendChild(tile);
+        initComponentWave(key, wc, isOnline);
+      } else {
+        // Update wave state for existing tile
+        const wc = tile.querySelector('canvas');
+        if (wc) initComponentWave(key, wc, isOnline);
+      }
+
+      // Update dynamic text
+      tile.className = `status-component ${isOnline ? 'ok' : 'err'}`;
+      const statusEl = tile.querySelector('.sc-status-text');
+      statusEl.textContent = isOnline ? '▶ ONLINE' : '■ OFFLINE';
+      statusEl.style.color = isOnline ? 'var(--green)' : 'var(--red)';
+
+      const detail = tile.querySelector('.sc-detail-text');
       detail.textContent = comp.detail || comp.error || '';
-      detail.style.color = comp.ok ? 'var(--green-dim)' : 'var(--red)';
-      detail.style.opacity = '0.7';
+      detail.style.color = isOnline ? 'var(--green-dim)' : 'var(--red)';
 
-      div.appendChild(icon);
-      div.appendChild(name);
-      div.appendChild(status);
-      div.appendChild(detail);
-      grid.appendChild(div);
+      const ping = tile.querySelector('.sc-ping-text');
+      if (ping) ping.textContent = isOnline ? `PING ${pingTime}` : `LAST ERR ${pingTime}`;
+
+      // Flash + sweep on fresh connection
+      if (justConnected) {
+        tile.classList.remove('flash', 'sweep');
+        void tile.offsetWidth; // reflow
+        tile.classList.add('flash', 'sweep');
+        tile.addEventListener('animationend', () => {
+          tile.classList.remove('flash', 'sweep');
+        }, { once: true });
+      }
     });
+
+    // Start wave engine if not running
+    if (!waveRafId) tickWaves();
+
   } catch(e) { console.error('Status error:', e); }
 }
 
@@ -926,9 +1235,14 @@ async function loadSettings() {
     document.getElementById('set-max-usd').value = d.risk?.max_purchase_usd ?? 20;
     document.getElementById('set-max-lev').value = d.risk?.max_leverage ?? 1;
     document.getElementById('set-max-pos').value = d.risk?.max_position_size_percent ?? 10;
+    document.getElementById('set-max-open').value = d.risk?.max_open_positions ?? 1;
     document.getElementById('set-risk-pct').value = d.risk?.risk_per_trade_percent ?? 2;
     document.getElementById('set-low-bal').value = d.risk?.low_balance_shutdown_sol ?? 0.05;
+    document.getElementById('set-low-bal-usd').value = d.risk?.low_balance_shutdown_usd ?? 20;
     document.getElementById('set-daily-loss').value = d.risk?.daily_loss_limit_percent ?? 10;
+    document.getElementById('set-cooldown').value = d.risk?.cooldown_between_trades_seconds ?? 60;
+    document.getElementById('set-slippage').value = d.jupiter?.slippage_bps ?? 100;
+    document.getElementById('set-priority-fee').value = d.jupiter?.priority_fee_lamports ?? 50000;
     document.getElementById('set-geo-wt').value = d.geo_risk?.weight ?? 0.7;
   } catch(e) { console.error('Settings error:', e); }
 }
@@ -940,9 +1254,14 @@ async function saveSettings() {
       max_purchase_usd: parseFloat(document.getElementById('set-max-usd').value),
       max_leverage: parseInt(document.getElementById('set-max-lev').value),
       max_position_size_percent: parseFloat(document.getElementById('set-max-pos').value),
+      max_open_positions: parseInt(document.getElementById('set-max-open').value),
       risk_per_trade_percent: parseFloat(document.getElementById('set-risk-pct').value),
       low_balance_shutdown_sol: parseFloat(document.getElementById('set-low-bal').value),
+      low_balance_shutdown_usd: parseFloat(document.getElementById('set-low-bal-usd').value),
       daily_loss_limit_percent: parseFloat(document.getElementById('set-daily-loss').value),
+      cooldown_between_trades_seconds: parseInt(document.getElementById('set-cooldown').value),
+      slippage_bps: parseInt(document.getElementById('set-slippage').value),
+      priority_fee_lamports: parseInt(document.getElementById('set-priority-fee').value),
       geo_risk_weight: parseFloat(document.getElementById('set-geo-wt').value),
     };
     const r = await fetch(`${API}/api/settings`, {

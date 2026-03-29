@@ -18,7 +18,7 @@ class JupiterClient:
 
     def __init__(self):
         cfg = get("jupiter")
-        self.api_base = cfg.get("api_base", "https://quote-api.jup.ag/v6")
+        self.api_base = cfg.get("api_base", "https://lite-api.jup.ag/swap/v1")
         self.sol_mint = cfg.get("sol_mint", "So11111111111111111111111111111111111111112")
         self.usdc_mint = cfg.get("usdc_mint", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
         self.slippage_bps = cfg.get("slippage_bps", 100)

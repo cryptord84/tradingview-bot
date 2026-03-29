@@ -1,5 +1,6 @@
 """TradingView SOL Trading Bot - Main FastAPI Application."""
 
+import asyncio
 import logging
 import logging.handlers
 import sys
@@ -15,6 +16,7 @@ from fastapi.responses import FileResponse
 from app.config import load_config, get
 from app.database import init_db
 from app.routers import webhook, dashboard
+from app.services.telegram_commands import TelegramCommandHandler
 from app.utils.csv_backup import run_daily_backup
 
 # --- Logging Setup ---
@@ -42,16 +44,29 @@ logging.basicConfig(
 logger = logging.getLogger("bot")
 
 
+_tg_handler = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
+    global _tg_handler
     logger.info("Starting TradingView SOL Trading Bot")
     load_config()
     init_db()
     run_daily_backup()
+
+    # Start Telegram command listener
+    _tg_handler = TelegramCommandHandler()
+    tg_task = asyncio.create_task(_tg_handler.run())
     logger.info("Bot initialized successfully")
+
     yield
+
     logger.info("Shutting down bot")
+    if _tg_handler:
+        await _tg_handler.stop()
+    tg_task.cancel()
 
 
 app = FastAPI(
@@ -101,6 +116,15 @@ async def cheatsheet():
     if page.exists():
         return FileResponse(str(page))
     return {"error": "cheatsheet.html not found"}
+
+
+@app.get("/changelog")
+async def changelog():
+    """Serve the changelog page."""
+    page = STATIC_DIR / "changelog.html"
+    if page.exists():
+        return FileResponse(str(page))
+    return {"error": "changelog.html not found"}
 
 
 @app.get("/health")
