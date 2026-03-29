@@ -36,21 +36,35 @@ class NewsService:
         ):
             return self._cache
 
-        try:
-            if self.provider == "newsapi" and self.newsapi_key:
-                headlines = await self._fetch_newsapi()
-            elif self.provider == "tavily" and self.tavily_key:
-                headlines = await self._fetch_tavily()
-            else:
-                logger.warning("No news provider configured")
-                return []
+        # Build ordered provider list: preferred first, then fallback
+        providers = []
+        if self.provider == "newsapi":
+            if self.newsapi_key:
+                providers.append(("newsapi", self._fetch_newsapi))
+            if self.tavily_key:
+                providers.append(("tavily", self._fetch_tavily))
+        else:
+            if self.tavily_key:
+                providers.append(("tavily", self._fetch_tavily))
+            if self.newsapi_key:
+                providers.append(("newsapi", self._fetch_newsapi))
 
-            self._cache = headlines
-            self._cache_time = now
-            return headlines
-        except Exception as e:
-            logger.error(f"News fetch failed: {e}")
-            return self._cache  # Return stale cache on error
+        if not providers:
+            logger.warning("No news provider configured")
+            return []
+
+        for name, fetch_fn in providers:
+            try:
+                headlines = await fetch_fn()
+                self._cache = headlines
+                self._cache_time = now
+                logger.info(f"News fetched via {name} ({len(headlines)} headlines)")
+                return headlines
+            except Exception as e:
+                logger.warning(f"{name} failed: {e}, trying next provider")
+
+        logger.error("All news providers failed")
+        return self._cache  # Return stale cache as last resort
 
     async def _fetch_newsapi(self) -> list[str]:
         query = " OR ".join(self.keywords[:5])

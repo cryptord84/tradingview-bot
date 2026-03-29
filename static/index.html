@@ -337,7 +337,7 @@ main {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -634,6 +634,30 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <!-- NGROK TUNNEL -->
+  <div class="card" data-label="// WEBHOOK TUNNEL" style="grid-column: 1 / -1;">
+    <div id="ngrok-panel" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-family:var(--mono);font-size:.7rem;">
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:6px;">CURRENT WEBHOOK URL</div>
+        <div id="ngrok-url" style="color:var(--green);font-size:.8rem;word-break:break-all;">--</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:6px;">LAST CHANGED</div>
+          <div id="ngrok-changed" style="color:var(--yellow);">--</div>
+        </div>
+        <div>
+          <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:6px;">STATUS</div>
+          <div id="ngrok-status" style="color:var(--green);">--</div>
+        </div>
+        <div style="grid-column:1/-1;">
+          <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:6px;">PREVIOUS URL</div>
+          <div id="ngrok-prev" style="color:#555;font-size:.65rem;word-break:break-all;">--</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- P&L CHART -->
   <div class="card card-chart" data-label="// P&L CURVE">
     <canvas id="pnl-chart"></canvas>
@@ -870,7 +894,7 @@ async function loadStats() {
 // ── SYSTEM STATUS ──
 const COMPONENT_ICONS = {
   database: '🗄', wallet: '👛', price_feed: '📈',
-  jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰'
+  jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰', ngrok: '🔗'
 };
 
 // Per-component waveform characteristics — each one looks distinct
@@ -882,6 +906,7 @@ const WAVE_PROFILES = {
   claude:     { speed: 0.06, amp: 4,  pattern: 'neural'  },
   telegram:   { speed: 0.09, amp: 5,  pattern: 'pulse'   },
   news:       { speed: 0.05, amp: 4,  pattern: 'sine'    },
+  ngrok:      { speed: 0.08, amp: 5,  pattern: 'pulse'   },
 };
 
 const waveStates = {};   // key → { ctx, buf, phase, isOnline }
@@ -1077,6 +1102,22 @@ async function loadSystemStatus() {
         }, { once: true });
       }
     });
+
+    // Update ngrok panel
+    if (sys.ngrok) {
+      const n = sys.ngrok;
+      setText('ngrok-url', n.webhook_url || 'not detected');
+      document.getElementById('ngrok-url').style.color = n.online ? 'var(--green)' : 'var(--red)';
+      setText('ngrok-status', n.online ? '▶ CONNECTED' : '■ OFFLINE');
+      document.getElementById('ngrok-status').style.color = n.online ? 'var(--green)' : 'var(--red)';
+      if (n.last_changed) {
+        const d = new Date(n.last_changed + 'Z');
+        setText('ngrok-changed', d.toLocaleString());
+      } else {
+        setText('ngrok-changed', 'since boot');
+      }
+      setText('ngrok-prev', n.previous_url ? n.previous_url + '/webhook' : 'none');
+    }
 
     // Start wave engine if not running
     if (!waveRafId) tickWaves();

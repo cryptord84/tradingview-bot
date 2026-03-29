@@ -1,0 +1,308 @@
+// =============================================================================
+// SOL Confluence Pro v2 — CONTROLLED TEST
+// IDENTICAL to strategy_v2.pine logic with chart validation added.
+//
+// TEST PLAN:
+//   Test A: Run on COINBASE:SOLUSD Daily  → baseline
+//   Test B: Run on BINANCE:SOLUSDT Daily  → compare data source
+//   Export .xlsx after each test.
+//
+// VALIDATION: Info table shows chart setup in real-time.
+//   - Red "WRONG TF" if not on Daily
+//   - Shows exact symbol/exchange being used
+//   - Shows total bars available (data depth)
+// =============================================================================
+
+//@version=5
+strategy("SOL v2 TEST A COINBASE", overlay=true, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=10, initial_capital=10000, slippage=3, commission_type=strategy.commission.percent,
+     commission_value=0.1, pyramiding=0, calc_on_every_tick=false)
+
+// =============================================================================
+// INPUTS — identical to v2
+// =============================================================================
+
+grp_wh = "Webhook"
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret", group=grp_wh)
+min_confluence = input.int(5, "Min Confluence (bull /9, bear /8)", minval=2, maxval=9, group=grp_wh)
+
+grp_ma = "Moving Averages"
+ema_fast   = input.int(9,   "EMA Fast",  group=grp_ma)
+ema_mid    = input.int(21,  "EMA Mid",   group=grp_ma)
+ema_slow   = input.int(50,  "EMA Slow",  group=grp_ma)
+sma_200    = input.int(200, "SMA 200",   group=grp_ma)
+
+grp_rsi = "RSI"
+rsi_len = input.int(14,   "RSI Length",      group=grp_rsi)
+rsi_ob  = input.float(70, "RSI Overbought",  group=grp_rsi)
+rsi_os  = input.float(30, "RSI Oversold",    group=grp_rsi)
+
+grp_macd = "MACD"
+macd_fast   = input.int(12, "Fast",   group=grp_macd)
+macd_slow   = input.int(26, "Slow",   group=grp_macd)
+macd_signal = input.int(9,  "Signal", group=grp_macd)
+
+grp_st = "Supertrend"
+st_factor  = input.float(3.0, "Factor",     group=grp_st)
+st_atr_len = input.int(10,    "ATR Length", group=grp_st)
+
+grp_bb = "Bollinger Bands"
+bb_len  = input.int(20,    "Length",     group=grp_bb)
+bb_mult = input.float(2.0, "Multiplier", group=grp_bb)
+
+grp_ichi = "Ichimoku"
+ichi_tenkan   = input.int(9,  "Tenkan",   group=grp_ichi)
+ichi_kijun    = input.int(26, "Kijun",    group=grp_ichi)
+ichi_senkou_b = input.int(52, "Senkou B", group=grp_ichi)
+
+grp_vol = "Volume"
+vol_ma_len      = input.int(20,   "MA Length",         group=grp_vol)
+vol_spike_mult  = input.float(2.0,"Spike Multiplier",  group=grp_vol)
+
+grp_htf = "Higher Timeframe"
+htf_tf      = input.timeframe("D", "Timeframe",  group=grp_htf)
+htf_ema_len = input.int(200, "EMA Length",         group=grp_htf)
+
+grp_risk = "Risk Management"
+sl_atr_mult    = input.float(1.5, "Stop Loss ATR Multiplier",  group=grp_risk)
+tp_atr_mult    = input.float(5.0, "Take Profit ATR Multiplier", group=grp_risk)
+risk_per_trade = input.float(2.0, "Risk Per Trade %", minval=0.5, maxval=10, group=grp_risk)
+
+grp_short = "Short Control"
+short_enabled      = input.bool(true, "Enable Short Signals", group=grp_short)
+short_bear_bars    = input.int(20, "Bars Below SMA200 Required", minval=5, maxval=100, group=grp_short)
+
+grp_cool = "Cooldown"
+cooldown_bars = input.int(10, "Bars Between Signals", minval=0, maxval=50, group=grp_cool)
+
+// =============================================================================
+// HELPER
+// =============================================================================
+
+_wsa(src, length, weight) =>
+    s   = 0.0
+    ma  = 0.0
+    out = 0.0
+    s   := nz(s[1]) - nz(src[length]) + src
+    ma  := na(src[length]) ? na : s / length
+    out := na(out[1]) ? ma : (src * weight + out[1] * (length - weight)) / length
+    out
+
+// =============================================================================
+// CALCULATIONS — identical to v2
+// =============================================================================
+
+ema9   = ta.ema(close, ema_fast)
+ema21  = ta.ema(close, ema_mid)
+ema50  = ta.ema(close, ema_slow)
+sma200 = ta.sma(close, sma_200)
+
+rsi_val = ta.rsi(close, rsi_len)
+[macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+[st_line, st_dir] = ta.supertrend(st_factor, st_atr_len)
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+
+vwap_val = ta.vwap(hlc3)[1]
+
+tenkan   = (ta.highest(high, ichi_tenkan)   + ta.lowest(low, ichi_tenkan))   / 2
+kijun    = (ta.highest(high, ichi_kijun)    + ta.lowest(low, ichi_kijun))    / 2
+senkou_a = (tenkan + kijun) / 2
+senkou_b = (ta.highest(high, ichi_senkou_b) + ta.lowest(low, ichi_senkou_b)) / 2
+cloud_top    = math.max(senkou_a[26], senkou_b[26])
+cloud_bottom = math.min(senkou_a[26], senkou_b[26])
+
+vol_ma    = ta.sma(volume, vol_ma_len)
+vol_spike = volume > vol_ma * vol_spike_mult
+
+atr_val = ta.atr(14)
+
+htf_ema   = request.security(syminfo.tickerid, htf_tf, ta.ema(close, htf_ema_len)[1], lookahead=barmerge.lookahead_off)
+htf_close = request.security(syminfo.tickerid, htf_tf, close[1],                      lookahead=barmerge.lookahead_off)
+htf_bullish = htf_close > htf_ema
+htf_bearish = htf_close < htf_ema
+
+swing_high = ta.highest(high, 50)
+swing_low  = ta.lowest(low,   50)
+fib_range  = swing_high - swing_low
+fib_382 = swing_high - fib_range * 0.382
+fib_500 = swing_high - fib_range * 0.500
+fib_618 = swing_high - fib_range * 0.618
+near_fib = (close <= fib_618 * 1.01 and close >= fib_618 * 0.99) or
+           (close <= fib_500 * 1.01 and close >= fib_500 * 0.99) or
+           (close <= fib_382 * 1.01 and close >= fib_382 * 0.99)
+
+bff_pct  = (close - ta.lowest(low, 27)) / (ta.highest(high, 27) - ta.lowest(low, 27)) * 100
+bff_wsa1 = _wsa(bff_pct, 5, 1)
+fund_flow_trend = (3 * bff_wsa1 - 2 * _wsa(bff_wsa1, 3, 1) - 50) * 1.032 + 50
+bff_typical  = (2 * close + high + low + open) / 5
+bull_bear_line = ta.ema((bff_typical - ta.lowest(low, 34)) / (ta.highest(high, 34) - ta.lowest(low, 34)) * 100, 13)
+banker_entry = ta.crossover(fund_flow_trend, bull_bear_line) and bull_bear_line < 25
+
+bars_since_cross_up   = ta.barssince(ta.crossover(macd_line, signal_line)[1])
+bars_since_cross_down = ta.barssince(ta.crossunder(macd_line, signal_line)[1])
+macd_div_bull = (close[bars_since_cross_up + 1] > close) and
+               (macd_line > macd_line[bars_since_cross_up + 1]) and
+               ta.crossover(macd_line, signal_line)
+macd_div_bear = (close[bars_since_cross_down + 1] < close) and
+               (macd_line[bars_since_cross_down + 1] > macd_line) and
+               ta.crossunder(macd_line, signal_line)
+
+var int bars_below_sma200 = 0
+bars_below_sma200 := close < sma200 ? bars_below_sma200 + 1 : 0
+bear_market = bars_below_sma200 >= short_bear_bars
+short_allowed = short_enabled and bear_market
+
+var int bars_since_signal = 100
+bars_since_signal := bars_since_signal + 1
+cooldown_ok = bars_since_signal >= cooldown_bars
+
+// =============================================================================
+// CONFLUENCE SCORES — identical to v2
+// =============================================================================
+
+ema_bull = ema9 > ema21 and ema21 > ema50 and close > sma200
+ema_bear = ema9 < ema21 and ema21 < ema50 and close < sma200
+
+rsi_bull = ta.crossover(rsi_val, rsi_os)  or (rsi_val > 40 and rsi_val < 65 and rsi_val > rsi_val[1])
+rsi_bear = ta.crossunder(rsi_val, rsi_ob) or (rsi_val < 60 and rsi_val > 35 and rsi_val < rsi_val[1])
+
+macd_bull = macd_hist > 0 and macd_hist > macd_hist[1]
+macd_bear = macd_hist < 0 and macd_hist < macd_hist[1]
+
+st_bull = st_dir < 0
+st_bear = st_dir > 0
+
+bb_bull = close < bb_mid and close > bb_lower and close > close[1]
+bb_bear = close > bb_mid and close < bb_upper and close < close[1]
+
+vi_bull = close > vwap_val and close > cloud_top
+vi_bear = close < vwap_val and close < cloud_bottom
+
+fib_bull = near_fib and close > close[1]
+fib_bear = near_fib and close < close[1]
+
+bull_score = (ema_bull      ? 1 : 0) + (rsi_bull      ? 1 : 0) + (macd_bull     ? 1 : 0) +
+             (st_bull       ? 1 : 0) + (bb_bull       ? 1 : 0) + (vi_bull       ? 1 : 0) +
+             (fib_bull      ? 1 : 0) + (banker_entry  ? 1 : 0) + (macd_div_bull ? 1 : 0)
+
+bear_score = (ema_bear      ? 1 : 0) + (rsi_bear      ? 1 : 0) + (macd_bear     ? 1 : 0) +
+             (st_bear       ? 1 : 0) + (bb_bear       ? 1 : 0) + (vi_bear       ? 1 : 0) +
+             (fib_bear      ? 1 : 0) + (macd_div_bear ? 1 : 0)
+
+// =============================================================================
+// SIGNALS — identical to v2
+// =============================================================================
+
+long_signal  = bull_score >= min_confluence and vol_spike and htf_bullish and cooldown_ok
+short_signal = bear_score >= min_confluence and vol_spike and htf_bearish and cooldown_ok and short_allowed
+
+close_long  = bear_score >= 3 or ta.crossunder(ema9, ema50) or st_dir > 0
+close_short = bull_score >= 3 or ta.crossover(ema9, ema50) or st_dir < 0
+
+if long_signal or short_signal
+    bars_since_signal := 0
+
+// =============================================================================
+// STRATEGY EXECUTION — identical to v2
+// =============================================================================
+
+var bool in_long = false
+var bool in_short = false
+
+if long_signal and not in_long
+    sl = close - atr_val * sl_atr_mult
+    tp = close + atr_val * tp_atr_mult
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=sl, limit=tp)
+    in_long := true
+    in_short := false
+
+if short_signal and not in_short
+    sl = close + atr_val * sl_atr_mult
+    tp = close - atr_val * tp_atr_mult
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=sl, limit=tp)
+    in_short := true
+    in_long := false
+
+if close_long and in_long
+    strategy.close("Long")
+    in_long := false
+
+if close_short and in_short
+    strategy.close("Short")
+    in_short := false
+
+// =============================================================================
+// CHART VALIDATION TABLE — shows setup info to prevent errors
+// =============================================================================
+
+// Count total bars on chart
+var int total_bars = 0
+total_bars += 1
+
+// Detect chart setup
+is_daily = timeframe.isdaily
+tf_label = timeframe.period
+exchange = syminfo.prefix
+symbol   = syminfo.ticker
+full_id  = syminfo.tickerid
+
+var table v = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 70), border_width=1)
+if barstate.islast
+    // Row 0: Test label
+    table.cell(v, 0, 0, "TEST",      text_color=color.yellow, text_size=size.normal, bgcolor=color.new(color.yellow, 85))
+    table.cell(v, 1, 0, "v2 CTRL",   text_color=color.yellow, text_size=size.normal, bgcolor=color.new(color.yellow, 85))
+
+    // Row 1: Timeframe validation
+    table.cell(v, 0, 1, "Timeframe", text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 1, tf_label,    text_color=is_daily ? color.lime : color.red, text_size=size.small,
+               bgcolor=is_daily ? na : color.new(color.red, 70))
+
+    // Row 2: Exchange
+    table.cell(v, 0, 2, "Exchange",  text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 2, exchange,    text_color=color.aqua, text_size=size.small)
+
+    // Row 3: Symbol
+    table.cell(v, 0, 3, "Symbol",    text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 3, symbol,      text_color=color.aqua, text_size=size.small)
+
+    // Row 4: Full ticker ID
+    table.cell(v, 0, 4, "Ticker ID", text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 4, full_id,     text_color=color.gray, text_size=size.tiny)
+
+    // Row 5: Data depth
+    table.cell(v, 0, 5, "Bars",      text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 5, str.tostring(total_bars), text_color=total_bars >= 500 ? color.lime : color.yellow, text_size=size.small)
+
+    // Row 6: HTF filter status
+    table.cell(v, 0, 6, "HTF D200",  text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 6, htf_bullish ? "BULL" : "BEAR", text_color=htf_bullish ? color.lime : color.red, text_size=size.small)
+
+    // Row 7: Bull/Bear scores
+    table.cell(v, 0, 7, "Bull/Bear", text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 7, str.tostring(bull_score) + "/" + str.tostring(bear_score), text_color=color.white, text_size=size.small)
+
+    // Row 8: Vol spike
+    table.cell(v, 0, 8, "Vol Spike", text_color=color.white, text_size=size.small)
+    table.cell(v, 1, 8, vol_spike ? "YES" : "NO", text_color=vol_spike ? color.lime : color.gray, text_size=size.small)
+
+    // Row 9: Warning if wrong TF
+    if not is_daily
+        table.cell(v, 0, 9, "⚠ WRONG", text_color=color.red, text_size=size.normal, bgcolor=color.new(color.red, 70))
+        table.cell(v, 1, 9, "USE DAILY", text_color=color.red, text_size=size.normal, bgcolor=color.new(color.red, 70))
+    else
+        table.cell(v, 0, 9, "✓ SETUP", text_color=color.lime, text_size=size.small)
+        table.cell(v, 1, 9, "OK",      text_color=color.lime, text_size=size.small)
+
+// Visuals
+plot(ema9,   "EMA 9",   color=color.new(color.lime,   30), linewidth=1)
+plot(ema21,  "EMA 21",  color=color.new(color.yellow, 30), linewidth=1)
+plot(ema50,  "EMA 50",  color=color.new(color.orange, 30), linewidth=2)
+plot(sma200, "SMA 200", color=color.new(color.red,    30), linewidth=2)
+plot(st_line, "Supertrend", color=st_dir < 0 ? color.green : color.red, linewidth=2, style=plot.style_linebr)
+
+plotshape(long_signal and not in_long[1], "BUY", shape.triangleup, location.belowbar, color.lime, size=size.normal)
+plotshape(short_signal and not in_short[1], "SELL", shape.triangledown, location.abovebar, color.red, size=size.normal)
+plotshape((close_long and in_long[1]) or (close_short and in_short[1]), "CLOSE", shape.xcross, location.belowbar, color.yellow, size=size.small)
+bgcolor(bear_market and short_enabled ? color.new(color.red, 95) : na, title="Bear Market Zone")

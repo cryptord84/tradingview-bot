@@ -14,6 +14,7 @@ from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
 from app import state
+from app.services.ngrok_monitor import get_ngrok_monitor
 
 logger = logging.getLogger("bot.dashboard")
 
@@ -261,25 +262,69 @@ async def system_status():
     else:
         results["telegram"] = {"ok": False, "label": "Telegram Bot", "detail": "disabled or no token"}
 
-    # 7. NewsAPI
+    # 7. News providers (with fallback)
     news_cfg = get("news")
-    news_key = news_cfg.get("newsapi_key", "")
-    if news_key:
-        try:
-            async with httpx.AsyncClient(timeout=8) as client:
-                resp = await client.get(
-                    "https://newsapi.org/v2/top-headlines",
-                    params={"country": "us", "pageSize": 1, "apiKey": news_key},
-                )
-                ok = resp.status_code == 200
-                results["news"] = {"ok": ok, "label": "NewsAPI", "detail": f"HTTP {resp.status_code}"}
-        except Exception as e:
-            results["news"] = {"ok": False, "label": "NewsAPI", "error": err(e)}
-    else:
-        results["news"] = {"ok": False, "label": "NewsAPI", "detail": "no key configured"}
+    newsapi_key = news_cfg.get("newsapi_key", "")
+    tavily_key = news_cfg.get("tavily_api_key", "")
+    preferred = news_cfg.get("provider", "newsapi")
+    news_ok = False
+
+    async with httpx.AsyncClient(timeout=8) as client:
+        # Try preferred provider first
+        providers = []
+        if preferred == "newsapi":
+            if newsapi_key:
+                providers.append(("NewsAPI", "https://newsapi.org/v2/top-headlines",
+                                  {"country": "us", "pageSize": 1, "apiKey": newsapi_key}))
+            if tavily_key:
+                providers.append(("Tavily", "https://api.tavily.com/search", None))
+        else:
+            if tavily_key:
+                providers.append(("Tavily", "https://api.tavily.com/search", None))
+            if newsapi_key:
+                providers.append(("NewsAPI", "https://newsapi.org/v2/top-headlines",
+                                  {"country": "us", "pageSize": 1, "apiKey": newsapi_key}))
+
+        for name, url, params in providers:
+            try:
+                if name == "Tavily":
+                    resp = await client.post(url, json={
+                        "api_key": tavily_key, "query": "crypto", "max_results": 1, "search_depth": "basic"
+                    })
+                else:
+                    resp = await client.get(url, params=params)
+                if resp.status_code == 200:
+                    results["news"] = {"ok": True, "label": name, "detail": "active"}
+                    news_ok = True
+                    break
+                else:
+                    results["news"] = {"ok": False, "label": name, "detail": f"HTTP {resp.status_code}"}
+            except Exception as e:
+                results["news"] = {"ok": False, "label": name, "error": err(e)}
+
+        if not providers:
+            results["news"] = {"ok": False, "label": "News", "detail": "no keys configured"}
+
+    # 8. ngrok tunnel
+    ngrok = get_ngrok_monitor()
+    ngrok_status = ngrok.get_status()
+    results["ngrok"] = {
+        "ok": ngrok_status["online"],
+        "label": "ngrok Tunnel",
+        "detail": ngrok_status["current_url"] or "not detected",
+    }
 
     return {
         "components": results,
         "bot_active": state.is_active(),
         "uptime": state.get_uptime(),
+        "ngrok": ngrok_status,
     }
+
+
+@router.get("/ngrok")
+async def get_ngrok_status():
+    """Get current ngrok tunnel status with URL history."""
+    ngrok = get_ngrok_monitor()
+    status = await ngrok.check_once()
+    return status

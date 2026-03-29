@@ -17,6 +17,7 @@ from app.config import load_config, get
 from app.database import init_db
 from app.routers import webhook, dashboard
 from app.services.telegram_commands import TelegramCommandHandler
+from app.services.ngrok_monitor import get_ngrok_monitor
 from app.utils.csv_backup import run_daily_backup
 
 # --- Logging Setup ---
@@ -59,6 +60,10 @@ async def lifespan(app: FastAPI):
     # Start Telegram command listener
     _tg_handler = TelegramCommandHandler()
     tg_task = asyncio.create_task(_tg_handler.run())
+
+    # Start ngrok URL monitor
+    ngrok = get_ngrok_monitor()
+    ngrok_task = ngrok.start()
     logger.info("Bot initialized successfully")
 
     yield
@@ -67,6 +72,7 @@ async def lifespan(app: FastAPI):
     if _tg_handler:
         await _tg_handler.stop()
     tg_task.cancel()
+    await ngrok.stop()
 
 
 app = FastAPI(

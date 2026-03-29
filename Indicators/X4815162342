@@ -1,0 +1,417 @@
+//@version=5
+indicator(title='X4815162342', overlay=true)
+
+source = close
+hilow = (high - low) * 100
+openclose = (close - open) * 100
+vol = volume / hilow
+spreadvol = openclose * vol
+VPT = spreadvol + ta.cum(spreadvol)
+window_len = 28
+
+v_len = 14
+price_spread = ta.stdev(high - low, window_len)
+
+v = spreadvol + ta.cum(spreadvol)
+smooth = ta.sma(v, v_len)
+v_spread = ta.stdev(v - smooth, window_len)
+shadow = (v - smooth) / v_spread * price_spread
+
+out = shadow > 0 ? high + shadow : low + shadow
+//
+src = out
+src1 = open
+src2 = low
+src3 = high
+tf = input(15)
+len = timeframe.isintraday and timeframe.multiplier >= 1 ? tf / timeframe.multiplier * 7 : timeframe.isintraday and timeframe.multiplier < 60 ? 60 / timeframe.multiplier * 24 * 7 : 7
+
+c = ta.ema(src, len)
+//plot(c, color=color.new(color.red, 0))
+o = ta.ema(src1, len)
+//plot(o, color=color.new(color.blue, 0))
+//h = ema(src3,len)
+//l=ema(src2,len)
+//
+col = c > o ? color.lime : color.orange
+vis = true
+vl = c
+ll = o
+//m1 = //plot(vl, color=col, linewidth=1, transp=60)
+//m2 = //plot(vis ? ll : na, color=col, linewidth=2, transp=80)
+
+//fill(m1, m2, color=col, transp=70)
+//
+
+vpt = ta.ema(out, len)
+
+// INPUTS //
+st_mult = input.float(1.9, title='SuperTrend Multiplier', minval=0, maxval=100, step=0.01)
+st_period = input.int(7, title='SuperTrend Period', minval=1)
+
+// CALCULATIONS //
+up_lev = vpt - st_mult * ta.atr(st_period)
+dn_lev = vpt + st_mult * ta.atr(st_period)
+
+up_trend = 0.0
+up_trend := close[1] > up_trend[1] ? math.max(up_lev, up_trend[1]) : up_lev
+
+down_trend = 0.0
+down_trend := close[1] < down_trend[1] ? math.min(dn_lev, down_trend[1]) : dn_lev
+
+// Calculate trend var
+trend = 0
+trend := close > down_trend[1] ? 1 : close < up_trend[1] ? -1 : nz(trend[1], 1)
+
+// Calculate SuperTrend Line
+st_line = trend == 1 ? up_trend : down_trend
+
+// Plotting
+//plot(st_line[1], color=trend == 1 ? color.green : color.red, style=plot.style_cross, linewidth=2, title='SuperTrend')
+buy = ta.crossover(close, st_line) and close > o
+sell = ta.crossunder(close, st_line) and close < o
+//plotshape(crossover( close, st_line), location = location.belowbar, color = color.green,size=size.tiny)
+//plotshape(crossunder(close, st_line), location = location.abovebar, color = color.red,size=size.tiny)
+plotshape(buy, title='buy', text='Buy', color=color.new(color.green, 0), style=shape.labelup, location=location.belowbar, size=size.small, textcolor=color.new(color.white, 0))  //plot for buy icon
+plotshape(sell, title='sell', text='Sell', color=color.new(color.red, 0), style=shape.labeldown, location=location.abovebar, size=size.small, textcolor=color.new(color.white, 0))  //plot for sell icon
+
+
+//
+multiplier = input.float(title='TP', defval=2, minval=1)
+src5 = close
+len5 = input.int(title='TP length', defval=150, minval=1)
+offset = 0
+
+calcSlope(src5, len5) =>
+    sumX = 0.0
+    sumY = 0.0
+    sumXSqr = 0.0
+    sumXY = 0.0
+    for i = 1 to len5 by 1
+        val = src5[len5 - i]
+        per = i + 1.0
+        sumX += per
+        sumY += val
+        sumXSqr += per * per
+        sumXY += val * per
+        sumXY
+
+
+    slope = (len5 * sumXY - sumX * sumY) / (len5 * sumXSqr - sumX * sumX)
+    average = sumY / len5
+    intercept = average - slope * sumX / len5 + slope
+    [slope, average, intercept]
+
+var float tmp = na
+[s, a, i] = calcSlope(src5, len5)
+
+vwap1 = i + s * (len5 - offset)
+sdev = ta.stdev(close, len5)
+dev = multiplier * sdev
+top = vwap1 + dev
+bott = vwap1 - dev
+
+//
+z1 = vwap1 + dev
+x1 = vwap1 - dev
+
+low1 = ta.crossover(close, x1)
+high1 = ta.crossunder(close, z1)
+
+plotshape(low1, title='low', text='TP', color=color.new(color.red, 0), style=shape.labelup, location=location.belowbar, size=size.small, textcolor=color.new(color.white, 0))  //plot for buy icon
+plotshape(high1, title='high', text='TP', color=color.new(color.green, 0), style=shape.labeldown, location=location.abovebar, size=size.small, textcolor=color.new(color.white, 0))  //plot for sell icon
+
+
+/////// Alerts /////
+alertcondition(buy, title='buy')
+alertcondition(sell, title='sell')
+alertcondition(low1, title='sell tp')
+alertcondition(high1, title='buy tp')
+
+ATRlength = input.int(200, minval=1)
+ATRMult = input.float(2.272, minval=1)
+
+ATR = ta.rma(ta.tr(true), ATRlength)
+
+len6 = input.int(175, minval=1, title='EMA Length')
+src6 = input(low, title='Source')
+out6 = ta.ema(src6, len6)
+plot(out6, title='EMA', color=#FFFFFF)
+
+//emaup = out + ATR * ATRMult
+//emadw = out - ATR * ATRMult
+
+//plot(emaup, title='EMAUP')
+//plot(emadw, title='EMADW')
+
+conversionPeriods = input.int(200, minval=1)
+basePeriods = input.int(26, minval=1)
+laggingSpan2Periods = input.int(52, minval=1)
+displacement = input.int(26, minval=1)
+
+donchian(len) =>
+    math.avg(ta.lowest(len), ta.highest(len))
+
+conversionLine = donchian(conversionPeriods)
+baseLine = donchian(basePeriods)
+leadLine1 = math.avg(conversionLine, baseLine)
+leadLine2 = donchian(laggingSpan2Periods)
+
+//plot(conversionLine, title='Conversion Line')
+//plot(baseLine, linewidth=2, title='Base Line', transp=5)
+
+
+//p3 = plot(leadLine1, offset=displacement, title='Lead 1', transp=85)
+//p4 = plot(leadLine2, offset=displacement, title='Lead 2', transp=85)
+
+//*****CDC-Actionzone**************************************************//
+
+//longest = ta.ema(close, 175)
+//plot(longest)
+
+xsrc = input.source(title='Source Data', defval=close)
+xprd1 = input.int(title='Fast EMA period', defval=12)
+xprd2 = input.int(title='Slow EMA period', defval=26)
+xsmooth = input.int(title='Smoothing period (1 = no smoothing)', defval=1)
+fillSW = input.bool(title='Paint Bar Colors', defval=true)
+fastSW = input.bool(title='Show fast moving average line', defval=true)
+slowSW = input.bool(title='Show slow moving average line', defval=true)
+labelSwitch = input.bool(title='Turn on assistive text', defval=true)
+plotSigsw = input.bool(title='Plot Buy/Sell Signals? ', defval=true)
+plotRibsw = input.bool(title='Plot Buy/Sell Ribbon', defval=false)
+plotRibbonPos = input.string(title='Ribbon Position', options=['Top', 'Bottom'], defval='Top')
+
+xfixtf = input.bool(title='** Use Fixed time frame Mode (advanced) **', defval=false)
+xtf = input.timeframe(title='** Fix chart to which time frame ? **)', defval='D')
+
+plotSig2sw = input.bool(title='Plot momentum based Buy/Sell Signals? ', defval=false)
+plotSig2lv = input.int(title='Set signal threshold (higher = stricter)', defval=1, minval=0, maxval=1)
+
+//****************************************************************************//
+//Calculate Indicators
+
+f_secureSecurity(_symbol, _res, _src) => request.security(_symbol, _res, _src[1], lookahead = barmerge.lookahead_on) // Using f_secureSecurity to avoid repainting
+
+xPrice = ta.ema(xsrc, xsmooth)
+
+ 
+FastMA = xfixtf ? 
+ ta.ema(f_secureSecurity(syminfo.tickerid, xtf, ta.ema(xsrc, xprd1)), xsmooth) 
+ :
+ ta.ema(xPrice, xprd1)
+
+
+SlowMA = xfixtf ?
+ ta.ema(f_secureSecurity(syminfo.tickerid, xtf, ta.ema(xsrc, xprd2)), xsmooth)
+ : 
+ ta.ema(xPrice, xprd2)
+
+Bull = FastMA > SlowMA
+Bear = FastMA < SlowMA
+
+//****************************************************************************//
+// Define Color Zones
+
+Green = Bull and xPrice > FastMA  // Buy
+Blue = Bear and xPrice > FastMA and xPrice > SlowMA  //Pre Buy 2
+LBlue = Bear and xPrice > FastMA and xPrice < SlowMA  //Pre Buy 1
+
+Red = Bear and xPrice < FastMA  // Sell
+Orange = Bull and xPrice < FastMA and xPrice < SlowMA  // Pre Sell 2
+Yellow = Bull and xPrice < FastMA and xPrice > SlowMA  // Pre Sell 1
+
+//****************************************************************************//
+// Display color on chart
+
+
+bColor = Green ? color.green :
+ Blue ? color.blue : 
+ LBlue ? color.aqua :
+ Red ? color.red : 
+ Orange ? color.orange : 
+ Yellow ? color.yellow : 
+ color.black
+barcolor(color=fillSW ? bColor : na)
+
+//****************************************************************************//
+// Display MA lines
+
+FastL = plot(fastSW ? FastMA : na, 'Fast EMA', color=color.new(color.red, 0), style = xfixtf ? plot.style_stepline : plot.style_line)
+SlowL = plot(slowSW ? SlowMA : na, 'Slow EMA', color=color.new(color.blue, 0), style = xfixtf ? plot.style_stepline : plot.style_line)
+fillcolor = Bull ? color.new(color.green,90) : Bear ? color.new(color.red,90) : color.new(color.black,90) // fillcolor = Bull ? color.green : Bear ? color.red : color.black
+fill(FastL, SlowL, fillcolor) // fill(FastL, SlowL, fillcolor, transp=90)
+
+//****************************************************************************//
+// Define Buy and Sell condition
+// This is only for thebasic usage of CDC Actionzone (EMA Crossover) 
+// ie. Buy on first green bar and sell on first red bar
+
+buycond = Green and Green[1] == 0
+sellcond = Red and Red[1] == 0
+
+bullish = ta.barssince(buycond) < ta.barssince(sellcond)
+bearish = ta.barssince(sellcond) < ta.barssince(buycond)
+
+buy1 = bearish[1] and buycond
+sell1 = bullish[1] and sellcond
+
+bColor_BullBear = bullish ? color.green : bearish ? color.red : color.black
+
+//****************************************************************************//
+// Plot Buy and Sell point on chart
+
+plotshape(plotSigsw ? buy : na,
+ style=shape.circle,
+ title='Buy Signal', 
+ location=location.belowbar, 
+ color=color.new(color.green, 0))
+plotshape(plotSigsw ? sell : na, 
+ style=shape.circle, 
+ title='Sell Signal', 
+ location=location.abovebar, 
+ color=color.new(color.red, 0))
+
+// Display Buy/Sell Ribbon
+
+
+plotshape(plotRibsw ? plotRibbonPos == 'Top' ? close : na : na, 
+ style=shape.square, 
+ title='Buy/Sell Ribbon', 
+ location=location.top, 
+ color=bColor_BullBear)
+
+plotshape(plotRibsw ? plotRibbonPos == 'Bottom' ? close : na : na,
+ style=shape.square, 
+ title='Buy/Sell Ribbon', 
+ location=location.bottom, 
+ color=bColor_BullBear)
+
+
+//****************************************************************************//
+// Label
+
+labelstyle = close > SlowMA ? label.style_label_down : label.style_label_up
+labelyloc = close > SlowMA ? yloc.abovebar : yloc.belowbar
+labeltcolor = buy1 ? color.black : 
+ sell1 ? color.white :
+ close > close[1] ? color.green : 
+ color.red
+labelbgcolor = buy1 ? color.green : sell ? color.red : color.silver
+labeltext = buy1 ? 'BUY next bar\n' : sell ? 'SELL next bar\n' : ' '
+trendText = bullish ? 'bullish' : bearish ? 'bearish' : 'sideways'
+
+
+//l1 = label.new(bar_index, na, //ชุดคำสั่งนี้ คือ ป้ายแจ้งเตือน Bull or Bear และราคา
+// text=labeltext + syminfo.ticker + ' ' + str.tostring(close) + ' ' + syminfo.currency + '\n currently in a ' + trendText + ' trend \n', 
+// color=labelbgcolor, 
+// textcolor=labeltcolor, 
+// yloc=labelyloc, 
+// style=labelstyle)
+// label.delete(labelSwitch ? l1[1] : l1)
+
+// Momentum Signal using StochRSI
+
+// Adds a momentum based signal following trends to the script
+// Default is hidden, only use with caution
+// Parameters for STOCH RSI is hard-coded to avoid cluttering the input screen further
+// If you need to change anything, make a copy of the code and change it.
+// Inputs are commented out, to enable them comment out the hard coded variables first!
+
+// fixed inputs //
+
+smoothK = 3
+smoothD = 3
+RSIlen = 14
+STOlen = 14
+SRsrc = close
+OSlevel = 30
+OBlevel = 70
+
+// User inputs // // COMMENT ABOVE VARIABLES FIRST!! 
+
+// smoothK = input(3,"StochRSI smooth K",type=input.integer,minval=1)
+// smoothD = input(3,"StochRSI smooth D",type=input.integer,minval=1)
+// RSIlen = input(14,"RSI length",type=input.integer,minval=1)
+// STOlen = input(14,"Stochastic length",type=input.integer,minval=1)
+// SRsrc = input(close,"Source for StochasticRSI",type=input.source)
+// OSlevel = input(30,"Oversold Threshold",type=input.float,minval=0.00)
+// OBlevel = input(70,"Oversold Threshold",type=input.float,minval=0.00)
+
+// calculations //
+rsi1 = ta.rsi(SRsrc, RSIlen)
+k = ta.sma(ta.stoch(rsi1, rsi1, rsi1, STOlen), smoothK)
+d = ta.sma(k, smoothD)
+
+// storsiBuySig =  if bullish
+//     if (d < OSlevel and crossover(k,d))
+//         3
+//     else if crossover(k,OSlevel)
+//         2
+//     else if d > OSlevel and crossover(k,d)
+//         1
+//     else
+//         0
+// else
+//     0
+
+crossover_1 = ta.crossover(k, d)
+crossover_2 = ta.crossover(k, d)
+iff_1 = d > OSlevel and crossover_2 ?
+ 1 : 0
+iff_2 = d < OSlevel and crossover_1 ?
+ 2 : iff_1
+storsiBuySig = bullish ? iff_2 : 0
+
+crossunder_1 = ta.crossunder(k, d)
+crossunder_2 = ta.crossunder(k, d)
+iff_3 = d < OBlevel and crossunder_2 ? 
+ 1 : 0
+iff_4 = d > OBlevel and crossunder_1 ? 
+ 2 : iff_3
+storsiSellSig = bearish ? iff_4 : 0
+
+plotshape(plotSig2sw ? storsiBuySig > plotSig2lv ? storsiBuySig : na : na, 
+ 'Buy more signals', style=shape.triangleup, 
+  location=location.belowbar, color=color.new(color.teal, 0))
+plotshape(plotSig2sw ? storsiSellSig > plotSig2lv ? storsiSellSig : na : na,
+ 'Sell more signals', style=shape.triangledown, 
+  location=location.abovebar, color=color.new(color.orange, 0))
+
+
+//****************************************************************************//
+// Alert conditions
+
+alertcondition(buy, 
+ title='*Buy Alert', 
+ message='Buy {{exchange}}:{{ticker}}')
+
+alertcondition(sell,
+ title='*Sell Alert',
+ message='Sell {{exchange}}:{{ticker}}')
+
+alertcondition(bullish,
+ title='is Bullish')
+
+alertcondition(bearish,
+ title='is Bearish')
+
+alertcondition(Green,
+ title='is Green')
+
+alertcondition(Blue, 
+ title='is Blue (Strong Rally)')
+
+alertcondition(LBlue,
+ title='is Light Blue (Rally)')
+
+alertcondition(Red,
+ title='is Red')
+
+alertcondition(Orange, 
+ title='is Orange (Strong Dip)')
+
+alertcondition(Yellow, 
+ title='is Yellow (Dip)')
+
+
+//****************************************************************************//
