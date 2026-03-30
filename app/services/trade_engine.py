@@ -11,6 +11,7 @@ from app.models import WebhookSignal, ClaudeDecision
 from app.services.claude_decision import get_claude_decision
 from app.services.jupiter_client import JupiterClient
 from app.services.news_service import NewsService
+from app.services.kamino_client import KaminoClient
 from app.services.telegram_service import TelegramService
 from app.services.wallet_service import WalletService
 
@@ -28,6 +29,7 @@ class TradeEngine:
         self.wallet = WalletService()
         self.telegram = TelegramService()
         self.news = NewsService()
+        self.kamino = KaminoClient()
         self._running = True
 
     def is_duplicate(self, signal: WebhookSignal) -> bool:
@@ -183,6 +185,25 @@ class TradeEngine:
                 })
                 return result
 
+            # Withdraw from Kamino if needed (auto-withdraw before trade)
+            if self.kamino.enabled and self.kamino.auto_withdraw:
+                try:
+                    position = await self.kamino.get_user_position(self.wallet.public_key)
+                    if position.get("has_position"):
+                        logger.info(f"Withdrawing {position['deposited_usdc']:.2f} USDC from Kamino before trade")
+                        withdraw_result = await self.kamino.withdraw_all(self.wallet.get_keypair())
+                        if withdraw_result.get("success"):
+                            await self.telegram.send_message(
+                                f"Kamino Withdraw: {position['deposited_usdc']:.2f} USDC withdrawn for trade execution"
+                            )
+                            # Brief pause for transaction to finalize
+                            import asyncio
+                            await asyncio.sleep(2)
+                        else:
+                            logger.warning(f"Kamino withdraw failed: {withdraw_result.get('error')}")
+                except Exception as e:
+                    logger.warning(f"Kamino withdraw error (continuing with available balance): {e}")
+
             # Execute swap via Jupiter
             amount_lamports = int(trade_sol * 1_000_000_000)
 
@@ -242,6 +263,21 @@ class TradeEngine:
                 new_balance_sol=new_balance,
             )
 
+            # Auto-deposit idle USDC back to Kamino after trade
+            if self.kamino.enabled and self.kamino.auto_deposit:
+                try:
+                    import asyncio
+                    await asyncio.sleep(3)  # Wait for balances to settle
+                    usdc_balance = await self.wallet.get_usdc_balance()
+                    deposit_result = await self.kamino.deposit_idle(self.wallet.get_keypair(), usdc_balance)
+                    if deposit_result.get("success"):
+                        deposited = deposit_result["amount_usdc"]
+                        await self.telegram.send_message(
+                            f"Kamino Deposit: {deposited:.2f} USDC deposited to earn yield"
+                        )
+                except Exception as e:
+                    logger.warning(f"Kamino auto-deposit after trade failed: {e}")
+
             return result
 
         except Exception as e:
@@ -257,3 +293,4 @@ class TradeEngine:
         await self.wallet.close()
         await self.telegram.close()
         await self.news.close()
+        await self.kamino.close()

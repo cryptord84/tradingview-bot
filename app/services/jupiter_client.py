@@ -9,6 +9,7 @@ from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
 from app.config import get
+from app.database import log_wallet_tx
 
 logger = logging.getLogger("bot.jupiter")
 
@@ -114,10 +115,26 @@ class JupiterClient:
         tx_sig = result.get("result", "")
         logger.info(f"Transaction sent: {tx_sig}")
 
+        # Determine swap direction and amounts for logging
+        out_amount = int(quote.get("outAmount", 0))
+        swap_fee_sol = (5000 + self.priority_fee) / 1_000_000_000  # base + priority fee
+        if input_mint == self.usdc_mint:
+            log_wallet_tx(
+                tx_type="swap", direction="out", amount=amount_lamports / 1_000_000,
+                token="USDC", fee_sol=swap_fee_sol, tx_signature=tx_sig,
+                notes=f"Buy SOL (got {out_amount / 1e9:.4f} SOL)",
+            )
+        else:
+            log_wallet_tx(
+                tx_type="swap", direction="out", amount=amount_lamports / 1_000_000_000,
+                token="SOL", fee_sol=swap_fee_sol, tx_signature=tx_sig,
+                notes=f"Sell SOL (got {out_amount / 1e6:.2f} USDC)",
+            )
+
         return {
             "tx_signature": tx_sig,
             "input_amount": amount_lamports,
-            "output_amount": int(quote.get("outAmount", 0)),
+            "output_amount": out_amount,
             "price_impact": quote.get("priceImpactPct", "0"),
             "route_plan": quote.get("routePlan", []),
         }

@@ -17,7 +17,9 @@ from app.config import load_config, get
 from app.database import init_db
 from app.routers import webhook, dashboard
 from app.services.telegram_commands import TelegramCommandHandler
+from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
+from app.services.wallet_service import WalletService
 from app.utils.csv_backup import run_daily_backup
 
 # --- Logging Setup ---
@@ -64,6 +66,23 @@ async def lifespan(app: FastAPI):
     # Start ngrok URL monitor
     ngrok = get_ngrok_monitor()
     ngrok_task = ngrok.start()
+
+    # Auto-deposit idle USDC into Kamino on startup
+    kamino = KaminoClient()
+    if kamino.enabled and kamino.auto_deposit:
+        try:
+            wallet = WalletService()
+            usdc_balance = await wallet.get_usdc_balance()
+            result = await kamino.deposit_idle(wallet.get_keypair(), usdc_balance)
+            if result.get("success"):
+                logger.info(f"Startup: deposited {result['amount_usdc']:.2f} USDC into Kamino")
+            elif result.get("skipped"):
+                logger.info(f"Startup: Kamino deposit skipped — {result.get('reason')}")
+            await wallet.close()
+        except Exception as e:
+            logger.warning(f"Startup Kamino deposit failed: {e}")
+    await kamino.close()
+
     logger.info("Bot initialized successfully")
 
     yield

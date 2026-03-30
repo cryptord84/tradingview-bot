@@ -271,7 +271,7 @@ main {
 
 .wallet-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1px 1fr 1px 1fr 1px 1fr;
   gap: 20px;
 }
 
@@ -337,7 +337,7 @@ main {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
@@ -391,6 +391,7 @@ main {
 
 /* ── TRADES TABLE ── */
 .card-trades { grid-column: 1 / -1; }
+.card-wallet-log { grid-column: 1 / -1; }
 
 table { width: 100%; border-collapse: collapse; font-size: .72rem; }
 th {
@@ -545,10 +546,10 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-settings,.card-costs { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-settings,.card-costs { grid-column: 1; }
   .settings-columns { grid-template-columns: 1fr; }
-  .wallet-grid { grid-template-columns: 1fr 1fr; }
-  .status-grid { grid-template-columns: repeat(4,1fr); }
+  .wallet-grid { grid-template-columns: 1fr 1px 1fr; }
+  .status-grid { grid-template-columns: repeat(3,1fr); }
   .hero-title { font-size: 2.2rem; }
 }
 </style>
@@ -598,21 +599,67 @@ footer a:hover { color: var(--green); }
 <!-- ── MAIN ── -->
 <main>
 
-  <!-- WALLET -->
-  <div class="card card-wallet" data-label="// WALLET STATUS">
+  <!-- WALLET + YIELD -->
+  <div class="card card-wallet" data-label="// WALLET &amp; YIELD" id="wallet-card">
     <div class="wallet-grid">
       <div class="wallet-item">
         <div class="wallet-item-label">SOL Balance</div>
-        <div class="wallet-item-value" id="w-sol">--</div>
-        <div class="wallet-item-sub" id="w-sol-usd">$-- USD</div>
+        <div class="wallet-item-value" id="w-sol-usd">$--</div>
+        <div class="wallet-item-sub" id="w-sol">-- SOL</div>
       </div>
       <div class="wallet-divider"></div>
       <div class="wallet-item">
-        <div class="wallet-item-label">USDC Balance</div>
-        <div class="wallet-item-value" id="w-usdc">--</div>
-        <div class="wallet-item-sub">USDC · Solana</div>
+        <div class="wallet-item-label">Wallet USDC</div>
+        <div class="wallet-item-value" id="w-usdc">$--</div>
+        <div class="wallet-item-sub">available for trades</div>
       </div>
       <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">Kamino Vault</div>
+        <div class="wallet-item-value" id="w-kamino" style="color:var(--yellow);">$--</div>
+        <div class="wallet-item-sub" id="w-kamino-apy">-- APY · earning yield</div>
+      </div>
+      <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">Total Portfolio</div>
+        <div class="wallet-item-value" id="w-portfolio">$--</div>
+        <div class="wallet-item-sub" id="w-yield-est">est. $--/mo yield</div>
+      </div>
+    </div>
+    <!-- Kamino Controls -->
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--green-dark);display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:12px;align-items:end;font-family:var(--mono);font-size:.65rem;">
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:4px;">TRANSFER MODE</div>
+        <select id="kamino-mode" style="background:#0a0f0a;border:1px solid var(--green-dark);color:var(--green);padding:6px 8px;font-family:var(--mono);font-size:.65rem;width:100%;cursor:pointer;">
+          <option value="deposit">DEPOSIT TO VAULT</option>
+          <option value="withdraw">WITHDRAW FROM VAULT</option>
+        </select>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:4px;">AMOUNT TYPE</div>
+        <select id="kamino-type" style="background:#0a0f0a;border:1px solid var(--green-dark);color:var(--green);padding:6px 8px;font-family:var(--mono);font-size:.65rem;width:100%;cursor:pointer;">
+          <option value="percent">PERCENTAGE %</option>
+          <option value="amount">USD AMOUNT $</option>
+          <option value="all">ALL</option>
+        </select>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;margin-bottom:4px;">VALUE</div>
+        <input id="kamino-value" type="number" value="80" min="1" step="1"
+          style="background:#0a0f0a;border:1px solid var(--green-dark);color:var(--green);padding:6px 8px;font-family:var(--mono);font-size:.65rem;width:100%;" />
+      </div>
+      <div>
+        <button onclick="executeKamino()" id="kamino-btn"
+          style="background:var(--green-dark);border:1px solid var(--green);color:var(--green);padding:6px 16px;font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;white-space:nowrap;">
+          [ EXECUTE ]
+        </button>
+      </div>
+      <div style="grid-column:1/-1;">
+        <div id="kamino-result" style="color:var(--green-dim);font-size:.6rem;letter-spacing:1px;min-height:1.2em;">--</div>
+      </div>
+    </div>
+    <!-- Trading stats row -->
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--green-dark);display:grid;grid-template-columns:1fr 1px 1fr 1px 1fr;gap:20px;">
       <div class="wallet-item">
         <div class="wallet-item-label">Today P&amp;L</div>
         <div class="wallet-item-value" id="w-today-pnl">$--</div>
@@ -623,6 +670,12 @@ footer a:hover { color: var(--green); }
         <div class="wallet-item-label">Win Rate</div>
         <div class="wallet-item-value" id="w-winrate">--%</div>
         <div class="wallet-item-sub" id="w-wl">-- W &nbsp;/&nbsp; -- L &nbsp;·&nbsp; -- trades</div>
+      </div>
+      <div class="wallet-divider"></div>
+      <div class="wallet-item">
+        <div class="wallet-item-label">Auto Mode</div>
+        <div class="wallet-item-value" id="w-auto-mode" style="font-size:1.4rem;">--</div>
+        <div class="wallet-item-sub" id="w-kamino-util">-- utilization</div>
       </div>
     </div>
   </div>
@@ -690,6 +743,32 @@ footer a:hover { color: var(--green); }
           </tr>
         </thead>
         <tbody id="trades-table"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- WALLET TRANSACTION LOG -->
+  <div class="card card-wallet-log" data-label="// WALLET TRANSACTIONS">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Transaction History</span>
+      <button onclick="loadWalletTxLog()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+    </div>
+    <div style="overflow-x:auto;max-height:280px;overflow-y:auto;">
+      <table>
+        <thead style="position:sticky;top:0;background:#000500;">
+          <tr>
+            <th>Timestamp</th>
+            <th>Type</th>
+            <th>Direction</th>
+            <th>Amount</th>
+            <th>Token</th>
+            <th>Fee (SOL)</th>
+            <th>Status</th>
+            <th>Notes</th>
+            <th>TX</th>
+          </tr>
+        </thead>
+        <tbody id="wallet-tx-table"></tbody>
       </table>
     </div>
   </div>
@@ -874,9 +953,17 @@ async function loadStats() {
 
     setText('sol-price-hero', `$${(d.sol_price_usd||0).toFixed(2)}`);
 
-    setText('w-sol', `${(d.wallet_balance_sol||0).toFixed(4)}`);
-    setText('w-sol-usd', `$${((d.wallet_balance_sol||0) * (d.sol_price_usd||0)).toFixed(2)} USD`);
-    setText('w-usdc', `$${(d.wallet_balance_usdc||0).toFixed(2)}`);
+    const solBal = d.wallet_balance_sol || 0;
+    const solPrice = d.sol_price_usd || 0;
+    const solUsd = solBal * solPrice;
+    const walletUsdc = d.wallet_balance_usdc || 0;
+    setText('w-sol-usd', `$${solUsd.toFixed(2)}`);
+    setText('w-sol', `${solBal.toFixed(4)} SOL`);
+    setText('w-usdc', `$${walletUsdc.toFixed(2)}`);
+
+    // Total portfolio = SOL USD + wallet USDC + Kamino deposited
+    window._solUsd = solUsd;
+    window._walletUsdc = walletUsdc;
 
     const todayPnl = d.today_pnl_usd || 0;
     setText('w-today-pnl', `${todayPnl >= 0 ? '+' : ''}$${todayPnl.toFixed(2)}`);
@@ -894,7 +981,7 @@ async function loadStats() {
 // ── SYSTEM STATUS ──
 const COMPONENT_ICONS = {
   database: '🗄', wallet: '👛', price_feed: '📈',
-  jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰', ngrok: '🔗'
+  jupiter: '⚡', claude: '🤖', telegram: '📱', news: '📰', kamino: '🏦', ngrok: '🔗'
 };
 
 // Per-component waveform characteristics — each one looks distinct
@@ -906,6 +993,7 @@ const WAVE_PROFILES = {
   claude:     { speed: 0.06, amp: 4,  pattern: 'neural'  },
   telegram:   { speed: 0.09, amp: 5,  pattern: 'pulse'   },
   news:       { speed: 0.05, amp: 4,  pattern: 'sine'    },
+  kamino:     { speed: 0.06, amp: 4,  pattern: 'sine'    },
   ngrok:      { speed: 0.08, amp: 5,  pattern: 'pulse'   },
 };
 
@@ -1119,11 +1207,110 @@ async function loadSystemStatus() {
       setText('ngrok-prev', n.previous_url ? n.previous_url + '/webhook' : 'none');
     }
 
+    // Load Kamino yield data into wallet section
+    try {
+      const kR = await fetch(`${API}/api/kamino`);
+      const k = await kR.json();
+      const earn = k.earnings_usdc || 0;
+      const earnStr = earn >= 0 ? `+$${earn.toFixed(4)}` : `-$${Math.abs(earn).toFixed(4)}`;
+      setText('w-kamino', `$${k.deposited_usdc.toFixed(2)}`);
+      setText('w-kamino-apy', `${k.supply_apy.toFixed(2)}% APY · ${earnStr} earned`);
+      setText('w-yield-est', 'est. $' + k.monthly_yield_est.toFixed(4) + '/mo yield');
+      // Total portfolio = SOL value + wallet USDC + Kamino deposited
+      const portfolio = (window._solUsd || 0) + (window._walletUsdc || 0) + k.deposited_usdc;
+      setText('w-portfolio', '$' + portfolio.toFixed(2));
+      const autoMode = [];
+      if (k.auto_deposit) autoMode.push('DEP');
+      if (k.auto_withdraw) autoMode.push('WDR');
+      setText('w-auto-mode', autoMode.join('+') || 'OFF');
+      const el = document.getElementById('w-auto-mode');
+      if (el) el.style.color = autoMode.length ? 'var(--green)' : 'var(--red)';
+      setText('w-kamino-util', k.utilization.toFixed(1) + '% pool utilization');
+      // Add Solscan wallet link
+      if (k.wallet_address) {
+        const card = document.getElementById('wallet-card');
+        if (card && !document.getElementById('solscan-link')) {
+          const link = document.createElement('a');
+          link.id = 'solscan-link';
+          link.href = `https://solscan.io/account/${k.wallet_address}`;
+          link.target = '_blank';
+          link.style.cssText = 'position:absolute;top:12px;right:16px;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:1px;text-decoration:none;';
+          link.textContent = `[ ${k.wallet_address.slice(0,6)}...${k.wallet_address.slice(-4)} SOLSCAN ]`;
+          link.onmouseover = () => link.style.color = 'var(--green)';
+          link.onmouseout = () => link.style.color = 'var(--green-dim)';
+          card.style.position = 'relative';
+          card.appendChild(link);
+        }
+      }
+    } catch(e) { console.warn('Kamino data unavailable:', e); }
+
     // Start wave engine if not running
     if (!waveRafId) tickWaves();
 
   } catch(e) { console.error('Status error:', e); }
 }
+
+async function executeKamino() {
+  const mode = document.getElementById('kamino-mode').value;
+  const type = document.getElementById('kamino-type').value;
+  const value = parseFloat(document.getElementById('kamino-value').value);
+  const resultEl = document.getElementById('kamino-result');
+  const btn = document.getElementById('kamino-btn');
+
+  btn.disabled = true;
+  btn.textContent = '[ SENDING... ]';
+  resultEl.style.color = 'var(--yellow)';
+  resultEl.textContent = `Submitting ${mode} to Kamino...`;
+
+  try {
+    const url = `${API}/api/kamino/${mode}`;
+    let body = {};
+
+    if (type === 'all') {
+      body = mode === 'withdraw' ? { all: true } : { percent: 100 };
+    } else if (type === 'percent') {
+      body = { percent: value };
+    } else {
+      body = { amount: value };
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+
+    if (data.success) {
+      resultEl.style.color = 'var(--green)';
+      resultEl.textContent = `${mode.toUpperCase()} $${data.amount_usdc.toFixed(2)} USDC — tx: ${data.tx_signature?.slice(0, 16)}...`;
+      // Refresh wallet data
+      setTimeout(() => { loadSystemStatus(); loadDashboard(); }, 3000);
+    } else {
+      resultEl.style.color = 'var(--red)';
+      resultEl.textContent = `Failed: ${data.error || data.detail || 'unknown error'}`;
+    }
+  } catch(e) {
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '[ EXECUTE ]';
+  }
+}
+
+// Toggle value input visibility based on type
+document.getElementById('kamino-type')?.addEventListener('change', function() {
+  const valueInput = document.getElementById('kamino-value');
+  if (this.value === 'all') {
+    valueInput.disabled = true;
+    valueInput.style.opacity = '0.3';
+  } else {
+    valueInput.disabled = false;
+    valueInput.style.opacity = '1';
+    valueInput.placeholder = this.value === 'percent' ? '80' : '50.00';
+  }
+});
 
 function updateBotUI(active) {
   const dot = document.getElementById('bot-dot');
@@ -1195,6 +1382,65 @@ async function loadTrades() {
 
     updateCharts(pnlData, d.trades);
   } catch(e) { console.error('Trades error:', e); }
+}
+
+// ── WALLET TX LOG ──
+async function loadWalletTxLog() {
+  try {
+    const r = await fetch(`${API}/api/wallet/transactions?limit=50`);
+    const d = await r.json();
+    const tbody = document.getElementById('wallet-tx-table');
+    tbody.textContent = '';
+
+    const typeLabels = {
+      kamino_deposit: 'Kamino Deposit',
+      kamino_withdraw: 'Kamino Withdraw',
+      swap: 'Swap',
+    };
+
+    d.transactions.forEach(tx => {
+      const tr = document.createElement('tr');
+      tr.appendChild(createCell(new Date(tx.timestamp).toLocaleString(), 'dim'));
+
+      const typeCell = createCell(typeLabels[tx.tx_type] || tx.tx_type);
+      typeCell.style.color = tx.tx_type.includes('deposit') ? '#00CED1' : tx.tx_type.includes('withdraw') ? 'var(--yellow)' : 'var(--green)';
+      typeCell.style.fontWeight = '700';
+      tr.appendChild(typeCell);
+
+      const dirCell = createCell(tx.direction === 'in' ? 'IN' : 'OUT');
+      dirCell.style.color = tx.direction === 'in' ? 'var(--green)' : 'var(--red)';
+      dirCell.style.fontWeight = '700';
+      tr.appendChild(dirCell);
+
+      tr.appendChild(createCell(tx.token === 'SOL' ? `${tx.amount.toFixed(4)}` : `$${tx.amount.toFixed(2)}`));
+      tr.appendChild(createCell(tx.token));
+
+      const fee = tx.fee_sol || 0;
+      tr.appendChild(createCell(fee > 0 ? fee.toFixed(6) : '--', 'dim'));
+
+      const statusCell = createCell(tx.status);
+      statusCell.style.color = tx.status === 'success' ? 'var(--green)' : 'var(--red)';
+      tr.appendChild(statusCell);
+
+      tr.appendChild(createCell(tx.notes || '--', 'dim'));
+
+      const txShort = tx.tx_signature ? `${tx.tx_signature.slice(0,8)}...` : '--';
+      const txHref = tx.tx_signature ? `https://solscan.io/tx/${tx.tx_signature}` : '#';
+      tr.appendChild(createLinkCell(txShort, txHref));
+
+      tbody.appendChild(tr);
+    });
+
+    if (d.transactions.length === 0) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 9;
+      td.textContent = 'No wallet transactions yet';
+      td.style.cssText = 'text-align:center;color:var(--green-dim);padding:20px;';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+  } catch(e) { console.error('Wallet TX log error:', e); }
 }
 
 // ── CHARTS ──
@@ -1322,11 +1568,13 @@ async function saveSettings() {
 // ── INIT ──
 loadStats();
 loadTrades();
+loadWalletTxLog();
 loadSettings();
 loadSystemStatus();
 
 setInterval(loadStats, 30000);
 setInterval(loadTrades, 60000);
+setInterval(loadWalletTxLog, 60000);
 setInterval(loadSystemStatus, 20000);
 </script>
 </body>

@@ -9,11 +9,12 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
 from app import state
+from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
 
 logger = logging.getLogger("bot.dashboard")
@@ -305,7 +306,27 @@ async def system_status():
         if not providers:
             results["news"] = {"ok": False, "label": "News", "detail": "no keys configured"}
 
-    # 8. ngrok tunnel
+    # 8. Kamino Lend
+    kamino_cfg = get("kamino")
+    if kamino_cfg.get("enabled"):
+        try:
+            kamino = KaminoClient()
+            metrics = await kamino.get_reserve_metrics()
+            await kamino.close()
+            if metrics.get("available"):
+                results["kamino"] = {
+                    "ok": True,
+                    "label": "Kamino Lend",
+                    "detail": f"USDC {metrics['supply_apy']:.2f}% APY",
+                }
+            else:
+                results["kamino"] = {"ok": False, "label": "Kamino Lend", "detail": metrics.get("error", "unavailable")}
+        except Exception as e:
+            results["kamino"] = {"ok": False, "label": "Kamino Lend", "error": err(e)}
+    else:
+        results["kamino"] = {"ok": False, "label": "Kamino Lend", "detail": "disabled"}
+
+    # 9. ngrok tunnel
     ngrok = get_ngrok_monitor()
     ngrok_status = ngrok.get_status()
     results["ngrok"] = {
@@ -328,3 +349,109 @@ async def get_ngrok_status():
     ngrok = get_ngrok_monitor()
     status = await ngrok.check_once()
     return status
+
+
+@router.get("/kamino")
+async def get_kamino_status():
+    """Get Kamino Lend yield status and position info."""
+    kamino = KaminoClient()
+    wallet = WalletService()
+
+    try:
+        metrics = await kamino.get_reserve_metrics()
+        position = await kamino.get_user_position(wallet.public_key)
+        usdc_balance = await wallet.get_usdc_balance()
+
+        deposited = position.get("deposited_usdc", 0)
+        total_usdc = deposited + usdc_balance
+        net_deposited = get_kamino_net_deposited()
+        earnings = deposited - net_deposited if deposited > 0 else 0.0
+
+        return {
+            "enabled": kamino.enabled,
+            "auto_deposit": kamino.auto_deposit,
+            "auto_withdraw": kamino.auto_withdraw,
+            "wallet_address": wallet.public_key,
+            "deposited_usdc": deposited,
+            "wallet_usdc": usdc_balance,
+            "total_usdc": total_usdc,
+            "yield_pct_deposited": (deposited / total_usdc * 100) if total_usdc > 0 else 0,
+            "supply_apy": metrics.get("supply_apy", 0),
+            "borrow_apy": metrics.get("borrow_apy", 0),
+            "utilization": metrics.get("utilization", 0),
+            "daily_yield_est": deposited * metrics.get("supply_apy", 0) / 100 / 365,
+            "monthly_yield_est": deposited * metrics.get("supply_apy", 0) / 100 / 12,
+            "earnings_usdc": earnings,
+        }
+    finally:
+        await kamino.close()
+        await wallet.close()
+
+
+@router.post("/kamino/deposit")
+async def kamino_deposit(body: dict):
+    """Manually deposit USDC into Kamino. Body: {"amount": 50.0} or {"percent": 80}"""
+    kamino = KaminoClient()
+    wallet = WalletService()
+
+    try:
+        usdc_balance = await wallet.get_usdc_balance()
+        amount = body.get("amount")
+        percent = body.get("percent")
+
+        if percent is not None:
+            amount = usdc_balance * float(percent) / 100
+
+        if amount is None or amount <= 0:
+            raise HTTPException(400, "Provide 'amount' (USD) or 'percent' (of wallet USDC)")
+
+        amount = min(amount, usdc_balance - kamino.reserve_usdc)
+        if amount < kamino.min_deposit:
+            raise HTTPException(400, f"Amount ${amount:.2f} below minimum ${kamino.min_deposit}")
+
+        result = await kamino.deposit(wallet.get_keypair(), amount)
+        return result
+    finally:
+        await kamino.close()
+        await wallet.close()
+
+
+@router.get("/wallet/transactions")
+async def get_wallet_tx_log(limit: int = 50):
+    """Get wallet transaction log."""
+    txs = get_wallet_transactions(limit=min(limit, 200))
+    return {"transactions": txs, "total": len(txs)}
+
+
+@router.post("/kamino/withdraw")
+async def kamino_withdraw(body: dict):
+    """Manually withdraw USDC from Kamino. Body: {"amount": 50.0} or {"percent": 100} or {"all": true}"""
+    kamino = KaminoClient()
+    wallet = WalletService()
+
+    try:
+        if body.get("all"):
+            result = await kamino.withdraw_all(wallet.get_keypair())
+            return result
+
+        position = await kamino.get_user_position(wallet.public_key)
+        deposited = position.get("deposited_usdc", 0)
+
+        if deposited <= 0:
+            raise HTTPException(400, "No USDC deposited in Kamino")
+
+        amount = body.get("amount")
+        percent = body.get("percent")
+
+        if percent is not None:
+            amount = deposited * float(percent) / 100
+
+        if amount is None or amount <= 0:
+            raise HTTPException(400, "Provide 'amount' (USD), 'percent' (of deposited), or 'all': true")
+
+        amount = min(amount, deposited)
+        result = await kamino.withdraw(wallet.get_keypair(), amount)
+        return result
+    finally:
+        await kamino.close()
+        await wallet.close()

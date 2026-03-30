@@ -60,6 +60,21 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
         CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+
+        CREATE TABLE IF NOT EXISTS wallet_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            tx_type TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            token TEXT NOT NULL DEFAULT 'USDC',
+            fee_sol REAL NOT NULL DEFAULT 0,
+            tx_signature TEXT,
+            status TEXT NOT NULL DEFAULT 'success',
+            notes TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wallet_tx_timestamp ON wallet_transactions(timestamp);
     """)
     conn.close()
 
@@ -173,6 +188,65 @@ def export_csv(output_path: Optional[str] = None) -> str:
         for row in rows:
             writer.writerow(tuple(row))
     return output_path
+
+
+def log_wallet_tx(
+    tx_type: str,
+    direction: str,
+    amount: float,
+    token: str = "USDC",
+    fee_sol: float = 0.000005,
+    tx_signature: str = "",
+    status: str = "success",
+    notes: str = "",
+) -> int:
+    """Log a wallet transaction (Kamino deposit/withdraw, swap, transfer)."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO wallet_transactions
+        (timestamp, tx_type, direction, amount, token, fee_sol, tx_signature, status, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            datetime.utcnow().isoformat(),
+            tx_type,
+            direction,
+            amount,
+            token,
+            fee_sol,
+            tx_signature,
+            status,
+            notes,
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_wallet_transactions(limit: int = 50) -> list[dict]:
+    """Get recent wallet transactions."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM wallet_transactions ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_kamino_net_deposited() -> float:
+    """Get net USDC deposited into Kamino (deposits - withdrawals)."""
+    conn = get_db()
+    row = conn.execute(
+        """SELECT
+            COALESCE(SUM(CASE WHEN tx_type = 'kamino_deposit' AND status = 'success' THEN amount ELSE 0 END), 0)
+            - COALESCE(SUM(CASE WHEN tx_type = 'kamino_withdraw' AND status = 'success' THEN amount ELSE 0 END), 0)
+            AS net_deposited
+        FROM wallet_transactions"""
+    ).fetchone()
+    conn.close()
+    return row["net_deposited"] if row else 0.0
 
 
 def get_recent_signal_hash() -> Optional[str]:

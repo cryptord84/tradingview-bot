@@ -1,13 +1,15 @@
 """Telegram command handler — listens for incoming messages and responds."""
 
 import asyncio
+import json
 import logging
+import shutil
 from datetime import datetime
 
 import httpx
 
 from app.config import get
-from app.database import get_trades, get_stats, get_today_trades
+from app.database import get_trades, get_stats, get_today_trades, get_wallet_transactions, get_kamino_net_deposited
 from app import state
 
 logger = logging.getLogger("bot.telegram_cmd")
@@ -20,8 +22,10 @@ class TelegramCommandHandler:
         "/help": "List available commands",
         "/status": "Bot health, uptime, active state",
         "/wallet": "SOL and USDC balances with USD value",
+        "/vault": "Kamino vault balance, APY, and earnings",
         "/apis": "Check all API connections",
         "/trades": "Last 5 executed trades",
+        "/txlog": "Recent wallet transactions",
         "/today": "Today's trades and P&L",
         "/pnl": "Overall P&L summary",
         "/start": "Start the bot",
@@ -97,30 +101,36 @@ class TelegramCommandHandler:
             logger.warning(f"Ignoring message from unauthorized chat: {chat_id}")
             return
 
-        if not text.startswith("/"):
+        if not text:
             return
 
-        cmd = text.split()[0].lower().split("@")[0]  # strip @botname suffix
-        logger.info(f"Telegram command: {cmd}")
+        if text.startswith("/"):
+            cmd = text.split()[0].lower().split("@")[0]  # strip @botname suffix
+            logger.info(f"Telegram command: {cmd}")
 
-        handlers = {
-            "/help": self.cmd_help,
-            "/status": self.cmd_status,
-            "/health": self.cmd_status,
-            "/wallet": self.cmd_wallet,
-            "/apis": self.cmd_apis,
-            "/trades": self.cmd_trades,
-            "/today": self.cmd_today,
-            "/pnl": self.cmd_pnl,
-            "/start": self.cmd_start,
-            "/stop": self.cmd_stop,
-        }
+            handlers = {
+                "/help": self.cmd_help,
+                "/status": self.cmd_status,
+                "/health": self.cmd_status,
+                "/wallet": self.cmd_wallet,
+                "/vault": self.cmd_vault,
+                "/apis": self.cmd_apis,
+                "/trades": self.cmd_trades,
+                "/txlog": self.cmd_txlog,
+                "/today": self.cmd_today,
+                "/pnl": self.cmd_pnl,
+                "/start": self.cmd_start,
+                "/stop": self.cmd_stop,
+            }
 
-        handler = handlers.get(cmd)
-        if handler:
-            await handler()
+            handler = handlers.get(cmd)
+            if handler:
+                await handler()
+            else:
+                await self.send(f"Unknown command: <code>{cmd}</code>\nType /help for available commands.")
         else:
-            await self.send(f"Unknown command: <code>{cmd}</code>\nType /help for available commands.")
+            # Free-form message — route to Claude
+            await self.cmd_chat(text)
 
     # ── Command Handlers ─────────────────────────────────────────
 
@@ -160,38 +170,125 @@ class TelegramCommandHandler:
     async def cmd_wallet(self):
         from app.services.wallet_service import WalletService
         from app.services.jupiter_client import JupiterClient
+        from app.services.kamino_client import KaminoClient
 
         try:
             wallet = WalletService()
             jupiter = JupiterClient()
+            kamino = KaminoClient()
 
             sol_balance = await wallet.get_balance_sol()
             sol_price = await jupiter.get_sol_price()
             sol_usd = sol_balance * sol_price
 
-            # Try to get USDC balance
             usdc_balance = 0.0
             try:
                 usdc_balance = await wallet.get_usdc_balance()
             except Exception:
                 pass
 
-            total_usd = sol_usd + usdc_balance
+            kamino_usdc = 0.0
+            try:
+                if kamino.enabled:
+                    position = await kamino.get_user_position(wallet.public_key)
+                    kamino_usdc = position.get("deposited_usdc", 0)
+            except Exception:
+                pass
+
+            total_usd = sol_usd + usdc_balance + kamino_usdc
+            addr = wallet.public_key
 
             msg = (
                 f"<b>💰 WALLET BALANCES</b>\n\n"
-                f"SOL: <b>{sol_balance:.4f}</b>\n"
-                f"  └ ${sol_usd:.2f} USD @ ${sol_price:.2f}/SOL\n\n"
-                f"USDC: <b>{usdc_balance:.2f}</b>\n\n"
-                f"Total: <b>${total_usd:.2f} USD</b>"
+                f"SOL: <b>{sol_balance:.4f}</b> (${sol_usd:.2f})\n"
+                f"USDC: <b>${usdc_balance:.2f}</b>\n"
+                f"Kamino Vault: <b>${kamino_usdc:.2f}</b>\n\n"
+                f"Total: <b>${total_usd:.2f} USD</b>\n"
+                f"SOL Price: ${sol_price:.2f}\n\n"
+                f"<a href='https://solscan.io/account/{addr}'>View on Solscan ↗</a>"
             )
 
             await jupiter.close()
             await wallet.close()
+            await kamino.close()
         except Exception as e:
             msg = f"<b>💰 WALLET</b>\n\n⚠️ Error fetching balances: {e}"
 
         await self.send(msg)
+
+    async def cmd_vault(self):
+        from app.services.wallet_service import WalletService
+        from app.services.kamino_client import KaminoClient
+
+        try:
+            wallet = WalletService()
+            kamino = KaminoClient()
+
+            if not kamino.enabled:
+                await self.send("<b>🏦 KAMINO VAULT</b>\n\nKamino Lend is disabled.")
+                return
+
+            metrics = await kamino.get_reserve_metrics()
+            position = await kamino.get_user_position(wallet.public_key)
+            deposited = position.get("deposited_usdc", 0)
+            net_deposited = get_kamino_net_deposited()
+            earnings = deposited - net_deposited if deposited > 0 else 0.0
+            supply_apy = metrics.get("supply_apy", 0)
+            daily_est = deposited * supply_apy / 100 / 365
+            monthly_est = deposited * supply_apy / 100 / 12
+
+            earn_str = f"+${earnings:.4f}" if earnings >= 0 else f"-${abs(earnings):.4f}"
+
+            msg = (
+                f"<b>🏦 KAMINO VAULT</b>\n\n"
+                f"Deposited: <b>${deposited:.2f}</b>\n"
+                f"Earnings: <b>{earn_str}</b>\n"
+                f"APY: <b>{supply_apy:.2f}%</b>\n\n"
+                f"Est. Daily: ${daily_est:.4f}\n"
+                f"Est. Monthly: ${monthly_est:.2f}\n\n"
+                f"Auto-deposit: {'ON' if kamino.auto_deposit else 'OFF'}\n"
+                f"Auto-withdraw: {'ON' if kamino.auto_withdraw else 'OFF'}\n"
+                f"Reserve: ${kamino.reserve_usdc:.0f} USDC"
+            )
+
+            await wallet.close()
+            await kamino.close()
+        except Exception as e:
+            msg = f"<b>🏦 KAMINO VAULT</b>\n\n⚠️ Error: {e}"
+
+        await self.send(msg)
+
+    async def cmd_txlog(self):
+        txs = get_wallet_transactions(limit=10)
+        if not txs:
+            await self.send("<b>📒 WALLET TRANSACTIONS</b>\n\nNo transactions recorded yet.")
+            return
+
+        type_labels = {
+            "kamino_deposit": "Kamino Deposit",
+            "kamino_withdraw": "Kamino Withdraw",
+            "swap": "Swap",
+        }
+
+        lines = ["<b>📒 RECENT TRANSACTIONS</b>\n"]
+        for tx in txs:
+            ts = tx.get("timestamp", "")[:16]
+            tx_type = type_labels.get(tx["tx_type"], tx["tx_type"])
+            direction = "→ IN" if tx["direction"] == "in" else "← OUT"
+            token = tx["token"]
+            amount = f"{tx['amount']:.4f}" if token == "SOL" else f"${tx['amount']:.2f}"
+            fee = tx.get("fee_sol", 0)
+            status = "✅" if tx["status"] == "success" else "❌"
+            sig = tx.get("tx_signature", "")
+            sig_link = f"<a href='https://solscan.io/tx/{sig}'>{sig[:8]}...</a>" if sig else "--"
+
+            lines.append(
+                f"{status} <b>{tx_type}</b> {direction}\n"
+                f"    {amount} {token} | Fee: {fee:.6f} SOL\n"
+                f"    {ts} | {sig_link}"
+            )
+
+        await self.send("\n".join(lines))
 
     async def cmd_apis(self):
         results = []
@@ -355,6 +452,141 @@ class TelegramCommandHandler:
             return
         result = state.stop_bot()
         await self.send(f"🔴 <b>Bot stopped</b>\nStopped at: {result['stopped_at']}")
+
+    async def cmd_chat(self, message: str):
+        """Send a free-form message to Claude and reply with the response."""
+        logger.info(f"Chat message: {message[:80]}")
+
+        # Gather bot context so Claude has awareness
+        context = await self._build_chat_context()
+        system_prompt = (
+            "You are Trinity, an AI assistant for a Solana trading bot. "
+            "You help the user with trading questions, market analysis, strategy ideas, "
+            "bot configuration, and general questions. Be concise — this is Telegram, "
+            "keep responses under 300 words. Use plain text (Telegram HTML is OK for bold/italic). "
+            "You have access to the bot's current state below.\n\n"
+            f"{context}"
+        )
+
+        try:
+            cfg = get("claude")
+            mode = cfg.get("mode", "cli")
+
+            if mode == "cli":
+                response_text = await self._call_claude_cli(system_prompt, message)
+            else:
+                response_text = await self._call_claude_api(system_prompt, message)
+
+            if len(response_text) > 3900:
+                response_text = response_text[:3900] + "\n...(truncated)"
+
+            await self.send(response_text)
+        except Exception as e:
+            logger.error(f"Chat error: {e}")
+            await self.send(f"⚠️ Claude unavailable: {str(e)[:100]}\n\nTry a /command instead.")
+
+    async def _build_chat_context(self) -> str:
+        """Gather current bot state for Claude context."""
+        lines = []
+        try:
+            stats = get_stats()
+            lines.append(
+                f"Bot: {'ACTIVE' if state.is_active() else 'STOPPED'} | "
+                f"Uptime: {state.get_uptime()}"
+            )
+            lines.append(
+                f"Trades: {stats['total_trades']} total | "
+                f"P&L: ${stats['total_pnl_usd']:+.2f} | "
+                f"Today: ${stats['today_pnl_usd']:+.2f}"
+            )
+        except Exception:
+            pass
+
+        try:
+            from app.services.wallet_service import WalletService
+            from app.services.jupiter_client import JupiterClient
+            from app.services.kamino_client import KaminoClient
+
+            wallet = WalletService()
+            jupiter = JupiterClient()
+            sol = await wallet.get_balance_sol()
+            price = await jupiter.get_sol_price()
+            usdc = await wallet.get_usdc_balance()
+
+            kamino_usdc = 0.0
+            kamino = KaminoClient()
+            if kamino.enabled:
+                pos = await kamino.get_user_position(wallet.public_key)
+                kamino_usdc = pos.get("deposited_usdc", 0)
+                await kamino.close()
+
+            total = sol * price + usdc + kamino_usdc
+            lines.append(
+                f"Wallet: {sol:.4f} SOL (${sol*price:.2f}) | "
+                f"USDC: ${usdc:.2f} | Kamino: ${kamino_usdc:.2f} | "
+                f"Total: ${total:.2f}"
+            )
+            lines.append(f"SOL Price: ${price:.2f}")
+            await jupiter.close()
+            await wallet.close()
+        except Exception:
+            pass
+
+        return "## Current Bot State\n" + "\n".join(lines) if lines else ""
+
+    async def _call_claude_cli(self, system_prompt: str, user_message: str) -> str:
+        """Call Claude via CLI for chat.
+
+        Uses create_subprocess_exec (not shell) to avoid command injection.
+        The prompt is passed as a positional argument, not interpolated into a shell string.
+        """
+        cfg = get("claude")
+        cli_path = cfg.get("cli_path", "claude")
+        timeout = cfg.get("timeout_seconds", 60)
+
+        resolved = shutil.which(cli_path)
+        if not resolved:
+            raise FileNotFoundError("Claude CLI not found")
+
+        full_prompt = f"{system_prompt}\n\n---\n\nUser message: {user_message}"
+
+        # create_subprocess_exec passes args as a list — no shell expansion, safe from injection
+        proc = await asyncio.create_subprocess_exec(
+            resolved, "--print", full_prompt,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise TimeoutError(f"Claude CLI timed out after {timeout}s")
+
+        if proc.returncode != 0:
+            err = stderr.decode().strip() if stderr else "unknown error"
+            raise RuntimeError(f"CLI error: {err[:200]}")
+
+        return stdout.decode().strip()
+
+    async def _call_claude_api(self, system_prompt: str, user_message: str) -> str:
+        """Call Claude via Anthropic API for chat."""
+        import anthropic
+
+        cfg = get("claude")
+        api_key = cfg.get("api_key", "")
+        if not api_key:
+            raise ValueError("No API key configured — set claude.api_key or use mode: cli")
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=cfg.get("model", "claude-sonnet-4-6-20250514"),
+            max_tokens=cfg.get("max_tokens", 1024),
+            temperature=0.7,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        return message.content[0].text
 
     # ── Polling Loop ─────────────────────────────────────────────
 
