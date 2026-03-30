@@ -5,11 +5,12 @@ import json
 import logging
 import shutil
 from datetime import datetime
+from pathlib import Path
 
 import httpx
 
 from app.config import get
-from app.database import get_trades, get_stats, get_today_trades, get_wallet_transactions, get_kamino_net_deposited
+from app.database import get_trades, get_stats, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions
 from app import state
 
 logger = logging.getLogger("bot.telegram_cmd")
@@ -28,9 +29,17 @@ class TelegramCommandHandler:
         "/txlog": "Recent wallet transactions",
         "/today": "Today's trades and P&L",
         "/pnl": "Overall P&L summary",
+        "/pull": "Git pull latest changes",
+        "/scan": "Scan Indicators directory for changes",
+        "/review": "Review an indicator script (/review filename)",
+        "/positions": "Show open positions with live P&L",
+        "/scout": "Run X.com TradingView bot scan now",
         "/start": "Start the bot",
         "/stop": "Stop the bot",
     }
+
+    # Project root directory
+    PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 
     def __init__(self):
         cfg = get("telegram")
@@ -119,9 +128,20 @@ class TelegramCommandHandler:
                 "/txlog": self.cmd_txlog,
                 "/today": self.cmd_today,
                 "/pnl": self.cmd_pnl,
+                "/pull": self.cmd_pull,
+                "/scan": self.cmd_scan,
+                "/positions": self.cmd_positions,
+                "/scout": self.cmd_scout,
                 "/start": self.cmd_start,
                 "/stop": self.cmd_stop,
             }
+
+            # /review takes an argument
+            if cmd == "/review":
+                args = text.split(maxsplit=1)
+                filename = args[1].strip() if len(args) > 1 else ""
+                await self.cmd_review(filename)
+                return
 
             handler = handlers.get(cmd)
             if handler:
@@ -452,6 +472,216 @@ class TelegramCommandHandler:
             return
         result = state.stop_bot()
         await self.send(f"🔴 <b>Bot stopped</b>\nStopped at: {result['stopped_at']}")
+
+    async def cmd_pull(self):
+        """Run git pull in the project directory."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", "pull",
+                cwd=str(self.PROJECT_DIR),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            output = stdout.decode().strip()
+            err = stderr.decode().strip()
+
+            if proc.returncode == 0:
+                msg = f"<b>📥 GIT PULL</b>\n\n<code>{output}</code>"
+                if err:
+                    msg += f"\n\n{err}"
+            else:
+                msg = f"<b>📥 GIT PULL — FAILED</b>\n\n<code>{err or output}</code>"
+
+            await self.send(msg)
+        except asyncio.TimeoutError:
+            await self.send("⚠️ Git pull timed out after 30s")
+        except Exception as e:
+            await self.send(f"⚠️ Git pull error: {e}")
+
+    async def cmd_scan(self):
+        """Scan the Indicators directory for files and show recent changes."""
+        indicators_dir = self.PROJECT_DIR / "Indicators"
+        if not indicators_dir.exists():
+            await self.send("<b>📂 SCAN</b>\n\nIndicators/ directory not found.")
+            return
+
+        try:
+            # Get all indicator files
+            files = sorted(indicators_dir.rglob("*.pine"), key=lambda f: f.stat().st_mtime, reverse=True)
+            if not files:
+                files = sorted(indicators_dir.rglob("*"), key=lambda f: f.stat().st_mtime, reverse=True)
+                files = [f for f in files if f.is_file() and not f.name.startswith(".")]
+
+            if not files:
+                await self.send("<b>📂 SCAN</b>\n\nNo indicator files found.")
+                return
+
+            # Get git status for indicators
+            proc = await asyncio.create_subprocess_exec(
+                "git", "status", "--porcelain", "Indicators/",
+                cwd=str(self.PROJECT_DIR),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            git_changes = stdout.decode().strip()
+
+            lines = [f"<b>📂 INDICATORS SCAN</b>\n"]
+            lines.append(f"Found <b>{len(files)}</b> file(s):\n")
+
+            for f in files[:20]:
+                rel = f.relative_to(self.PROJECT_DIR)
+                mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                size = f.stat().st_size
+                age = datetime.now() - mtime
+                if age.days > 0:
+                    age_str = f"{age.days}d ago"
+                elif age.seconds > 3600:
+                    age_str = f"{age.seconds // 3600}h ago"
+                else:
+                    age_str = f"{age.seconds // 60}m ago"
+
+                lines.append(f"  📄 <code>{rel}</code>\n      {size:,}b | modified {age_str}")
+
+            if git_changes:
+                lines.append(f"\n<b>Uncommitted changes:</b>\n<code>{git_changes}</code>")
+            else:
+                lines.append("\n✅ All files committed")
+
+            lines.append(f"\nUse <code>/review filename</code> to analyze a script")
+
+            await self.send("\n".join(lines))
+        except Exception as e:
+            await self.send(f"⚠️ Scan error: {e}")
+
+    async def cmd_review(self, filename: str):
+        """Read an indicator file and send it to Claude for analysis."""
+        if not filename:
+            await self.send(
+                "<b>📝 REVIEW</b>\n\n"
+                "Usage: <code>/review filename.pine</code>\n"
+                "Or: <code>/review Indicators/subfolder/file.pine</code>\n\n"
+                "Run /scan to see available files."
+            )
+            return
+
+        # Search for the file
+        search_path = Path(filename)
+        candidates = []
+
+        # Try exact path from project root
+        exact = self.PROJECT_DIR / search_path
+        if exact.is_file():
+            candidates.append(exact)
+
+        # Try inside Indicators/
+        in_indicators = self.PROJECT_DIR / "Indicators" / search_path
+        if in_indicators.is_file() and in_indicators not in candidates:
+            candidates.append(in_indicators)
+
+        # Fuzzy search by filename in Indicators/
+        if not candidates:
+            indicators_dir = self.PROJECT_DIR / "Indicators"
+            if indicators_dir.exists():
+                for f in indicators_dir.rglob("*"):
+                    if f.is_file() and filename.lower() in f.name.lower():
+                        candidates.append(f)
+
+        if not candidates:
+            await self.send(f"❌ File not found: <code>{filename}</code>\n\nRun /scan to see available files.")
+            return
+
+        target = candidates[0]
+        rel_path = target.relative_to(self.PROJECT_DIR)
+
+        try:
+            content = target.read_text()
+        except Exception as e:
+            await self.send(f"❌ Cannot read <code>{rel_path}</code>: {e}")
+            return
+
+        if len(content) > 15000:
+            content = content[:15000] + "\n// ... (truncated)"
+
+        await self.send(f"🔍 Reviewing <code>{rel_path}</code> ({len(content):,} chars)...\nThis may take a moment.")
+
+        # Send to Claude for analysis
+        system_prompt = (
+            "You are Trinity, an expert Pine Script and trading indicator analyst. "
+            "Review the following indicator script and provide:\n"
+            "1. **Summary** — what the indicator does in 2-3 sentences\n"
+            "2. **Signals** — what buy/sell/close signals it generates\n"
+            "3. **Strengths** — what it does well\n"
+            "4. **Weaknesses** — repainting risk, overfitting, missing features\n"
+            "5. **Verdict** — would you recommend using it? Score 1-10\n\n"
+            "Be concise — this is Telegram. Use HTML formatting (bold, italic, code)."
+        )
+
+        try:
+            cfg = get("claude")
+            mode = cfg.get("mode", "cli")
+
+            user_msg = f"Review this Pine Script indicator ({rel_path}):\n\n{content}"
+
+            if mode == "cli":
+                response = await self._call_claude_cli(system_prompt, user_msg)
+            else:
+                response = await self._call_claude_api(system_prompt, user_msg)
+
+            if len(response) > 3900:
+                response = response[:3900] + "\n...(truncated)"
+
+            await self.send(response)
+        except Exception as e:
+            logger.error(f"Review error: {e}")
+            await self.send(f"⚠️ Claude review failed: {str(e)[:100]}")
+
+    async def cmd_positions(self):
+        """Show open positions with live P&L."""
+        positions = get_open_positions()
+        if not positions:
+            await self.send("<b>📊 OPEN POSITIONS</b>\n\nNo open positions.")
+            return
+
+        from app.services.jupiter_client import JupiterClient
+        jupiter = JupiterClient()
+        try:
+            price = await jupiter.get_sol_price()
+        finally:
+            await jupiter.close()
+
+        lines = [f"<b>📊 OPEN POSITIONS</b> (SOL=${price:.2f})\n"]
+        for p in positions:
+            pnl = (price - p["entry_price"]) * p["amount_sol"]
+            pnl_pct = ((price - p["entry_price"]) / p["entry_price"]) * 100
+            icon = "📈" if pnl >= 0 else "📉"
+
+            tp_dist = ((p["tp_price"] - price) / price) * 100
+            sl_dist = ((price - p["sl_price"]) / price) * 100
+
+            lines.append(
+                f"{icon} <b>{p['symbol']}</b> LONG\n"
+                f"  Entry: ${p['entry_price']:.2f} | Size: {p['amount_sol']:.4f} SOL\n"
+                f"  TP: ${p['tp_price']:.2f} ({tp_dist:+.1f}%) | SL: ${p['sl_price']:.2f} (-{sl_dist:.1f}%)\n"
+                f"  P&L: <b>${pnl:+.2f}</b> ({pnl_pct:+.1f}%)\n"
+                f"  Opened: {p['created_at'][:16]}"
+            )
+
+        await self.send("\n".join(lines))
+
+    async def cmd_scout(self):
+        """Manually trigger the X.com TradingView bot scan."""
+        await self.send("🔍 Running X.com scan for TradingView bot intel...\nThis may take 15-30 seconds.")
+        try:
+            from app.services.scout_service import ScoutService
+            scout = ScoutService()
+            report = await scout.generate_report()
+            msg = await scout.format_telegram_message(report)
+            await scout.close()
+            await self.send(msg)
+        except Exception as e:
+            await self.send(f"⚠️ Scout scan failed: {str(e)[:200]}")
 
     async def cmd_chat(self, message: str):
         """Send a free-form message to Claude and reply with the response."""

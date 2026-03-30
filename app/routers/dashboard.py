@@ -9,13 +9,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
 from app import state
 from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
+from app.services.scout_service import get_latest_report, get_all_reports, ScoutService
 
 logger = logging.getLogger("bot.dashboard")
 
@@ -455,3 +456,74 @@ async def kamino_withdraw(body: dict):
     finally:
         await kamino.close()
         await wallet.close()
+
+
+@router.get("/scout")
+async def get_scout_report():
+    """Get latest scout report and recent history."""
+    latest = get_latest_report()
+    history = get_all_reports(limit=7)
+    return {
+        "latest": latest,
+        "history_dates": [r.get("date") for r in history],
+        "total_reports": len(history),
+    }
+
+
+@router.post("/scout/run")
+async def run_scout_now():
+    """Manually trigger a scout scan."""
+    scout = ScoutService()
+    try:
+        report = await scout.generate_report()
+        return {"status": "ok", "result_count": report.get("result_count", 0), "report": report}
+    finally:
+        await scout.close()
+
+
+@router.get("/positions")
+async def get_positions_api(status: str = "all", limit: int = 50):
+    """Get positions, optionally filtered by status."""
+    if status == "open":
+        positions = get_open_positions()
+    else:
+        positions = get_all_positions(limit=min(limit, 200))
+
+    # Add live P&L for open positions
+    has_open = any(p["status"] == "open" for p in positions)
+    if has_open:
+        jupiter = JupiterClient()
+        try:
+            current_price = await jupiter.get_sol_price()
+            for p in positions:
+                if p["status"] == "open":
+                    p["current_price"] = current_price
+                    p["unrealized_pnl_usdc"] = (current_price - p["entry_price"]) * p["amount_sol"]
+                    p["unrealized_pnl_percent"] = ((current_price - p["entry_price"]) / p["entry_price"]) * 100
+                    p["distance_to_tp_percent"] = ((p["tp_price"] - current_price) / current_price) * 100
+                    p["distance_to_sl_percent"] = ((current_price - p["sl_price"]) / current_price) * 100
+        finally:
+            await jupiter.close()
+
+    return {"positions": positions, "total": len(positions)}
+
+
+@router.post("/positions/{position_id}/close")
+async def manual_close_position(position_id: int):
+    """Manually close a position at market price."""
+    from app.services.position_monitor import get_position_monitor
+
+    positions = get_open_positions()
+    pos = next((p for p in positions if p["id"] == position_id), None)
+    if not pos:
+        raise HTTPException(status_code=404, detail=f"Open position #{position_id} not found")
+
+    monitor = get_position_monitor()
+    jupiter = JupiterClient()
+    try:
+        current_price = await jupiter.get_sol_price()
+        await monitor._close_position(pos, current_price, "manual", jupiter)
+    finally:
+        await jupiter.close()
+
+    return {"status": "ok", "position_id": position_id}

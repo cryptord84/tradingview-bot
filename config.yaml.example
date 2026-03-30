@@ -64,6 +64,14 @@ risk:
   max_open_positions: 3
   cooldown_between_trades_seconds: 60
 
+# --- Position Monitor (TP/SL Auto-Close) ---
+position_monitor:
+  enabled: true
+  poll_interval_seconds: 30          # How often to check prices
+  tp_multiplier: 4.0                 # TP = entry + ATR * this
+  sl_multiplier: 1.5                 # SL = entry - ATR * this
+  max_close_retries: 3               # Retry failed close attempts
+
 # --- Geopolitical Risk Weight ---
 geo_risk:
   enabled: true

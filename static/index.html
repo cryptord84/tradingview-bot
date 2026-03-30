@@ -392,6 +392,12 @@ main {
 /* ── TRADES TABLE ── */
 .card-trades { grid-column: 1 / -1; }
 .card-wallet-log { grid-column: 1 / -1; }
+.card-scout { grid-column: 1 / -1; }
+.card-positions { grid-column: 1 / -1; }
+.pnl-positive { color: #00ff41; }
+.pnl-negative { color: #ff4444; }
+.pos-progress { display:inline-block; width:60px; height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden; vertical-align:middle; }
+.pos-progress-fill { height:100%; border-radius:3px; }
 
 table { width: 100%; border-collapse: collapse; font-size: .72rem; }
 th {
@@ -546,7 +552,7 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-settings,.card-costs { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-settings,.card-costs { grid-column: 1; }
   .settings-columns { grid-template-columns: 1fr; }
   .wallet-grid { grid-template-columns: 1fr 1px 1fr; }
   .status-grid { grid-template-columns: repeat(3,1fr); }
@@ -770,6 +776,48 @@ footer a:hover { color: var(--green); }
         </thead>
         <tbody id="wallet-tx-table"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- POSITIONS: TP/SL TRACKING -->
+  <div class="card card-positions" data-label="// OPEN POSITIONS">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Position Monitor</span>
+      <span id="positions-count" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">0 open</span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="positions-table">
+        <thead><tr>
+          <th>Symbol</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
+        </tr></thead>
+        <tbody id="positions-tbody"></tbody>
+      </table>
+    </div>
+    <div id="positions-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
+      No open positions. Positions are created when BUY signals execute with ATR data.
+    </div>
+    <div id="positions-history" style="margin-top:16px;">
+      <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">RECENT CLOSED</div>
+      <table id="positions-history-table" style="display:none;">
+        <thead><tr>
+          <th>Symbol</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Status</th><th>Duration</th>
+        </tr></thead>
+        <tbody id="positions-history-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SCOUT: X.COM TRADINGVIEW INTEL -->
+  <div class="card card-scout" data-label="// TRADINGVIEW SCOUT">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">X.com Daily Intel</span>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="scout-date" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">--</span>
+        <button onclick="runScout()" id="scout-run-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ SCAN NOW ]</button>
+      </div>
+    </div>
+    <div id="scout-results" style="font-family:var(--mono);font-size:.72rem;">
+      <div style="color:var(--green-dim);padding:20px;text-align:center;">No scout data yet. Runs daily at 3:30 AM or click SCAN NOW.</div>
     </div>
   </div>
 
@@ -1513,6 +1561,251 @@ function updateCharts(pnlData, trades) {
   });
 }
 
+// ── SCOUT ──
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+async function loadPositions() {
+  try {
+    const resp = await fetch('/api/positions?status=all&limit=20');
+    const data = await resp.json();
+    const positions = data.positions || [];
+
+    const openPositions = positions.filter(p => p.status === 'open');
+    const closedPositions = positions.filter(p => p.status !== 'open').slice(0, 5);
+
+    document.getElementById('positions-count').textContent = openPositions.length + ' open';
+
+    const tbody = document.getElementById('positions-tbody');
+    const emptyMsg = document.getElementById('positions-empty');
+
+    tbody.innerHTML = '';
+
+    if (openPositions.length === 0) {
+      emptyMsg.style.display = 'block';
+      document.getElementById('positions-table').style.display = 'none';
+    } else {
+      emptyMsg.style.display = 'none';
+      document.getElementById('positions-table').style.display = 'table';
+
+      openPositions.forEach(p => {
+        const pnl = p.unrealized_pnl_usdc || 0;
+        const pnlPct = p.unrealized_pnl_percent || 0;
+        const currentPrice = p.current_price || p.entry_price;
+        const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+
+        // Progress bar: SL (0%) to TP (100%)
+        const range = p.tp_price - p.sl_price;
+        const progress = range > 0 ? Math.max(0, Math.min(100, ((currentPrice - p.sl_price) / range) * 100)) : 50;
+        const barColor = progress < 25 ? '#ff4444' : progress > 75 ? '#00ff41' : '#FFD700';
+
+        // Age calculation
+        const created = new Date(p.created_at);
+        const ageMs = Date.now() - created.getTime();
+        const ageHours = Math.floor(ageMs / 3600000);
+        const ageDays = Math.floor(ageHours / 24);
+        const ageStr = ageDays > 0 ? ageDays + 'd ' + (ageHours % 24) + 'h' : ageHours + 'h';
+
+        const tr = document.createElement('tr');
+        const cells = [
+          p.symbol,
+          '$' + p.entry_price.toFixed(2),
+          '$' + currentPrice.toFixed(2),
+          '$' + p.tp_price.toFixed(2),
+          '$' + p.sl_price.toFixed(2),
+          p.amount_sol.toFixed(4) + ' SOL',
+        ];
+        cells.forEach(text => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+
+        // P&L cell
+        const pnlTd = document.createElement('td');
+        pnlTd.className = pnlClass;
+        pnlTd.textContent = '$' + pnl.toFixed(2) + ' (' + pnlPct.toFixed(1) + '%)';
+        tr.appendChild(pnlTd);
+
+        // Progress bar cell
+        const progTd = document.createElement('td');
+        const progBar = document.createElement('div');
+        progBar.className = 'pos-progress';
+        const progFill = document.createElement('div');
+        progFill.className = 'pos-progress-fill';
+        progFill.style.width = progress.toFixed(0) + '%';
+        progFill.style.background = barColor;
+        progBar.appendChild(progFill);
+        progTd.appendChild(progBar);
+        tr.appendChild(progTd);
+
+        // Age cell
+        const ageTd = document.createElement('td');
+        ageTd.textContent = ageStr;
+        tr.appendChild(ageTd);
+
+        // Close button
+        const actionTd = document.createElement('td');
+        const closeBtn = document.createElement('button');
+        closeBtn.textContent = 'CLOSE';
+        closeBtn.style.cssText = 'background:transparent;border:1px solid #ff4444;color:#ff4444;font-family:var(--mono);font-size:.6rem;cursor:pointer;padding:2px 6px;';
+        closeBtn.addEventListener('click', async () => {
+          if (confirm('Close position #' + p.id + ' at market price?')) {
+            closeBtn.textContent = '...';
+            try {
+              await fetch('/api/positions/' + p.id + '/close', { method: 'POST' });
+              await loadPositions();
+            } catch(e) { closeBtn.textContent = 'ERR'; }
+          }
+        });
+        actionTd.appendChild(closeBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // Closed positions history
+    const histTbody = document.getElementById('positions-history-tbody');
+    const histTable = document.getElementById('positions-history-table');
+    histTbody.innerHTML = '';
+
+    if (closedPositions.length > 0) {
+      histTable.style.display = 'table';
+      closedPositions.forEach(p => {
+        const pnl = p.pnl_usdc || 0;
+        const pnlPct = p.pnl_percent || 0;
+        const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
+        const statusLabel = { closed_tp: 'TP HIT', closed_sl: 'SL HIT', closed_manual: 'MANUAL' }[p.status] || p.status;
+        const statusColor = p.status === 'closed_tp' ? '#00ff41' : p.status === 'closed_sl' ? '#ff4444' : '#FFD700';
+
+        // Duration
+        let duration = '--';
+        if (p.created_at && p.closed_at) {
+          const dMs = new Date(p.closed_at) - new Date(p.created_at);
+          const dH = Math.floor(dMs / 3600000);
+          const dD = Math.floor(dH / 24);
+          duration = dD > 0 ? dD + 'd ' + (dH % 24) + 'h' : dH + 'h';
+        }
+
+        const tr = document.createElement('tr');
+        [p.symbol, '$' + p.entry_price.toFixed(2), '$' + (p.exit_price || 0).toFixed(2)].forEach(text => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          tr.appendChild(td);
+        });
+
+        const pnlTd = document.createElement('td');
+        pnlTd.className = pnlClass;
+        pnlTd.textContent = '$' + pnl.toFixed(2) + ' (' + pnlPct.toFixed(1) + '%)';
+        tr.appendChild(pnlTd);
+
+        const statusTd = document.createElement('td');
+        statusTd.textContent = statusLabel;
+        statusTd.style.color = statusColor;
+        tr.appendChild(statusTd);
+
+        const durTd = document.createElement('td');
+        durTd.textContent = duration;
+        tr.appendChild(durTd);
+
+        histTbody.appendChild(tr);
+      });
+    } else {
+      histTable.style.display = 'none';
+    }
+  } catch(e) {
+    console.error('Failed to load positions:', e);
+  }
+}
+
+async function loadScout() {
+  try {
+    const r = await fetch(`${API}/api/scout`);
+    const d = await r.json();
+    const container = document.getElementById('scout-results');
+    const dateEl = document.getElementById('scout-date');
+
+    container.textContent = '';
+
+    if (!d.latest || !d.latest.posts || d.latest.posts.length === 0) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--green-dim);padding:20px;text-align:center;';
+      empty.textContent = 'No scout data yet. Runs daily at 3:30 AM or click SCAN NOW.';
+      container.appendChild(empty);
+      return;
+    }
+
+    dateEl.textContent = `Last scan: ${d.latest.date}`;
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;gap:10px;';
+
+    d.latest.posts.forEach(p => {
+      const card = document.createElement('div');
+      card.style.cssText = 'padding:10px 12px;background:rgba(0,255,65,0.03);border-left:2px solid var(--green-dark);border-radius:4px;display:flex;justify-content:space-between;align-items:start;gap:10px;';
+
+      const info = document.createElement('div');
+      info.style.flex = '1';
+
+      const title = document.createElement('div');
+      title.style.cssText = 'color:var(--green);font-weight:700;font-size:.72rem;margin-bottom:4px;';
+      const isX = p.url && (p.url.includes('x.com') || p.url.includes('twitter.com'));
+      title.textContent = (isX ? '\uD835\uDD4F ' : '\uD83D\uDD17 ') + (p.title || 'Untitled');
+      info.appendChild(title);
+
+      const snippet = document.createElement('div');
+      snippet.style.cssText = 'color:var(--green-dim);font-size:.65rem;line-height:1.4;';
+      snippet.textContent = (p.content || '').slice(0, 150);
+      info.appendChild(snippet);
+
+      card.appendChild(info);
+
+      if (p.url) {
+        const link = document.createElement('a');
+        link.href = p.url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.style.cssText = 'color:var(--green-dim);font-size:.6rem;white-space:nowrap;text-decoration:none;border:1px solid var(--green-dark);padding:3px 8px;border-radius:3px;';
+        link.textContent = 'OPEN \u2197';
+        card.appendChild(link);
+      }
+
+      grid.appendChild(card);
+    });
+
+    container.appendChild(grid);
+
+    if (d.history_dates && d.history_dates.length > 1) {
+      const hist = document.createElement('div');
+      hist.style.cssText = 'margin-top:12px;color:var(--green-dim);font-size:.6rem;letter-spacing:1px;';
+      hist.textContent = 'HISTORY: ' + d.history_dates.join(' \u00b7 ');
+      container.appendChild(hist);
+    }
+  } catch(e) { console.warn('Scout load error:', e); }
+}
+
+async function runScout() {
+  const btn = document.getElementById('scout-run-btn');
+  btn.textContent = '[ SCANNING... ]';
+  btn.style.color = 'var(--yellow)';
+  try {
+    const r = await fetch(`${API}/api/scout/run`, { method: 'POST' });
+    const d = await r.json();
+    btn.textContent = '[ DONE: ' + d.result_count + ' posts ]';
+    btn.style.color = 'var(--green)';
+    await loadScout();
+    setTimeout(() => { btn.textContent = '[ SCAN NOW ]'; btn.style.color = 'var(--green-dim)'; }, 3000);
+  } catch(e) {
+    btn.textContent = '[ FAILED ]';
+    btn.style.color = 'var(--red)';
+    setTimeout(() => { btn.textContent = '[ SCAN NOW ]'; btn.style.color = 'var(--green-dim)'; }, 3000);
+  }
+}
+
 // ── SETTINGS ──
 async function loadSettings() {
   try {
@@ -1569,12 +1862,15 @@ async function saveSettings() {
 loadStats();
 loadTrades();
 loadWalletTxLog();
+loadScout();
+loadPositions();
 loadSettings();
 loadSystemStatus();
 
 setInterval(loadStats, 30000);
 setInterval(loadTrades, 60000);
 setInterval(loadWalletTxLog, 60000);
+setInterval(loadPositions, 30000);
 setInterval(loadSystemStatus, 20000);
 </script>
 </body>

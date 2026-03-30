@@ -75,6 +75,32 @@ def init_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_wallet_tx_timestamp ON wallet_transactions(timestamp);
+
+        CREATE TABLE IF NOT EXISTS positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            closed_at TEXT,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL DEFAULT 'long',
+            entry_price REAL NOT NULL,
+            exit_price REAL,
+            amount_sol REAL NOT NULL DEFAULT 0,
+            amount_usdc REAL NOT NULL DEFAULT 0,
+            tp_price REAL NOT NULL,
+            sl_price REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            pnl_usdc REAL,
+            pnl_percent REAL,
+            entry_tx TEXT,
+            exit_tx TEXT,
+            timeframe TEXT,
+            confidence INTEGER DEFAULT 0,
+            atr REAL,
+            notes TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
+        CREATE INDEX IF NOT EXISTS idx_positions_created ON positions(created_at);
     """)
     conn.close()
 
@@ -247,6 +273,97 @@ def get_kamino_net_deposited() -> float:
     ).fetchone()
     conn.close()
     return row["net_deposited"] if row else 0.0
+
+
+def insert_position(pos: dict) -> int:
+    """Insert a new position record."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO positions
+        (created_at, symbol, direction, entry_price, amount_sol, amount_usdc,
+         tp_price, sl_price, status, entry_tx, timeframe, confidence, atr, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            pos.get("created_at", datetime.utcnow().isoformat()),
+            pos["symbol"],
+            pos.get("direction", "long"),
+            pos["entry_price"],
+            pos.get("amount_sol", 0),
+            pos.get("amount_usdc", 0),
+            pos["tp_price"],
+            pos["sl_price"],
+            pos.get("status", "open"),
+            pos.get("entry_tx", ""),
+            pos.get("timeframe", ""),
+            pos.get("confidence", 0),
+            pos.get("atr"),
+            pos.get("notes", ""),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_open_positions() -> list[dict]:
+    """Get all open positions."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM positions WHERE status = 'open' ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_positions(limit: int = 50) -> list[dict]:
+    """Get recent positions (all statuses)."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM positions ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def close_position(
+    position_id: int,
+    exit_price: float,
+    exit_tx: str,
+    status: str,
+    pnl_usdc: float,
+    pnl_percent: float,
+) -> None:
+    """Close a position with exit details."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE positions
+        SET closed_at=?, exit_price=?, exit_tx=?, status=?, pnl_usdc=?, pnl_percent=?
+        WHERE id=?""",
+        (
+            datetime.utcnow().isoformat(),
+            exit_price,
+            exit_tx,
+            status,
+            pnl_usdc,
+            pnl_percent,
+            position_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_position_count(status: str = "open") -> int:
+    """Count positions by status."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM positions WHERE status = ?",
+        (status,),
+    ).fetchone()
+    conn.close()
+    return row["cnt"] if row else 0
 
 
 def get_recent_signal_hash() -> Optional[str]:

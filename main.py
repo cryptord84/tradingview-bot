@@ -21,6 +21,8 @@ from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
 from app.services.wallet_service import WalletService
 from app.utils.csv_backup import run_daily_backup
+from app.services.scout_service import scout_scheduler
+from app.services.position_monitor import get_position_monitor
 
 # --- Logging Setup ---
 LOG_DIR = Path("logs")
@@ -67,6 +69,14 @@ async def lifespan(app: FastAPI):
     ngrok = get_ngrok_monitor()
     ngrok_task = ngrok.start()
 
+    # Start daily scout scheduler (3:30 AM X.com scan)
+    scout_task = asyncio.create_task(scout_scheduler())
+
+    # Start position monitor (TP/SL auto-close)
+    pos_monitor = get_position_monitor()
+    if pos_monitor.enabled:
+        pos_monitor_task = pos_monitor.start()
+
     # Auto-deposit idle USDC into Kamino on startup
     kamino = KaminoClient()
     if kamino.enabled and kamino.auto_deposit:
@@ -92,6 +102,8 @@ async def lifespan(app: FastAPI):
         await _tg_handler.stop()
     tg_task.cancel()
     await ngrok.stop()
+    if pos_monitor.enabled:
+        await pos_monitor.stop()
 
 
 app = FastAPI(

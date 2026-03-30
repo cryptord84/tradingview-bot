@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 
 from app.config import get
-from app.database import insert_trade, get_stats, log_signal
+from app.database import insert_trade, get_stats, log_signal, insert_position, get_position_count
 from app.models import WebhookSignal, ClaudeDecision
 from app.services.claude_decision import get_claude_decision
 from app.services.jupiter_client import JupiterClient
@@ -262,6 +262,42 @@ class TradeEngine:
                 fees_sol=0.000005,
                 new_balance_sol=new_balance,
             )
+
+            # Create position record for TP/SL monitoring (BUY only)
+            if signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0:
+                pos_cfg = get("position_monitor") or {}
+                tp_mult = pos_cfg.get("tp_multiplier", 4.0)
+                sl_mult = pos_cfg.get("sl_multiplier", 1.5)
+                tp_price = sol_price + (signal.atr * tp_mult)
+                sl_price = sol_price - (signal.atr * sl_mult)
+
+                risk_cfg = get("risk")
+                max_positions = risk_cfg.get("max_open_positions", 3)
+                open_count = get_position_count("open")
+
+                if open_count < max_positions:
+                    pos_id = insert_position({
+                        "symbol": signal.symbol,
+                        "direction": "long",
+                        "entry_price": sol_price,
+                        "amount_sol": trade_sol,
+                        "amount_usdc": trade_usd,
+                        "tp_price": tp_price,
+                        "sl_price": sl_price,
+                        "entry_tx": swap_result["tx_signature"],
+                        "timeframe": signal.timeframe or "",
+                        "confidence": signal.confidence_score,
+                        "atr": signal.atr,
+                        "notes": f"TP=${tp_price:.2f} SL=${sl_price:.2f} ATR={signal.atr:.4f}",
+                    })
+                    logger.info(
+                        f"Position #{pos_id} opened: {trade_sol:.4f} SOL @ ${sol_price:.2f}, "
+                        f"TP=${tp_price:.2f}, SL=${sl_price:.2f}"
+                    )
+                else:
+                    logger.warning(f"Max open positions ({max_positions}) reached, skipping position tracking")
+            elif signal.signal_type.value == "BUY":
+                logger.warning("No ATR in signal, cannot set TP/SL for position tracking")
 
             # Auto-deposit idle USDC back to Kamino after trade
             if self.kamino.enabled and self.kamino.auto_deposit:
