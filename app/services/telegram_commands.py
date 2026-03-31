@@ -33,7 +33,7 @@ class TelegramCommandHandler:
         "/scan": "Scan Indicators directory for changes",
         "/review": "Review an indicator script (/review filename)",
         "/positions": "Show open positions with live P&L",
-        "/scout": "Run X.com TradingView bot scan now",
+        "/scout": "Run multi-source intelligence scan (X, blogs, on-chain, news)",
         "/start": "Start the bot",
         "/stop": "Stop the bot",
     }
@@ -180,7 +180,7 @@ class TelegramCommandHandler:
             f"Active: <b>{'YES' if active else 'NO'}</b>\n"
             f"API Health: <b>{'OK' if api_ok else 'DOWN'}</b>\n"
             f"Uptime: <code>{uptime}</code>\n"
-            f"Strategy: 1H v3.5 + Daily v2\n"
+            f"Strategy: 4H v1.3 + 1H v3.5 + Daily v2\n"
             f"Total Trades: {db_stats.get('total_trades', 0)}\n"
             f"Win Rate: {db_stats.get('win_rate', 0):.1f}%\n"
             f"Time: <code>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</code>"
@@ -671,8 +671,8 @@ class TelegramCommandHandler:
         await self.send("\n".join(lines))
 
     async def cmd_scout(self):
-        """Manually trigger the X.com TradingView bot scan."""
-        await self.send("🔍 Running X.com scan for TradingView bot intel...\nThis may take 15-30 seconds.")
+        """Manually trigger the multi-source intelligence scan."""
+        await self.send("🔍 Running multi-source intelligence scan (X.com, blogs, on-chain, news)...\nThis may take 30-60 seconds.")
         try:
             from app.services.scout_service import ScoutService
             scout = ScoutService()
@@ -810,7 +810,7 @@ class TelegramCommandHandler:
 
         client = anthropic.Anthropic(api_key=api_key)
         message = client.messages.create(
-            model=cfg.get("model", "claude-sonnet-4-6-20250514"),
+            model=cfg.get("model", "sonnet"),
             max_tokens=cfg.get("max_tokens", 1024),
             temperature=0.7,
             system=system_prompt,

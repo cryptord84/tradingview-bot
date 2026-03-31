@@ -27,3 +27,6 @@ pydantic==2.10.4
 
 # Base58 encoding
 base58==2.1.1
+
+# Web scraping & search
+firecrawl-py>=1.0.0

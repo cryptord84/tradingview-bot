@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_backtests, insert_backtest, delete_backtest
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
@@ -467,6 +467,7 @@ async def get_scout_report():
         "latest": latest,
         "history_dates": [r.get("date") for r in history],
         "total_reports": len(history),
+        "sources": latest.get("sources_searched", []) if latest else [],
     }
 
 
@@ -502,6 +503,10 @@ async def get_positions_api(status: str = "all", limit: int = 50):
                     p["unrealized_pnl_percent"] = ((current_price - p["entry_price"]) / p["entry_price"]) * 100
                     p["distance_to_tp_percent"] = ((p["tp_price"] - current_price) / current_price) * 100
                     p["distance_to_sl_percent"] = ((current_price - p["sl_price"]) / current_price) * 100
+                    # Effective SL considers trailing stop
+                    trail_sl = p.get("trail_sl_price") or 0
+                    p["effective_sl"] = max(p["sl_price"], trail_sl)
+                    p["trail_active"] = trail_sl > p["sl_price"]
         finally:
             await jupiter.close()
 
@@ -527,3 +532,151 @@ async def manual_close_position(position_id: int):
         await jupiter.close()
 
     return {"status": "ok", "position_id": position_id}
+
+
+@router.get("/positions/analytics")
+async def position_analytics():
+    """Get aggregated position analytics: win rate by strategy, equity curve, monthly P&L."""
+    return get_position_analytics()
+
+
+# ── Backtest Tracker ──────────────────────────────────────────────
+
+@router.get("/backtests")
+async def list_backtests(strategy: str = None, limit: int = 50):
+    """Get backtest results, optionally filtered by strategy."""
+    results = get_backtests(strategy=strategy, limit=limit)
+    return {"backtests": results, "total": len(results)}
+
+
+@router.post("/backtests")
+async def add_backtest(data: dict):
+    """Add a backtest result manually."""
+    required = ["strategy_name", "version", "timeframe", "symbol"]
+    for field in required:
+        if field not in data:
+            raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+    bt_id = insert_backtest(data)
+    return {"id": bt_id, "status": "ok"}
+
+
+@router.post("/backtests/import")
+async def import_backtests_from_reports():
+    """Scan Exports/ directory and import all .report.txt files."""
+    import re
+    from pathlib import Path
+
+    exports_dir = Path("Exports")
+    if not exports_dir.exists():
+        return {"imported": 0, "error": "Exports/ directory not found"}
+
+    existing = {bt.get("source_file") for bt in get_backtests(limit=500)}
+    imported = 0
+    errors = []
+
+    for report_file in sorted(exports_dir.glob("*.report.txt")):
+        fname = report_file.name
+        if fname in existing:
+            continue
+
+        try:
+            text = report_file.read_text()
+            bt = _parse_report_txt(text, fname)
+            if bt:
+                insert_backtest(bt)
+                imported += 1
+        except Exception as e:
+            errors.append(f"{fname}: {e}")
+
+    return {"imported": imported, "errors": errors, "total_in_db": len(get_backtests(limit=500))}
+
+
+@router.delete("/backtests/{backtest_id}")
+async def remove_backtest(backtest_id: int):
+    """Delete a backtest record."""
+    delete_backtest(backtest_id)
+    return {"status": "ok"}
+
+
+def _parse_report_txt(text: str, filename: str) -> dict:
+    """Parse a .report.txt file into a backtest dict."""
+    import re
+
+    def extract(pattern, txt, group=1, as_float=True):
+        m = re.search(pattern, txt, re.MULTILINE)
+        if not m:
+            return None
+        val = m.group(group).strip().replace(",", "").replace("$", "").replace("+", "").replace("%", "")
+        if as_float:
+            try:
+                return float(val)
+            except ValueError:
+                return None
+        return val
+
+    # Parse strategy name and version from filename
+    # e.g. SOL_Confluence_Pro_v3.5_COINBASE_SOLUSD_2026-03-29.report.txt
+    # or SOL_Mean_Reversion_v1.3_—_4H_Backtest_BINANCE_SOLUSDT_2026-03-30.report.txt
+    name_match = re.match(r"(.+?)_(v[\d.]+)", filename)
+    if name_match:
+        strategy_name = name_match.group(1).replace("_", " ")
+        version = name_match.group(2)
+    else:
+        strategy_name = filename.split("_")[0]
+        version = "unknown"
+
+    symbol = extract(r"Symbol\s*:\s*(\S+)", text, as_float=False) or ""
+    tf_raw = extract(r"Timeframe:\s*(.+?)$", text, as_float=False) or ""
+    tf_raw = tf_raw.strip()
+    # Normalize: "4 hours" → "4H", "1 hour" → "1H", "D" → "D"
+    tf_map = {"4 hours": "4H", "1 hour": "1H", "2 hours": "2H", "1 day": "D", "1 week": "W",
+              "240": "4H", "60": "1H", "120": "2H", "d": "D", "w": "W"}
+    timeframe = tf_map.get(tf_raw.lower(), tf_raw)
+    period_line = re.search(r"Period\s*:\s*(.+?)$", text, re.MULTILINE)
+    period_start, period_end = None, None
+    if period_line:
+        parts = period_line.group(1).split("—")
+        if len(parts) == 2:
+            period_start = parts[0].strip()
+            period_end = parts[1].strip()
+
+    capital = extract(r"Capital\s*:\s*\$([\d,.]+)", text)
+
+    # Determine status from filename/strategy
+    status = "tested"
+
+    return {
+        "strategy_name": strategy_name,
+        "version": version,
+        "timeframe": timeframe,
+        "symbol": symbol,
+        "period_start": period_start,
+        "period_end": period_end,
+        "initial_capital": capital,
+        "net_profit_usd": extract(r"Net Profit\s*:\s*\$([+\-\d,.]+)", text),
+        "net_profit_pct": extract(r"Net Profit\s*:.*?\(([+\-\d,.]+)%\)", text),
+        "gross_profit": extract(r"Gross Profit\s*:\s*\$([\d,.]+)", text),
+        "gross_loss": extract(r"Gross Loss\s*:\s*-?\$?([\d,.]+)", text),
+        "profit_factor": extract(r"Profit Factor\s*:\s*([\d.]+)", text),
+        "total_trades": int(extract(r"Total Trades\s*:\s*(\d+)", text) or 0),
+        "winning_trades": int(extract(r"Winners.*?:\s*(\d+)", text) or 0),
+        "losing_trades": int(extract(r"Losers.*?:\s*(\d+)", text) or extract(r"Winners\s*/\s*Losers\s*:\s*\d+\s*/\s*(\d+)", text) or 0),
+        "win_rate": extract(r"Win Rate\s*:\s*([\d.]+)", text),
+        "avg_win": extract(r"Avg Win\s*:\s*\$([+\-\d,.]+)", text),
+        "avg_loss": extract(r"Avg Loss\s*:\s*-?\$?([\d,.]+)", text),
+        "win_loss_ratio": extract(r"Win/Loss Ratio\s*:\s*([\d.]+)", text),
+        "largest_win": extract(r"Largest Win\s*:\s*\$([+\-\d,.]+)", text),
+        "largest_loss": extract(r"Largest Loss\s*:\s*-?\$?([\d,.]+)", text),
+        "max_drawdown": extract(r"Max Drawdown \(EOB\)\s*:\s*-?\$?([\d,.]+)", text),
+        "sharpe_ratio": extract(r"Sharpe Ratio\s*:\s*([+\-\d.]+)", text),
+        "sortino_ratio": extract(r"Sortino Ratio\s*:\s*([+\-\d.]+)", text),
+        "long_trades": int(extract(r"Long\s*:\s*(\d+)\s*trades", text) or 0),
+        "long_win_rate": extract(r"Long\s*:.*?\(([\d.]+)%\)", text),
+        "long_pnl": extract(r"Long\s*:.*?P&L:\s*\$([+\-\d,.]+)", text),
+        "short_trades": int(extract(r"Short\s*:\s*(\d+)\s*trades", text) or 0),
+        "short_win_rate": extract(r"Short\s*:.*?\(([\d.]+)%\)", text),
+        "short_pnl": extract(r"Short\s*:.*?P&L:\s*\$([+\-\d,.]+)", text),
+        "source_file": filename,
+        "notes": "",
+        "status": status,
+    }

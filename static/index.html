@@ -394,8 +394,27 @@ main {
 .card-wallet-log { grid-column: 1 / -1; }
 .card-scout { grid-column: 1 / -1; }
 .card-positions { grid-column: 1 / -1; }
+.card-analytics { grid-column: 1 / -1; }
+.card-backtests { grid-column: 1 / -1; }
+.bt-sort { cursor:pointer; user-select:none; position:relative; white-space:nowrap; }
+.bt-sort:hover { color: var(--green); }
+.bt-sort::after { content:''; margin-left:3px; font-size:.55rem; }
+.bt-sort.sort-asc::after { content:'\25B2'; }
+.bt-sort.sort-desc::after { content:'\25BC'; }
 .pnl-positive { color: #00ff41; }
 .pnl-negative { color: #ff4444; }
+
+/* ── ANALYTICS ── */
+.analytics-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px; }
+.analytics-stat { background:rgba(0,20,0,0.5); border:1px solid var(--green-dark); border-radius:4px; padding:10px 12px; text-align:center; }
+.analytics-stat .stat-value { font-size:1.1rem; font-weight:700; color:var(--green); font-family:var(--mono); }
+.analytics-stat .stat-label { font-size:.55rem; color:var(--green-dim); letter-spacing:1px; margin-top:2px; font-family:var(--mono); }
+.analytics-charts { display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:16px; }
+.analytics-chart-box { background:rgba(0,20,0,0.3); border:1px solid var(--green-dark); border-radius:4px; padding:12px; }
+.analytics-chart-box canvas { width:100% !important; }
+.tf-table { width:100%; }
+.tf-table td, .tf-table th { padding:4px 8px; font-size:.68rem; }
+.tf-bar { display:inline-block; height:8px; background:var(--green); border-radius:2px; vertical-align:middle; }
 .pos-progress { display:inline-block; width:60px; height:6px; background:#1a1a2e; border-radius:3px; overflow:hidden; vertical-align:middle; }
 .pos-progress-fill { height:100%; border-radius:3px; }
 
@@ -552,7 +571,9 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-settings,.card-costs { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-backtests,.card-settings,.card-costs { grid-column: 1; }
+  .analytics-grid { grid-template-columns: repeat(2, 1fr); }
+  .analytics-charts { grid-template-columns: 1fr; }
   .settings-columns { grid-template-columns: 1fr; }
   .wallet-grid { grid-template-columns: 1fr 1px 1fr; }
   .status-grid { grid-template-columns: repeat(3,1fr); }
@@ -807,17 +828,104 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <!-- POSITION ANALYTICS -->
+  <div class="card card-analytics" data-label="// POSITION ANALYTICS">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <span class="section-title" style="margin:0">Strategy Performance</span>
+      <button onclick="loadAnalytics()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+    </div>
+
+    <!-- KPI Row -->
+    <div class="analytics-grid" id="analytics-kpis">
+      <div class="analytics-stat"><div class="stat-value" id="a-total">--</div><div class="stat-label">CLOSED TRADES</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-winrate">--</div><div class="stat-label">WIN RATE</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-pnl">--</div><div class="stat-label">TOTAL P&L</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-ratio">--</div><div class="stat-label">WIN/LOSS RATIO</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-avgwin">--</div><div class="stat-label">AVG WIN</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-avgloss">--</div><div class="stat-label">AVG LOSS</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-best">--</div><div class="stat-label">BEST TRADE</div></div>
+      <div class="analytics-stat"><div class="stat-value" id="a-worst">--</div><div class="stat-label">WORST TRADE</div></div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="analytics-charts">
+      <div class="analytics-chart-box">
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">EQUITY CURVE (POSITIONS)</div>
+        <canvas id="equity-chart" height="180"></canvas>
+      </div>
+      <div class="analytics-chart-box">
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">OUTCOME DISTRIBUTION</div>
+        <canvas id="outcome-chart" height="180"></canvas>
+      </div>
+    </div>
+
+    <!-- Strategy Breakdown -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">PERFORMANCE BY TIMEFRAME</div>
+        <table class="tf-table" id="tf-breakdown-table">
+          <thead><tr><th>Timeframe</th><th>Trades</th><th>Win Rate</th><th>P&L</th><th></th></tr></thead>
+          <tbody id="tf-breakdown-tbody"></tbody>
+        </table>
+        <div id="tf-empty" style="color:var(--green-dim);padding:12px;text-align:center;font-family:var(--mono);font-size:.68rem;">No closed positions yet</div>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">MONTHLY P&L</div>
+        <table class="tf-table" id="monthly-table">
+          <thead><tr><th>Month</th><th>Trades</th><th>Wins</th><th>P&L</th></tr></thead>
+          <tbody id="monthly-tbody"></tbody>
+        </table>
+        <div id="monthly-empty" style="color:var(--green-dim);padding:12px;text-align:center;font-family:var(--mono);font-size:.68rem;">No monthly data yet</div>
+      </div>
+    </div>
+
+    <!-- Extra Stats -->
+    <div style="margin-top:12px;display:flex;gap:24px;font-family:var(--mono);font-size:.62rem;color:var(--green-dim);">
+      <span>AVG HOLD: <span id="a-hold" style="color:var(--green)">--</span></span>
+      <span>AVG SIZE: <span id="a-size" style="color:var(--green)">--</span> SOL</span>
+      <span>OPEN: <span id="a-open" style="color:var(--yellow)">--</span></span>
+      <span>TP HITS: <span id="a-tp" style="color:var(--green)">--</span></span>
+      <span>SL HITS: <span id="a-sl" style="color:var(--red)">--</span></span>
+    </div>
+  </div>
+
   <!-- SCOUT: X.COM TRADINGVIEW INTEL -->
   <div class="card card-scout" data-label="// TRADINGVIEW SCOUT">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <span class="section-title" style="margin:0">X.com Daily Intel</span>
       <div style="display:flex;gap:10px;align-items:center;">
         <span id="scout-date" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">--</span>
+        <button onclick="resetScoutHidden()" id="scout-reset-btn" style="display:none;background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ RESET HIDDEN ]</button>
         <button onclick="runScout()" id="scout-run-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ SCAN NOW ]</button>
       </div>
     </div>
     <div id="scout-results" style="font-family:var(--mono);font-size:.72rem;">
       <div style="color:var(--green-dim);padding:20px;text-align:center;">No scout data yet. Runs daily at 3:30 AM or click SCAN NOW.</div>
+    </div>
+  </div>
+
+  <!-- BACKTEST TRACKER -->
+  <div class="card card-backtests" data-label="// BACKTEST TRACKER">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Strategy Backtest History</span>
+      <div style="display:flex;gap:8px;">
+        <select id="bt-filter" onchange="loadBacktests()" style="background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.62rem;padding:2px 6px;">
+          <option value="">All Strategies</option>
+        </select>
+        <button onclick="resetBtHidden()" id="bt-reset-btn" style="display:none;background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ RESET HIDDEN ]</button>
+        <button onclick="importBacktests()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;" id="bt-import-btn">[ IMPORT REPORTS ]</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="backtests-table">
+        <thead><tr>
+          <th></th><th class="bt-sort" data-sort="strategy_name">Strategy</th><th class="bt-sort" data-sort="version">Ver</th><th class="bt-sort" data-sort="timeframe">TF</th><th class="bt-sort" data-sort="symbol">Symbol</th><th class="bt-sort" data-sort="total_trades">Trades</th><th class="bt-sort" data-sort="win_rate">Win %</th><th class="bt-sort" data-sort="profit_factor">PF</th><th class="bt-sort" data-sort="net_profit_usd">P&L</th><th class="bt-sort" data-sort="win_loss_ratio">R:R</th><th class="bt-sort" data-sort="max_drawdown">DD</th><th class="bt-sort" data-sort="sharpe_ratio">Sharpe</th><th class="bt-sort" data-sort="created_at">Date</th>
+        </tr></thead>
+        <tbody id="backtests-tbody"></tbody>
+      </table>
+    </div>
+    <div id="backtests-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
+      No backtests recorded. Click IMPORT REPORTS to scan Exports/ directory.
     </div>
   </div>
 
@@ -1615,7 +1723,7 @@ async function loadPositions() {
           '$' + p.entry_price.toFixed(2),
           '$' + currentPrice.toFixed(2),
           '$' + p.tp_price.toFixed(2),
-          '$' + p.sl_price.toFixed(2),
+          p.trail_active ? '$' + p.effective_sl.toFixed(2) + ' \u2191' : '$' + p.sl_price.toFixed(2),
           p.amount_sol.toFixed(4) + ' SOL',
         ];
         cells.forEach(text => {
@@ -1679,8 +1787,8 @@ async function loadPositions() {
         const pnl = p.pnl_usdc || 0;
         const pnlPct = p.pnl_percent || 0;
         const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-        const statusLabel = { closed_tp: 'TP HIT', closed_sl: 'SL HIT', closed_manual: 'MANUAL' }[p.status] || p.status;
-        const statusColor = p.status === 'closed_tp' ? '#00ff41' : p.status === 'closed_sl' ? '#ff4444' : '#FFD700';
+        const statusLabel = { closed_tp: 'TP HIT', closed_sl: 'SL HIT', closed_trail: 'TRAIL SL', closed_manual: 'MANUAL' }[p.status] || p.status;
+        const statusColor = p.status === 'closed_tp' ? '#00ff41' : (p.status === 'closed_sl' || p.status === 'closed_trail') ? '#ff4444' : '#FFD700';
 
         // Duration
         let duration = '--';
@@ -1722,6 +1830,348 @@ async function loadPositions() {
   }
 }
 
+// ── POSITION ANALYTICS ──
+let equityChart = null;
+let outcomeChart = null;
+
+async function loadAnalytics() {
+  try {
+    const r = await fetch(`${API}/api/positions/analytics`);
+    const d = await r.json();
+
+    // KPI values
+    document.getElementById('a-total').textContent = d.total_closed;
+    document.getElementById('a-winrate').textContent = d.total_closed ? d.win_rate + '%' : '--';
+    document.getElementById('a-pnl').textContent = d.total_closed ? '$' + d.total_pnl_usdc.toFixed(2) : '--';
+    document.getElementById('a-pnl').style.color = d.total_pnl_usdc >= 0 ? '#00ff41' : '#ff4444';
+    document.getElementById('a-ratio').textContent = d.total_closed ? d.win_loss_ratio + ':1' : '--';
+    document.getElementById('a-avgwin').textContent = d.total_closed ? '+$' + d.avg_win_usdc.toFixed(2) : '--';
+    document.getElementById('a-avgwin').style.color = '#00ff41';
+    document.getElementById('a-avgloss').textContent = d.total_closed ? '-$' + Math.abs(d.avg_loss_usdc).toFixed(2) : '--';
+    document.getElementById('a-avgloss').style.color = '#ff4444';
+    document.getElementById('a-best').textContent = d.total_closed ? '+$' + d.best_trade_usdc.toFixed(2) : '--';
+    document.getElementById('a-best').style.color = '#00ff41';
+    document.getElementById('a-worst').textContent = d.total_closed ? '-$' + Math.abs(d.worst_trade_usdc).toFixed(2) : '--';
+    document.getElementById('a-worst').style.color = '#ff4444';
+
+    // Footer stats
+    document.getElementById('a-hold').textContent = d.avg_hold_hours > 0 ? d.avg_hold_hours.toFixed(1) + 'h' : '--';
+    document.getElementById('a-size').textContent = d.avg_size_sol > 0 ? d.avg_size_sol.toFixed(4) : '--';
+    document.getElementById('a-open').textContent = d.open_count;
+    document.getElementById('a-tp').textContent = d.tp_wins;
+    document.getElementById('a-sl').textContent = d.sl_losses;
+
+    // Equity curve chart
+    const eqCtx = document.getElementById('equity-chart').getContext('2d');
+    const eqLabels = d.equity_curve.map(p => {
+      const dt = new Date(p.ts);
+      return dt.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+    });
+    const eqData = d.equity_curve.map(p => p.cumulative);
+
+    if (equityChart) equityChart.destroy();
+    equityChart = new Chart(eqCtx, {
+      type: 'line',
+      data: {
+        labels: eqLabels,
+        datasets: [{
+          data: eqData,
+          borderColor: '#00FF41',
+          backgroundColor: 'rgba(0,255,65,0.06)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: eqData.length > 30 ? 0 : 3,
+          pointBackgroundColor: d.equity_curve.map(p => p.pnl >= 0 ? '#00ff41' : '#ff4444'),
+          borderWidth: 1.5,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const pt = d.equity_curve[ctx.dataIndex];
+                return `Cumulative: $${pt.cumulative.toFixed(2)} | Trade: $${pt.pnl.toFixed(2)} (${pt.status})`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { ticks: { color: '#00AA2B', font: { size: 9 } }, grid: { color: '#001200' } },
+          y: {
+            ticks: { color: '#00AA2B', font: { size: 9 }, callback: v => '$' + v.toFixed(0) },
+            grid: { color: '#001200' },
+          }
+        }
+      }
+    });
+
+    // Outcome distribution (doughnut)
+    const outCtx = document.getElementById('outcome-chart').getContext('2d');
+    if (outcomeChart) outcomeChart.destroy();
+    outcomeChart = new Chart(outCtx, {
+      type: 'doughnut',
+      data: {
+        labels: ['TP Wins', 'SL Losses', 'Manual'],
+        datasets: [{
+          data: [d.tp_wins, d.sl_losses, d.manual_closes],
+          backgroundColor: ['#00FF41', '#FF2222', '#FFD700'],
+          borderColor: '#000',
+          borderWidth: 1,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '65%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#00AA2B', font: { size: 10, family: 'monospace' }, padding: 12 } }
+        }
+      }
+    });
+
+    // Timeframe breakdown table
+    const tfBody = document.getElementById('tf-breakdown-tbody');
+    const tfEmpty = document.getElementById('tf-empty');
+    if (d.by_timeframe.length > 0) {
+      tfEmpty.style.display = 'none';
+      const maxPnl = Math.max(...d.by_timeframe.map(t => Math.abs(t.pnl_usdc)), 1);
+      tfBody.innerHTML = d.by_timeframe.map(t => {
+        const wr = t.total > 0 ? ((t.wins / t.total) * 100).toFixed(0) : 0;
+        const pnlColor = t.pnl_usdc >= 0 ? '#00ff41' : '#ff4444';
+        const barW = Math.round((Math.abs(t.pnl_usdc) / maxPnl) * 60);
+        const barColor = t.pnl_usdc >= 0 ? '#00ff41' : '#ff4444';
+        const label = t.timeframe === '240' ? '4H' : t.timeframe === '60' ? '1H' : t.timeframe === 'D' || t.timeframe === '1D' ? 'Daily' : t.timeframe;
+        return `<tr>
+          <td style="color:var(--green)">${label}</td>
+          <td>${t.total}</td>
+          <td>${wr}%</td>
+          <td style="color:${pnlColor}">$${t.pnl_usdc.toFixed(2)}</td>
+          <td><span class="tf-bar" style="width:${barW}px;background:${barColor}"></span></td>
+        </tr>`;
+      }).join('');
+    } else {
+      tfEmpty.style.display = 'block';
+      tfBody.innerHTML = '';
+    }
+
+    // Monthly P&L table
+    const mBody = document.getElementById('monthly-tbody');
+    const mEmpty = document.getElementById('monthly-empty');
+    if (d.monthly.length > 0) {
+      mEmpty.style.display = 'none';
+      mBody.innerHTML = d.monthly.map(m => {
+        const pnlColor = m.pnl_usdc >= 0 ? '#00ff41' : '#ff4444';
+        const wr = m.trades > 0 ? ((m.wins / m.trades) * 100).toFixed(0) + '%' : '--';
+        return `<tr>
+          <td style="color:var(--green)">${m.month}</td>
+          <td>${m.trades}</td>
+          <td>${wr}</td>
+          <td style="color:${pnlColor}">$${m.pnl_usdc.toFixed(2)}</td>
+        </tr>`;
+      }).join('');
+    } else {
+      mEmpty.style.display = 'block';
+      mBody.innerHTML = '';
+    }
+  } catch(e) {
+    console.error('Failed to load analytics:', e);
+  }
+}
+
+// ── BACKTEST TRACKER ──
+let btSortKey = null;
+let btSortDir = 'desc';
+
+function initBtSort() {
+  document.querySelectorAll('.bt-sort').forEach(th => {
+    th.onclick = () => {
+      const key = th.dataset.sort;
+      if (btSortKey === key) {
+        btSortDir = btSortDir === 'desc' ? 'asc' : 'desc';
+      } else {
+        btSortKey = key;
+        btSortDir = 'desc';
+      }
+      document.querySelectorAll('.bt-sort').forEach(h => h.classList.remove('sort-asc', 'sort-desc'));
+      th.classList.add(btSortDir === 'asc' ? 'sort-asc' : 'sort-desc');
+      loadBacktests();
+    };
+  });
+}
+
+function sortBacktests(arr) {
+  if (!btSortKey) return arr;
+  const stringKeys = ['strategy_name', 'version', 'timeframe', 'symbol', 'created_at'];
+  const isString = stringKeys.includes(btSortKey);
+  return [...arr].sort((a, b) => {
+    let va = a[btSortKey], vb = b[btSortKey];
+    if (va == null) va = isString ? '' : -Infinity;
+    if (vb == null) vb = isString ? '' : -Infinity;
+    if (isString) { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
+    let cmp = va < vb ? -1 : va > vb ? 1 : 0;
+    return btSortDir === 'asc' ? cmp : -cmp;
+  });
+}
+
+async function loadBacktests() {
+  try {
+    const filter = document.getElementById('bt-filter').value;
+    const url = filter ? `${API}/api/backtests?strategy=${encodeURIComponent(filter)}` : `${API}/api/backtests`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const tbody = document.getElementById('backtests-tbody');
+    const empty = document.getElementById('backtests-empty');
+    const select = document.getElementById('bt-filter');
+
+    if (d.backtests.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+
+    // Populate filter dropdown (only on first load or if empty)
+    if (select.options.length <= 1) {
+      const strategies = [...new Set(d.backtests.map(b => b.strategy_name))];
+      strategies.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = s;
+        select.appendChild(opt);
+      });
+    }
+
+    const sorted = sortBacktests(d.backtests);
+    const BT_COLLAPSED = 7;
+    tbody.innerHTML = sorted.map((b, idx) => {
+      const pf = b.profit_factor;
+      const pfColor = pf >= 1.5 ? '#00ff41' : pf >= 1.0 ? '#FFD700' : '#ff4444';
+      const pnlColor = (b.net_profit_usd || 0) >= 0 ? '#00ff41' : '#ff4444';
+      const wrColor = (b.win_rate || 0) >= 50 ? '#00ff41' : (b.win_rate || 0) >= 40 ? '#FFD700' : '#ff4444';
+      const wr = b.win_rate != null ? b.win_rate.toFixed(1) + '%' : '--';
+      const rr = b.win_loss_ratio != null ? b.win_loss_ratio.toFixed(2) : '--';
+      const pnl = b.net_profit_usd != null ? '$' + b.net_profit_usd.toFixed(2) : '--';
+      const dd = b.max_drawdown != null ? '$' + b.max_drawdown.toFixed(0) : '--';
+      const sharpe = b.sharpe_ratio != null ? b.sharpe_ratio.toFixed(3) : '--';
+      const dt = b.created_at ? b.created_at.substring(0, 10) : '--';
+      const tfLabel = b.timeframe === '240' ? '4H' : b.timeframe === '60' ? '1H' : b.timeframe || '--';
+      const hidden = idx >= BT_COLLAPSED ? 'style="display:none" data-bt-extra' : '';
+
+      return `<tr ${hidden}>
+        <td><button onclick="hideBtRow(this)" style="background:transparent;border:none;color:var(--green-dark);font-family:var(--mono);font-size:.6rem;cursor:pointer;padding:0 4px;" title="Hide row">\u2715</button></td>
+        <td style="color:var(--green)">${b.strategy_name}</td>
+        <td>${b.version}</td>
+        <td>${tfLabel}</td>
+        <td style="font-size:.6rem">${b.symbol || '--'}</td>
+        <td>${b.total_trades || '--'}</td>
+        <td style="color:${wrColor}">${wr}</td>
+        <td style="color:${pfColor};font-weight:700">${pf != null ? pf.toFixed(3) : '--'}</td>
+        <td style="color:${pnlColor}">${pnl}</td>
+        <td>${rr}</td>
+        <td>${dd}</td>
+        <td>${sharpe}</td>
+        <td style="font-size:.6rem">${dt}</td>
+      </tr>`;
+    }).join('');
+
+    // Expand/collapse toggle
+    const existingToggle = document.getElementById('bt-toggle');
+    if (existingToggle) existingToggle.remove();
+    if (d.backtests.length > BT_COLLAPSED) {
+      const toggle = document.createElement('button');
+      toggle.id = 'bt-toggle';
+      toggle.style.cssText = 'background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;margin-top:10px;width:100%;text-align:center;';
+      toggle.textContent = `[ SHOW ALL ${d.backtests.length} BACKTESTS ]`;
+      toggle.dataset.expanded = 'false';
+      toggle.onclick = () => {
+        const expanded = toggle.dataset.expanded === 'true';
+        tbody.querySelectorAll('[data-bt-extra]').forEach(tr => {
+          tr.style.display = expanded ? 'none' : '';
+        });
+        toggle.dataset.expanded = expanded ? 'false' : 'true';
+        toggle.textContent = expanded ? `[ SHOW ALL ${d.backtests.length} BACKTESTS ]` : '[ COLLAPSE ]';
+      };
+      tbody.closest('.card').appendChild(toggle);
+    }
+  } catch(e) {
+    console.error('Failed to load backtests:', e);
+  }
+}
+
+async function importBacktests() {
+  const btn = document.getElementById('bt-import-btn');
+  btn.textContent = '[ IMPORTING... ]';
+  btn.style.color = 'var(--yellow)';
+  try {
+    const r = await fetch(`${API}/api/backtests/import`, { method: 'POST' });
+    const d = await r.json();
+    btn.textContent = `[ IMPORTED ${d.imported} ]`;
+    btn.style.color = 'var(--green)';
+    await loadBacktests();
+    setTimeout(() => { btn.textContent = '[ IMPORT REPORTS ]'; btn.style.color = 'var(--green-dim)'; }, 3000);
+  } catch(e) {
+    btn.textContent = '[ FAILED ]';
+    btn.style.color = 'var(--red)';
+    setTimeout(() => { btn.textContent = '[ IMPORT REPORTS ]'; btn.style.color = 'var(--green-dim)'; }, 3000);
+  }
+}
+
+let scoutHiddenCount = 0;
+function hideScoutRow(btn) {
+  const card = btn.closest('[data-scout-idx]');
+  card.style.display = 'none';
+  card.dataset.scoutHidden = 'true';
+  scoutHiddenCount++;
+  const resetBtn = document.getElementById('scout-reset-btn');
+  resetBtn.style.display = '';
+  resetBtn.textContent = `[ RESET ${scoutHiddenCount} HIDDEN ]`;
+}
+function resetScoutHidden() {
+  const SCOUT_COLLAPSED = 3;
+  document.querySelectorAll('[data-scout-hidden]').forEach(el => {
+    el.removeAttribute('data-scout-hidden');
+    const idx = parseInt(el.dataset.scoutIdx);
+    const toggle = document.getElementById('scout-toggle');
+    if (idx >= SCOUT_COLLAPSED && toggle && toggle.dataset.expanded === 'false') {
+      el.style.display = 'none';
+    } else {
+      el.style.display = '';
+    }
+  });
+  scoutHiddenCount = 0;
+  document.getElementById('scout-reset-btn').style.display = 'none';
+}
+
+let btHiddenCount = 0;
+function hideBtRow(btn) {
+  const tr = btn.closest('tr');
+  tr.style.display = 'none';
+  tr.dataset.btHidden = 'true';
+  btHiddenCount++;
+  const resetBtn = document.getElementById('bt-reset-btn');
+  resetBtn.style.display = '';
+  resetBtn.textContent = `[ RESET ${btHiddenCount} HIDDEN ]`;
+}
+
+function resetBtHidden() {
+  document.querySelectorAll('#backtests-tbody tr[data-bt-hidden]').forEach(tr => {
+    tr.removeAttribute('data-bt-hidden');
+    // Respect the expand/collapse state
+    const toggle = document.getElementById('bt-toggle');
+    if (tr.hasAttribute('data-bt-extra') && toggle && toggle.dataset.expanded === 'false') {
+      tr.style.display = 'none';
+    } else {
+      tr.style.display = '';
+    }
+  });
+  btHiddenCount = 0;
+  document.getElementById('bt-reset-btn').style.display = 'none';
+}
+
 async function loadScout() {
   try {
     const r = await fetch(`${API}/api/scout`);
@@ -1744,7 +2194,10 @@ async function loadScout() {
     const grid = document.createElement('div');
     grid.style.cssText = 'display:grid;gap:10px;';
 
-    d.latest.posts.forEach(p => {
+    const SCOUT_COLLAPSED = 3;
+    const posts = d.latest.posts;
+
+    posts.forEach((p, idx) => {
       const card = document.createElement('div');
       card.style.cssText = 'padding:10px 12px;background:rgba(0,255,65,0.03);border-left:2px solid var(--green-dark);border-radius:4px;display:flex;justify-content:space-between;align-items:start;gap:10px;';
 
@@ -1762,7 +2215,19 @@ async function loadScout() {
       snippet.textContent = (p.content || '').slice(0, 150);
       info.appendChild(snippet);
 
+      if (p.scanned_at || d.latest.timestamp) {
+        const ts = document.createElement('div');
+        const tsVal = p.scanned_at || d.latest.timestamp;
+        const tsDate = new Date(tsVal + 'Z');
+        ts.style.cssText = 'color:var(--green-dark);font-size:.55rem;margin-top:3px;letter-spacing:1px;';
+        ts.textContent = 'SCANNED ' + tsDate.toLocaleString();
+        info.appendChild(ts);
+      }
+
       card.appendChild(info);
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;gap:6px;align-items:center;flex-shrink:0;';
 
       if (p.url) {
         const link = document.createElement('a');
@@ -1771,13 +2236,45 @@ async function loadScout() {
         link.rel = 'noopener noreferrer';
         link.style.cssText = 'color:var(--green-dim);font-size:.6rem;white-space:nowrap;text-decoration:none;border:1px solid var(--green-dark);padding:3px 8px;border-radius:3px;';
         link.textContent = 'OPEN \u2197';
-        card.appendChild(link);
+        actions.appendChild(link);
       }
 
+      const hideBtn = document.createElement('button');
+      hideBtn.onclick = function() { hideScoutRow(this); };
+      hideBtn.style.cssText = 'background:transparent;border:none;color:var(--green-dark);font-family:var(--mono);font-size:.65rem;cursor:pointer;padding:0 4px;';
+      hideBtn.title = 'Hide result';
+      hideBtn.textContent = '\u2715';
+      actions.appendChild(hideBtn);
+
+      card.appendChild(actions);
+
+      if (idx >= SCOUT_COLLAPSED) card.style.display = 'none';
+      card.dataset.scoutIdx = idx;
       grid.appendChild(card);
     });
 
     container.appendChild(grid);
+
+    // Expand/collapse button
+    if (posts.length > SCOUT_COLLAPSED) {
+      const toggle = document.createElement('button');
+      toggle.style.cssText = 'background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;margin-top:10px;width:100%;text-align:center;';
+      toggle.textContent = `[ SHOW ALL ${posts.length} RESULTS ]`;
+      toggle.dataset.expanded = 'false';
+      toggle.id = 'scout-toggle';
+      toggle.onclick = () => {
+        const expanded = toggle.dataset.expanded === 'true';
+        grid.querySelectorAll('[data-scout-idx]').forEach(el => {
+          if (parseInt(el.dataset.scoutIdx) >= SCOUT_COLLAPSED) {
+            if (el.dataset.scoutHidden) return;
+            el.style.display = expanded ? 'none' : '';
+          }
+        });
+        toggle.dataset.expanded = expanded ? 'false' : 'true';
+        toggle.textContent = expanded ? `[ SHOW ALL ${posts.length} RESULTS ]` : `[ COLLAPSE ]`;
+      };
+      container.appendChild(toggle);
+    }
 
     if (d.history_dates && d.history_dates.length > 1) {
       const hist = document.createElement('div');
@@ -1864,6 +2361,9 @@ loadTrades();
 loadWalletTxLog();
 loadScout();
 loadPositions();
+loadAnalytics();
+initBtSort();
+loadBacktests();
 loadSettings();
 loadSystemStatus();
 
@@ -1871,6 +2371,7 @@ setInterval(loadStats, 30000);
 setInterval(loadTrades, 60000);
 setInterval(loadWalletTxLog, 60000);
 setInterval(loadPositions, 30000);
+setInterval(loadAnalytics, 60000);
 setInterval(loadSystemStatus, 20000);
 </script>
 </body>

@@ -199,10 +199,44 @@ footer a:hover { color: var(--green); }
 <div class="version-block">
   <div class="version-header">
     <div>
+      <span class="version-tag">v1.3 (4H) + v3.5 (1H) + v2 (Daily)</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-active">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Triple-timeframe deployment: 4H Mean Reversion (v1.3) + 1H (v3.5) + Daily (v2)</li>
+      <li><span class="change-type type-feature">feature</span> 4H Mean Reversion indicator &mdash; longs-only BB dip buys with 6-factor confirmation scoring</li>
+      <li><span class="change-type type-feature">feature</span> Position Monitor &mdash; background TP/SL auto-close service with retry logic</li>
+      <li><span class="change-type type-feature">feature</span> Trailing Stop-Loss &mdash; SL ratchets up after 1.5x ATR profit, trails at 1.0x ATR offset</li>
+      <li><span class="change-type type-feature">feature</span> Position Analytics dashboard &mdash; equity curve, win rate by strategy, monthly P&L, outcome distribution</li>
+      <li><span class="change-type type-feature">feature</span> Firecrawl-powered Scout &mdash; multi-source intelligence scan (X.com, blogs, on-chain, crypto news)</li>
+      <li><span class="change-type type-feature">feature</span> Dashboard positions card &mdash; open positions with live P&L, progress bars, manual close</li>
+      <li><span class="change-type type-feature">feature</span> Telegram /positions command &mdash; view open positions with live P&L from mobile</li>
+      <li><span class="change-type type-infra">infra</span> SQLite positions table with 5 query functions for position lifecycle</li>
+      <li><span class="change-type type-feature">feature</span> Backtest Results Tracker &mdash; import TradingView exports, compare strategies by PF/WR/R:R</li>
+      <li><span class="change-type type-infra">infra</span> Firecrawl API integration with fallback chain: Firecrawl &rarr; Tavily &rarr; DuckDuckGo</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">4H Strategy: </span><span class="metric-value">v1.3 MeanRev</span></div>
+      <div class="metric"><span class="metric-label">1H Strategy: </span><span class="metric-value">v3.5</span></div>
+      <div class="metric"><span class="metric-label">Daily Strategy: </span><span class="metric-value">v2</span></div>
+      <div class="metric"><span class="metric-label">4H Backtest PF: </span><span class="metric-value good">1.091</span></div>
+      <div class="metric"><span class="metric-label">4H Trades: </span><span class="metric-value">109</span></div>
+      <div class="metric"><span class="metric-label">4H Win Rate: </span><span class="metric-value warn">31.2%</span></div>
+      <div class="metric"><span class="metric-label">4H R:R: </span><span class="metric-value good">2.41</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
       <span class="version-tag">v3.5 (1H) + v2 (Daily)</span>
       <span class="version-date">&nbsp;&nbsp;2026-03-29</span>
     </div>
-    <span class="version-status status-active">LIVE</span>
+    <span class="version-status status-superseded">superseded</span>
   </div>
   <div class="version-body">
     <ul>
@@ -224,6 +258,110 @@ footer a:hover { color: var(--green); }
 
 <!-- ════════════════════════════════════════════════════════════════ -->
 <div class="section-divider">-- STRATEGY OPTIMIZATION HISTORY --</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Mean Reversion v1.4</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-superseded">over-optimized</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Added Daily SMA200 trend filter + raised min confirms to 5/6</li>
+      <li><span class="change-type type-perf">perf</span> Result: Only 3 trades in 5 years &mdash; over-optimization killed all signals</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value bad">3</span></div>
+      <div class="metric"><span class="metric-label">Verdict: </span><span class="metric-value bad">Non-viable</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Mean Reversion v1.3</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-active">best 4H</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Longs-only &mdash; disabled shorts (SOL shorts unprofitable in uptrend)</li>
+      <li><span class="change-type type-perf">perf</span> Raised min confirms to 4/6, removed early BB mid exit, widened TP to 4x ATR</li>
+      <li><span class="change-type type-perf">perf</span> First profitable version: +7.1% net, PF 1.091, R:R 2.41</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">109</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value warn">31.2%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value good">1.091</span></div>
+      <div class="metric"><span class="metric-label">R:R: </span><span class="metric-value good">2.41</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Mean Reversion v1.2</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> BB touch hard gate + 3/6 confirms, both longs &amp; shorts</li>
+      <li><span class="change-type type-perf">perf</span> Result: 732 trades, -47% &mdash; shorts terrible (-33%), BB mid exit clipped winners</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value">732</span></div>
+      <div class="metric"><span class="metric-label">Win Rate: </span><span class="metric-value bad">30.6%</span></div>
+      <div class="metric"><span class="metric-label">PF: </span><span class="metric-value bad">0.690</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Mean Reversion v1.1</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-perf">perf</span> Min score 3/7 with no hard gate &mdash; too loose</li>
+      <li><span class="change-type type-perf">perf</span> Result: 2,866 trades, -81% &mdash; massive overtrading</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value bad">2,866</span></div>
+      <div class="metric"><span class="metric-label">Net: </span><span class="metric-value bad">-81%</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">Mean Reversion v1.0</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Initial 4H mean reversion: BB + RSI + Banker Fund Flow + Volume + Choppiness + Swing + SuperTrend</li>
+      <li><span class="change-type type-perf">perf</span> SuperTrend hard gate + 4/6 score too restrictive &mdash; only 3 trades in 5 years</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Trades: </span><span class="metric-value bad">3</span></div>
+      <div class="metric"><span class="metric-label">Verdict: </span><span class="metric-value bad">Too restrictive</span></div>
+    </div>
+  </div>
+</div>
 
 <div class="version-block">
   <div class="version-header">

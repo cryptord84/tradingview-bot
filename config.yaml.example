@@ -21,7 +21,7 @@ claude:
   mode: "cli"                                 # "cli" = Claude Code CLI (no API key needed)
                                               # "api" = Anthropic API (requires api_key)
   api_key: ""                                 # Only needed if mode: "api"
-  model: "claude-sonnet-4-6-20250514"         # Used for API mode; CLI uses your default model
+  model: "sonnet"                              # CLI shorthand; for API mode use full ID e.g. "claude-sonnet-4-6"
   max_tokens: 1024
   temperature: 0.3                            # Only used in API mode
   timeout_seconds: 60                         # CLI can be slower than API
@@ -71,6 +71,10 @@ position_monitor:
   tp_multiplier: 4.0                 # TP = entry + ATR * this
   sl_multiplier: 1.5                 # SL = entry - ATR * this
   max_close_retries: 3               # Retry failed close attempts
+  trailing_stop:
+    enabled: true
+    activation_atr: 1.5              # Trail activates at entry + 1.5x ATR
+    offset_atr: 1.0                  # Trail follows price at 1.0x ATR distance
 
 # --- Geopolitical Risk Weight ---
 geo_risk:
@@ -119,6 +123,10 @@ database:
   path: "data/trades.db"
   csv_backup_dir: "data/csv_backups"
   csv_backup_daily: true
+
+# --- Firecrawl ---
+firecrawl:
+  api_key: ""                       # https://firecrawl.dev
 
 # --- Logging ---
 logging:

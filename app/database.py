@@ -88,6 +88,7 @@ def init_db():
             amount_usdc REAL NOT NULL DEFAULT 0,
             tp_price REAL NOT NULL,
             sl_price REAL NOT NULL,
+            trail_sl_price REAL,
             status TEXT NOT NULL DEFAULT 'open',
             pnl_usdc REAL,
             pnl_percent REAL,
@@ -101,7 +102,54 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
         CREATE INDEX IF NOT EXISTS idx_positions_created ON positions(created_at);
-    """)
+
+        CREATE TABLE IF NOT EXISTS backtests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            strategy_name TEXT NOT NULL,
+            version TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            period_start TEXT,
+            period_end TEXT,
+            initial_capital REAL,
+            net_profit_usd REAL,
+            net_profit_pct REAL,
+            gross_profit REAL,
+            gross_loss REAL,
+            profit_factor REAL,
+            total_trades INTEGER,
+            winning_trades INTEGER,
+            losing_trades INTEGER,
+            win_rate REAL,
+            avg_win REAL,
+            avg_loss REAL,
+            win_loss_ratio REAL,
+            largest_win REAL,
+            largest_loss REAL,
+            max_drawdown REAL,
+            sharpe_ratio REAL,
+            sortino_ratio REAL,
+            long_trades INTEGER,
+            long_win_rate REAL,
+            long_pnl REAL,
+            short_trades INTEGER,
+            short_win_rate REAL,
+            short_pnl REAL,
+            source_file TEXT,
+            notes TEXT,
+            status TEXT NOT NULL DEFAULT 'tested'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_backtests_strategy ON backtests(strategy_name, version);
+
+        """)
+    # Migration: add trail_sl_price column if not exists
+    try:
+        conn.execute("SELECT trail_sl_price FROM positions LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE positions ADD COLUMN trail_sl_price REAL")
+    conn.commit()
     conn.close()
 
 
@@ -355,6 +403,134 @@ def close_position(
     conn.close()
 
 
+def get_position_analytics() -> dict:
+    """Get aggregated position analytics for the dashboard."""
+    conn = get_db()
+
+    # Overall closed position stats
+    overall = conn.execute("""
+        SELECT
+            COUNT(*) as total_closed,
+            SUM(CASE WHEN status = 'closed_tp' THEN 1 ELSE 0 END) as tp_wins,
+            SUM(CASE WHEN status = 'closed_sl' THEN 1 ELSE 0 END) as sl_losses,
+            SUM(CASE WHEN status = 'closed_manual' THEN 1 ELSE 0 END) as manual_closes,
+            COALESCE(SUM(pnl_usdc), 0) as total_pnl_usdc,
+            COALESCE(AVG(pnl_usdc), 0) as avg_pnl_usdc,
+            COALESCE(AVG(pnl_percent), 0) as avg_pnl_percent,
+            COALESCE(AVG(CASE WHEN pnl_usdc > 0 THEN pnl_usdc END), 0) as avg_win_usdc,
+            COALESCE(AVG(CASE WHEN pnl_usdc < 0 THEN pnl_usdc END), 0) as avg_loss_usdc,
+            COALESCE(MAX(pnl_usdc), 0) as best_trade_usdc,
+            COALESCE(MIN(pnl_usdc), 0) as worst_trade_usdc,
+            COALESCE(AVG(amount_sol), 0) as avg_size_sol,
+            COALESCE(AVG(
+                CASE WHEN closed_at IS NOT NULL AND created_at IS NOT NULL
+                THEN (julianday(closed_at) - julianday(created_at)) * 24
+                END
+            ), 0) as avg_hold_hours
+        FROM positions WHERE status != 'open'
+    """).fetchone()
+
+    # Per-timeframe breakdown (maps to indicator)
+    by_timeframe = conn.execute("""
+        SELECT
+            COALESCE(timeframe, 'unknown') as timeframe,
+            COUNT(*) as total,
+            SUM(CASE WHEN pnl_usdc > 0 THEN 1 ELSE 0 END) as wins,
+            SUM(CASE WHEN pnl_usdc <= 0 THEN 1 ELSE 0 END) as losses,
+            COALESCE(SUM(pnl_usdc), 0) as pnl_usdc,
+            COALESCE(AVG(pnl_percent), 0) as avg_pnl_pct
+        FROM positions WHERE status != 'open'
+        GROUP BY timeframe
+        ORDER BY pnl_usdc DESC
+    """).fetchall()
+
+    # Equity curve: cumulative P&L over time (closed positions chronologically)
+    equity_curve = conn.execute("""
+        SELECT
+            closed_at as ts,
+            pnl_usdc,
+            symbol,
+            status
+        FROM positions
+        WHERE status != 'open' AND closed_at IS NOT NULL
+        ORDER BY closed_at ASC
+    """).fetchall()
+
+    # Monthly breakdown
+    monthly = conn.execute("""
+        SELECT
+            strftime('%Y-%m', closed_at) as month,
+            COUNT(*) as trades,
+            SUM(CASE WHEN pnl_usdc > 0 THEN 1 ELSE 0 END) as wins,
+            COALESCE(SUM(pnl_usdc), 0) as pnl_usdc
+        FROM positions
+        WHERE status != 'open' AND closed_at IS NOT NULL
+        GROUP BY month
+        ORDER BY month ASC
+    """).fetchall()
+
+    # Open position count
+    open_count = conn.execute(
+        "SELECT COUNT(*) as cnt FROM positions WHERE status = 'open'"
+    ).fetchone()
+
+    conn.close()
+
+    # Build equity curve with running total
+    curve_data = []
+    cumulative = 0.0
+    for row in equity_curve:
+        cumulative += row["pnl_usdc"]
+        curve_data.append({
+            "ts": row["ts"],
+            "pnl": row["pnl_usdc"],
+            "cumulative": round(cumulative, 2),
+            "symbol": row["symbol"],
+            "status": row["status"],
+        })
+
+    o = {k: (v if v is not None else 0) for k, v in dict(overall).items()} if overall else {}
+    win_count = o.get("tp_wins", 0) + o.get("manual_closes", 0)
+    total = o.get("total_closed", 0)
+    # Win/loss ratio
+    avg_win = abs(o.get("avg_win_usdc", 0))
+    avg_loss = abs(o.get("avg_loss_usdc", 0) or 1)
+    win_loss_ratio = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
+
+    return {
+        "total_closed": total,
+        "open_count": open_count["cnt"] if open_count else 0,
+        "tp_wins": o.get("tp_wins", 0),
+        "sl_losses": o.get("sl_losses", 0),
+        "manual_closes": o.get("manual_closes", 0),
+        "win_rate": round((win_count / total) * 100, 1) if total > 0 else 0,
+        "total_pnl_usdc": round(o.get("total_pnl_usdc", 0), 2),
+        "avg_pnl_usdc": round(o.get("avg_pnl_usdc", 0), 2),
+        "avg_pnl_percent": round(o.get("avg_pnl_percent", 0), 2),
+        "avg_win_usdc": round(o.get("avg_win_usdc", 0), 2),
+        "avg_loss_usdc": round(o.get("avg_loss_usdc", 0), 2),
+        "win_loss_ratio": win_loss_ratio,
+        "best_trade_usdc": round(o.get("best_trade_usdc", 0), 2),
+        "worst_trade_usdc": round(o.get("worst_trade_usdc", 0), 2),
+        "avg_size_sol": round(o.get("avg_size_sol", 0), 4),
+        "avg_hold_hours": round(o.get("avg_hold_hours", 0), 1),
+        "by_timeframe": [dict(r) for r in by_timeframe],
+        "equity_curve": curve_data,
+        "monthly": [dict(r) for r in monthly],
+    }
+
+
+def update_trail_sl(position_id: int, trail_sl_price: float) -> None:
+    """Update the trailing stop-loss price for a position."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE positions SET trail_sl_price = ? WHERE id = ?",
+        (trail_sl_price, position_id),
+    )
+    conn.commit()
+    conn.close()
+
+
 def get_position_count(status: str = "open") -> int:
     """Count positions by status."""
     conn = get_db()
@@ -364,6 +540,90 @@ def get_position_count(status: str = "open") -> int:
     ).fetchone()
     conn.close()
     return row["cnt"] if row else 0
+
+
+def insert_backtest(bt: dict) -> int:
+    """Insert a backtest result record."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO backtests
+        (created_at, strategy_name, version, timeframe, symbol,
+         period_start, period_end, initial_capital,
+         net_profit_usd, net_profit_pct, gross_profit, gross_loss, profit_factor,
+         total_trades, winning_trades, losing_trades, win_rate,
+         avg_win, avg_loss, win_loss_ratio, largest_win, largest_loss,
+         max_drawdown, sharpe_ratio, sortino_ratio,
+         long_trades, long_win_rate, long_pnl,
+         short_trades, short_win_rate, short_pnl,
+         source_file, notes, status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            bt.get("created_at", datetime.utcnow().isoformat()),
+            bt["strategy_name"],
+            bt["version"],
+            bt["timeframe"],
+            bt["symbol"],
+            bt.get("period_start"),
+            bt.get("period_end"),
+            bt.get("initial_capital"),
+            bt.get("net_profit_usd"),
+            bt.get("net_profit_pct"),
+            bt.get("gross_profit"),
+            bt.get("gross_loss"),
+            bt.get("profit_factor"),
+            bt.get("total_trades"),
+            bt.get("winning_trades"),
+            bt.get("losing_trades"),
+            bt.get("win_rate"),
+            bt.get("avg_win"),
+            bt.get("avg_loss"),
+            bt.get("win_loss_ratio"),
+            bt.get("largest_win"),
+            bt.get("largest_loss"),
+            bt.get("max_drawdown"),
+            bt.get("sharpe_ratio"),
+            bt.get("sortino_ratio"),
+            bt.get("long_trades"),
+            bt.get("long_win_rate"),
+            bt.get("long_pnl"),
+            bt.get("short_trades"),
+            bt.get("short_win_rate"),
+            bt.get("short_pnl"),
+            bt.get("source_file"),
+            bt.get("notes"),
+            bt.get("status", "tested"),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_backtests(strategy: str = None, limit: int = 50) -> list[dict]:
+    """Get backtest results, optionally filtered by strategy name."""
+    conn = get_db()
+    if strategy:
+        rows = conn.execute(
+            "SELECT * FROM backtests WHERE strategy_name = ? ORDER BY created_at DESC LIMIT ?",
+            (strategy, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM backtests ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def delete_backtest(backtest_id: int) -> bool:
+    """Delete a backtest record."""
+    conn = get_db()
+    conn.execute("DELETE FROM backtests WHERE id = ?", (backtest_id,))
+    conn.commit()
+    conn.close()
+    return True
 
 
 def get_recent_signal_hash() -> Optional[str]:

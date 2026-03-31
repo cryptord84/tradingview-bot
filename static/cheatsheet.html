@@ -41,7 +41,7 @@
         <span class="text-slate-600">/</span>
         <span class="font-bold">SOL Bot Cheatsheet</span>
     </div>
-    <span class="text-xs text-slate-500">Last updated: 2026-03-28</span>
+    <span class="text-xs text-slate-500">Last updated: 2026-03-31</span>
 </header>
 
 <main class="max-w-6xl mx-auto p-6 space-y-6">
@@ -56,8 +56,10 @@
             <a href="#pine">🌲 Pine Script</a>
             <a href="#claude">🤖 Claude AI</a>
             <a href="#jupiter">⚡ Jupiter</a>
+            <a href="#positions">📍 Position Monitor</a>
             <a href="#risk">🛡 Risk Settings</a>
             <a href="#telegram">📱 Telegram</a>
+            <a href="#scout">🔍 Scout Service</a>
             <a href="#dashboard">📊 Dashboard</a>
             <a href="#test-plan">🧪 Test Plan</a>
             <a href="#troubleshoot">🔧 Troubleshoot</a>
@@ -73,7 +75,7 @@
                 <h3>Files</h3>
                 <table>
                     <tr><td><code class="text-yellow-300">main.py</code></td><td class="text-slate-400">FastAPI app entry point</td></tr>
-                    <tr><td><code class="text-yellow-300">strategy.pine</code></td><td class="text-slate-400">TradingView Pine Script v5</td></tr>
+                    <tr><td><code class="text-yellow-300">strategy.pine</code></td><td class="text-slate-400">TradingView Pine Script v6</td></tr>
                     <tr><td><code class="text-yellow-300">config.yaml</code></td><td class="text-slate-400">All settings (never commit)</td></tr>
                     <tr><td><code class="text-yellow-300">.env</code></td><td class="text-slate-400">Wallet password (never commit)</td></tr>
                     <tr><td><code class="text-yellow-300">data/trades.db</code></td><td class="text-slate-400">SQLite trade log</td></tr>
@@ -89,6 +91,10 @@
                     <tr><td><code class="text-blue-300">jupiter_client.py</code></td><td class="text-slate-400">DEX swap execution</td></tr>
                     <tr><td><code class="text-blue-300">wallet_service.py</code></td><td class="text-slate-400">Solana wallet + balance</td></tr>
                     <tr><td><code class="text-blue-300">telegram_service.py</code></td><td class="text-slate-400">Push notifications</td></tr>
+                    <tr><td><code class="text-blue-300">telegram_commands.py</code></td><td class="text-slate-400">Interactive /commands</td></tr>
+                    <tr><td><code class="text-blue-300">position_monitor.py</code></td><td class="text-slate-400">TP/SL auto-close + trailing</td></tr>
+                    <tr><td><code class="text-blue-300">scout_service.py</code></td><td class="text-slate-400">Multi-source intel scanner</td></tr>
+                    <tr><td><code class="text-blue-300">kamino_client.py</code></td><td class="text-slate-400">Kamino vault deposits</td></tr>
                     <tr><td><code class="text-blue-300">news_service.py</code></td><td class="text-slate-400">Geo-risk headlines</td></tr>
                 </table>
             </div>
@@ -101,6 +107,10 @@
                     <tr><td><code class="text-green-300">GET /api/price</code></td><td class="text-slate-400">Live SOL price</td></tr>
                     <tr><td><code class="text-green-300">GET /api/settings</code></td><td class="text-slate-400">Current risk config</td></tr>
                     <tr><td><code class="text-green-300">POST /api/settings</code></td><td class="text-slate-400">Update risk config</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/positions</code></td><td class="text-slate-400">Open/closed positions</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/positions/analytics</code></td><td class="text-slate-400">P&L analytics</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/scout</code></td><td class="text-slate-400">Scout intel reports</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/backtests</code></td><td class="text-slate-400">Backtest results</td></tr>
                     <tr><td><code class="text-green-300">GET /api/export/csv</code></td><td class="text-slate-400">Tax CSV download</td></tr>
                     <tr><td><code class="text-green-300">GET /health</code></td><td class="text-slate-400">Health check</td></tr>
                 </table>
@@ -193,10 +203,17 @@ cloudflared tunnel --url http://localhost:8000</code>
 
     <!-- Pine Script -->
     <div class="card p-5" id="pine">
-        <h2>🌲 Pine Script — Indicators & Confluence</h2>
+        <h2>🌲 Pine Script — Active Strategies</h2>
+        <h3>Triple-Timeframe Deployment</h3>
+        <table class="mb-4">
+            <tr><th>Timeframe</th><th>Strategy</th><th>Type</th><th>PF</th><th>Win Rate</th></tr>
+            <tr><td><span class="badge badge-blue">4H</span></td><td>Mean Reversion v1.3</td><td>Longs-only BB dip buys</td><td>1.091</td><td>31.2%</td></tr>
+            <tr><td><span class="badge badge-green">1H</span></td><td>Confluence v3.5</td><td>7-indicator confluence</td><td>0.982</td><td>--</td></tr>
+            <tr><td><span class="badge badge-yellow">Daily</span></td><td>Confluence v2</td><td>EMA200 daily filter</td><td>2.336</td><td>--</td></tr>
+        </table>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-                <h3>7 Confluence Indicators</h3>
+                <h3>1H/Daily: 7 Confluence Indicators</h3>
                 <table>
                     <tr><th>#</th><th>Indicator</th><th>Bull Condition</th></tr>
                     <tr><td>1</td><td>EMA/SMA Ribbon</td><td>9 &gt; 21 &gt; 50, price &gt; SMA200</td></tr>
@@ -331,6 +348,50 @@ cloudflared tunnel --url http://localhost:8000</code>
         </div>
     </div>
 
+    <!-- Position Monitor -->
+    <div class="card p-5" id="positions">
+        <h2>📍 Position Monitor &amp; Trailing Stop</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>How It Works</h3>
+                <p class="text-sm text-slate-400 mb-2">Background service polls every 30s. On BUY execution, creates a position with TP/SL levels derived from ATR. Auto-closes via Jupiter when price hits target.</p>
+                <table>
+                    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+                    <tr><td><code>tp_multiplier</code></td><td>4.0</td><td>TP = entry + 4.0 × ATR</td></tr>
+                    <tr><td><code>sl_multiplier</code></td><td>1.5</td><td>SL = entry − 1.5 × ATR</td></tr>
+                    <tr><td><code>poll_interval_seconds</code></td><td>30</td><td>Price check frequency</td></tr>
+                    <tr><td><code>max_close_retries</code></td><td>3</td><td>Retry failed close swaps</td></tr>
+                </table>
+                <h3 class="mt-3">Position Statuses</h3>
+                <table>
+                    <tr><td><span class="badge badge-green">open</span></td><td>Active, monitoring</td></tr>
+                    <tr><td><span class="badge badge-green">closed_tp</span></td><td>Take-profit hit</td></tr>
+                    <tr><td><span class="badge badge-red">closed_sl</span></td><td>Stop-loss hit</td></tr>
+                    <tr><td><span class="badge badge-yellow">closed_trail</span></td><td>Trailing stop triggered</td></tr>
+                    <tr><td><span class="badge badge-gray">closed_manual</span></td><td>Manually closed via dashboard</td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Trailing Stop-Loss</h3>
+                <p class="text-sm text-slate-400 mb-2">Locks in profits as price rises. Only ratchets UP — never moves down.</p>
+                <table>
+                    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+                    <tr><td><code>activation_atr</code></td><td>1.5</td><td>Trail activates when price &gt; entry + 1.5 × ATR</td></tr>
+                    <tr><td><code>offset_atr</code></td><td>1.0</td><td>Trail follows at price − 1.0 × ATR</td></tr>
+                </table>
+                <h3 class="mt-3">Example</h3>
+                <div class="text-sm text-slate-300 space-y-1">
+                    <p>Entry: $130, ATR: $3.50</p>
+                    <p>Fixed SL: $130 − 1.5 × $3.50 = <span class="text-red-400">$124.75</span></p>
+                    <p>Trail activates at: $130 + 1.5 × $3.50 = <span class="text-blue-400">$135.25</span></p>
+                    <p>If price hits $140: trail SL = $140 − 1.0 × $3.50 = <span class="text-yellow-400">$136.50</span></p>
+                    <p>Effective SL = max(fixed, trail) = <span class="text-green-400">$136.50</span></p>
+                </div>
+                <div class="tip mt-3">💡 On bot restart, open positions reload from SQLite automatically. No positions are lost.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Risk Settings -->
     <div class="card p-5" id="risk">
         <h2>🛡 Risk Management Settings</h2>
@@ -366,12 +427,18 @@ cloudflared tunnel --url http://localhost:8000</code>
         <table>
             <tr><th>Command</th><th>Description</th><th>Returns</th></tr>
             <tr><td><code>/help</code></td><td>List available commands</td><td>All commands with descriptions</td></tr>
-            <tr><td><code>/status</code></td><td>Bot health &amp; uptime</td><td>Active state, API health, uptime, strategy, win rate</td></tr>
-            <tr><td><code>/wallet</code></td><td>Wallet balances</td><td>SOL balance, USD value, USDC balance, total USD</td></tr>
+            <tr><td><code>/status</code></td><td>Bot health &amp; uptime</td><td>Active state, API health, uptime, strategy (4H+1H+Daily), win rate</td></tr>
+            <tr><td><code>/wallet</code></td><td>Wallet balances</td><td>SOL balance, USD value, USDC balance, Kamino vault, total USD</td></tr>
             <tr><td><code>/apis</code></td><td>Check all API connections</td><td>Status of Bot API, Jupiter, Solana RPC, Telegram, Claude, NewsAPI, DB</td></tr>
             <tr><td><code>/trades</code></td><td>Recent trades</td><td>Last 5 executed trades with signal, amount, price, P&amp;L</td></tr>
             <tr><td><code>/today</code></td><td>Today's activity</td><td>Today's trade count, P&amp;L, and trade list</td></tr>
             <tr><td><code>/pnl</code></td><td>P&amp;L summary</td><td>Total P&amp;L, today P&amp;L, win rate, monthly costs</td></tr>
+            <tr><td><code>/positions</code></td><td>Open positions</td><td>Entry, TP, SL, trailing SL, unrealized P&amp;L per position</td></tr>
+            <tr><td><code>/vault</code></td><td>Kamino vault</td><td>Vault balance, total deposited, earnings</td></tr>
+            <tr><td><code>/scout</code></td><td>Run intel scan</td><td>Multi-source market intelligence report</td></tr>
+            <tr><td><code>/scan</code></td><td>Scan indicators</td><td>Check Indicators/ directory for new or changed Pine scripts</td></tr>
+            <tr><td><code>/review</code></td><td>Review indicator</td><td>Claude AI analysis of indicator script</td></tr>
+            <tr><td><code>/txlog</code></td><td>TX log</td><td>Recent wallet transactions from Solscan</td></tr>
             <tr><td><code>/start</code></td><td>Start the bot</td><td>Activates signal processing</td></tr>
             <tr><td><code>/stop</code></td><td>Stop the bot</td><td>Pauses signal processing</td></tr>
         </table>
@@ -384,21 +451,77 @@ cloudflared tunnel --url http://localhost:8000</code>
 curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
     </div>
 
+    <!-- Scout Service -->
+    <div class="card p-5" id="scout">
+        <h2>🔍 Scout Service — Multi-Source Intelligence</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>Search Priority</h3>
+                <div class="space-y-1 text-sm">
+                    <div class="flow-box">1. Firecrawl (primary — deep scraping)</div>
+                    <div class="flow-arrow">↓ fallback</div>
+                    <div class="flow-box">2. Tavily (domain-filtered search)</div>
+                    <div class="flow-arrow">↓ fallback</div>
+                    <div class="flow-box">3. DuckDuckGo (free HTML scraping)</div>
+                </div>
+                <h3 class="mt-3">Source Categories</h3>
+                <table>
+                    <tr><th>Category</th><th>Sources</th></tr>
+                    <tr><td><span class="badge badge-blue">Social</span></td><td>X.com, Twitter, Reddit</td></tr>
+                    <tr><td><span class="badge badge-green">Blogs</span></td><td>Medium, TradingView, BabyPips</td></tr>
+                    <tr><td><span class="badge badge-yellow">On-Chain</span></td><td>Glassnode, Dune, Nansen, DefiLlama</td></tr>
+                    <tr><td><span class="badge badge-red">News</span></td><td>CoinDesk, CoinTelegraph, TheBlock</td></tr>
+                    <tr><td><span class="badge badge-gray">Bittensor</span></td><td>TAO accounts: @const_anto, @markjeffrey, @bittensor_</td></tr>
+                </table>
+            </div>
+            <div>
+                <h3>Features</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li>Runs daily at 3:30 AM automatically</li>
+                    <li>Manual trigger: <code>/scout</code> in Telegram or SCAN NOW on dashboard</li>
+                    <li>Claude Sonnet analyzes results into actionable summary</li>
+                    <li>Ad/spam filter removes paid indicators and promotions</li>
+                    <li>Deep scrapes top blog/news URLs for full content</li>
+                    <li>Reports saved to <code>data/scout_logs/</code></li>
+                </ul>
+                <h3 class="mt-3">Dashboard Display</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li>Collapsed to top 3 results by default</li>
+                    <li>Expand to show all results</li>
+                    <li>Hide individual results with X button</li>
+                    <li>Timestamp on each result</li>
+                    <li>Report history dates shown at bottom</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
     <!-- Dashboard -->
     <div class="card p-5" id="dashboard">
         <h2>📊 Dashboard</h2>
+        <h3>Pages</h3>
         <table>
             <tr><th>URL</th><th>Description</th></tr>
             <tr><td><a href="/">http://localhost:8000</a></td><td>Main dashboard</td></tr>
             <tr><td><a href="/cheatsheet">http://localhost:8000/cheatsheet</a></td><td>This cheatsheet</td></tr>
-            <tr><td><a href="/docs">http://localhost:8000/docs</a></td><td>Auto-generated API docs (Swagger)</td></tr>
-            <tr><td><a href="/api/stats">http://localhost:8000/api/stats</a></td><td>Raw stats JSON</td></tr>
-            <tr><td><a href="/api/trades">http://localhost:8000/api/trades</a></td><td>Trade history JSON</td></tr>
-            <tr><td><a href="/api/export/csv">http://localhost:8000/api/export/csv</a></td><td>Download tax CSV</td></tr>
-            <tr><td><a href="/health">http://localhost:8000/health</a></td><td>Health check</td></tr>
             <tr><td><a href="/changelog">http://localhost:8000/changelog</a></td><td>Strategy changelog</td></tr>
+            <tr><td><a href="/docs">http://localhost:8000/docs</a></td><td>Auto-generated API docs (Swagger)</td></tr>
         </table>
-        <div class="mt-3 tip">💡 To redesign the dashboard, copy the prompt in <code>GOOGLE_STITCH_PROMPT.md</code> into <a href="https://stitch.withgoogle.com" target="_blank">stitch.withgoogle.com</a>.</div>
+        <h3 class="mt-3">Dashboard Cards</h3>
+        <table>
+            <tr><th>Card</th><th>Content</th><th>Refresh</th></tr>
+            <tr><td>Wallet</td><td>SOL + USDC + Kamino vault balances, total USD value</td><td>30s</td></tr>
+            <tr><td>Bot Status</td><td>Active/paused, strategy, uptime, API health</td><td>30s</td></tr>
+            <tr><td>SOL Price Chart</td><td>24h price chart (CoinGecko)</td><td>60s</td></tr>
+            <tr><td>Trade Distribution</td><td>Doughnut chart: BUY/SELL/CLOSE breakdown</td><td>60s</td></tr>
+            <tr><td>Trade History</td><td>Recent trades with signal, amount, P&L, TX link</td><td>30s</td></tr>
+            <tr><td>Wallet TX Log</td><td>Recent on-chain transactions</td><td>60s</td></tr>
+            <tr><td>Positions</td><td>Open/closed positions with live P&L, TP/SL, trailing SL indicator</td><td>30s</td></tr>
+            <tr><td>Position Analytics</td><td>Equity curve, outcome doughnut, timeframe breakdown, monthly P&L</td><td>60s</td></tr>
+            <tr><td>Scout Intel</td><td>Multi-source intelligence results (top 3, expandable, hideable)</td><td>Manual</td></tr>
+            <tr><td>Backtest Tracker</td><td>Strategy comparison table — sortable, filterable, hideable</td><td>Manual</td></tr>
+            <tr><td>Risk Settings</td><td>Live-editable risk parameters</td><td>Manual</td></tr>
+        </table>
     </div>
 
     <!-- Test Plan -->
@@ -572,7 +695,7 @@ curl -X POST http://localhost:8000/webhook \
 </main>
 
 <footer class="text-center text-xs text-slate-500 py-4 mt-4 border-t border-slate-800">
-    TradingView SOL Bot v1.0 Cheatsheet &mdash; <a href="/">← Back to Dashboard</a>
+    TradingView SOL Bot Cheatsheet &mdash; <a href="/">← Dashboard</a> · <a href="/changelog">Changelog</a>
 </footer>
 
 </body>

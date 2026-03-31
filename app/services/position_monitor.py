@@ -1,4 +1,4 @@
-"""Position Monitor — background TP/SL auto-close service."""
+"""Position Monitor — background TP/SL auto-close service with trailing stop."""
 
 import asyncio
 import logging
@@ -11,19 +11,31 @@ from app.database import (
     close_position,
     insert_trade,
     log_wallet_tx,
+    update_trail_sl,
 )
 
 logger = logging.getLogger("bot.positions")
 
 
 class PositionMonitor:
-    """Polls SOL price and auto-closes positions when TP/SL is hit."""
+    """Polls SOL price and auto-closes positions when TP/SL is hit.
+
+    Supports trailing stop-loss: once price moves past activation threshold
+    (entry + activation_atr * ATR), the SL ratchets up behind price at
+    offset_atr * ATR distance. The effective SL is max(fixed SL, trailing SL).
+    """
 
     def __init__(self):
         cfg = get("position_monitor") or {}
         self.poll_interval = cfg.get("poll_interval_seconds", 30)
         self.max_retries = cfg.get("max_close_retries", 3)
         self.enabled = cfg.get("enabled", True)
+
+        # Trailing stop config
+        trail_cfg = cfg.get("trailing_stop") or {}
+        self.trail_enabled = trail_cfg.get("enabled", False)
+        self.trail_activation_atr = trail_cfg.get("activation_atr", 1.5)
+        self.trail_offset_atr = trail_cfg.get("offset_atr", 1.0)
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -32,7 +44,11 @@ class PositionMonitor:
         """Start the background polling task."""
         self._running = True
         self._task = asyncio.create_task(self._poll_loop())
-        logger.info(f"Position monitor started (poll every {self.poll_interval}s)")
+        trail_status = "ON" if self.trail_enabled else "OFF"
+        logger.info(
+            f"Position monitor started (poll every {self.poll_interval}s, "
+            f"trailing stop: {trail_status})"
+        )
         return self._task
 
     async def stop(self):
@@ -57,7 +73,6 @@ class PositionMonitor:
         if not positions:
             return
 
-        # Lazy imports to avoid circular dependencies
         from app.services.jupiter_client import JupiterClient
 
         jupiter = JupiterClient()
@@ -74,11 +89,17 @@ class PositionMonitor:
 
         for pos in positions:
             trigger = None
+            effective_sl = pos["sl_price"]
+
             if pos["direction"] == "long":
+                # Update trailing stop if enabled and ATR is available
+                if self.trail_enabled and pos.get("atr") and pos["atr"] > 0:
+                    effective_sl = self._update_trailing_sl(pos, current_price)
+
                 if current_price >= pos["tp_price"]:
                     trigger = "tp"
-                elif current_price <= pos["sl_price"]:
-                    trigger = "sl"
+                elif current_price <= effective_sl:
+                    trigger = "trail_sl" if effective_sl > pos["sl_price"] else "sl"
             else:  # short (future use)
                 if current_price <= pos["tp_price"]:
                     trigger = "tp"
@@ -89,11 +110,43 @@ class PositionMonitor:
                 logger.info(
                     f"Position #{pos['id']} {trigger.upper()} triggered @ ${current_price:.2f} "
                     f"(entry=${pos['entry_price']:.2f}, "
-                    f"TP=${pos['tp_price']:.2f}, SL=${pos['sl_price']:.2f})"
+                    f"TP=${pos['tp_price']:.2f}, SL=${pos['sl_price']:.2f}, "
+                    f"Trail SL=${effective_sl:.2f})"
                 )
                 await self._close_position(pos, current_price, trigger, jupiter)
 
         await jupiter.close()
+
+    def _update_trailing_sl(self, pos: dict, current_price: float) -> float:
+        """Update trailing stop-loss and return the effective SL price.
+
+        Trail activates when price reaches entry + activation_atr * ATR.
+        Once active, trail SL = current_price - offset_atr * ATR.
+        Trail only ratchets UP (never down).
+        """
+        atr = pos["atr"]
+        entry = pos["entry_price"]
+        activation_price = entry + (self.trail_activation_atr * atr)
+
+        # Current trail SL from DB (may be None)
+        current_trail = pos.get("trail_sl_price") or 0
+
+        if current_price >= activation_price:
+            # Trail is active — compute new trail level
+            new_trail = current_price - (self.trail_offset_atr * atr)
+
+            # Only ratchet up, never down
+            if new_trail > current_trail:
+                update_trail_sl(pos["id"], new_trail)
+                logger.debug(
+                    f"Position #{pos['id']}: trail SL updated "
+                    f"${current_trail:.2f} → ${new_trail:.2f} "
+                    f"(price=${current_price:.2f}, activation=${activation_price:.2f})"
+                )
+                current_trail = new_trail
+
+        # Effective SL is the higher of fixed SL and trailing SL
+        return max(pos["sl_price"], current_trail)
 
     async def _close_position(
         self, pos: dict, current_price: float, trigger: str, jupiter=None
@@ -155,11 +208,13 @@ class PositionMonitor:
             ) * 100
 
             # Map trigger to status
-            status = {
+            status_map = {
                 "tp": "closed_tp",
                 "sl": "closed_sl",
+                "trail_sl": "closed_trail",
                 "manual": "closed_manual",
-            }[trigger]
+            }
+            status = status_map.get(trigger, "closed_manual")
 
             # Update position in database
             close_position(
@@ -191,7 +246,7 @@ class PositionMonitor:
             })
 
             # Log wallet transaction
-            swap_fee_sol = 0.000055  # base + priority fee estimate
+            swap_fee_sol = 0.000055
             log_wallet_tx(
                 tx_type="jupiter_swap",
                 direction="sell",
@@ -204,19 +259,25 @@ class PositionMonitor:
             )
 
             # Send Telegram notification
-            trigger_label = {
-                "tp": "Take Profit",
-                "sl": "Stop Loss",
-                "manual": "Manual Close",
-            }[trigger]
-            trigger_emoji = {"tp": "\U0001f3af", "sl": "\U0001f6d1", "manual": "\u2705"}[trigger]
+            trigger_labels = {
+                "tp": ("Take Profit", "\U0001f3af"),
+                "sl": ("Stop Loss", "\U0001f6d1"),
+                "trail_sl": ("Trailing Stop", "\U0001f4c9"),
+                "manual": ("Manual Close", "\u2705"),
+            }
+            label, emoji = trigger_labels.get(trigger, ("Close", "\u2705"))
             pnl_emoji = "\U0001f4c8" if pnl_usdc >= 0 else "\U0001f4c9"
 
+            trail_info = ""
+            if trigger == "trail_sl" and pos.get("trail_sl_price"):
+                trail_info = f"Trail SL: ${pos['trail_sl_price']:.2f}\n"
+
             msg = (
-                f"<b>{trigger_emoji} Position Closed — {trigger_label}</b>\n\n"
+                f"<b>{emoji} Position Closed — {label}</b>\n\n"
                 f"Symbol: {pos['symbol']}\n"
                 f"Entry: ${pos['entry_price']:.2f}\n"
                 f"Exit: ${current_price:.2f}\n"
+                f"{trail_info}"
                 f"Amount: {pos['amount_sol']:.4f} SOL\n"
                 f"{pnl_emoji} P&L: <b>${pnl_usdc:+.2f}</b> ({pnl_percent:+.1f}%)\n"
                 f"TX: <code>{swap_result['tx_signature'][:20]}...</code>"

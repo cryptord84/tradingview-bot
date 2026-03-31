@@ -205,7 +205,7 @@ async def _call_api(context: str) -> str:
 
     client = anthropic.Anthropic(api_key=api_key)
     message = client.messages.create(
-        model=cfg.get("model", "claude-sonnet-4-6-20250514"),
+        model=cfg.get("model", "sonnet"),
         max_tokens=cfg.get("max_tokens", 1024),
         temperature=cfg.get("temperature", 0.3),
         system=SYSTEM_PROMPT,
