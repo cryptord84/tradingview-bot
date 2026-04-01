@@ -37,6 +37,13 @@ wallet:
   # rpc_url: "https://solana-mainnet.g.alchemy.com/v2/YOUR_KEY"
   # rpc_url: "https://your-helius-rpc.helius-rpc.com/?api-key=YOUR_KEY"
 
+# --- Real-Time Price Feed ---
+price_feed:
+  enabled: true                                  # Enable WebSocket-based real-time prices
+  binance_ws: "wss://stream.binance.us:9443"     # Binance US WebSocket endpoint
+  coingecko_poll_seconds: 30                     # Poll interval for non-Binance tokens
+  reconnect_max_seconds: 30                      # Max backoff on WS reconnect
+
 # --- Jupiter DEX ---
 jupiter:
   api_base: "https://lite-api.jup.ag/swap/v1"
@@ -50,6 +57,13 @@ jupiter:
   # Perpetuals (Jupiter Perps)
   perps_enabled: false
   perps_api_base: "https://perp-api.jup.ag"
+
+# --- Signal Priority Queue ---
+signal_queue:
+  enabled: true                     # Batch simultaneous signals by confidence
+  batch_window_seconds: 5           # Collect signals for this long before processing
+                                    # Set to 0 to disable batching (FIFO order)
+                                    # 4H candle alerts arrive within ~2-3s of each other
 
 # --- Risk Management ---
 risk:
@@ -127,6 +141,186 @@ database:
 # --- Firecrawl ---
 firecrawl:
   api_key: ""                       # https://firecrawl.dev
+
+# --- Kalshi Event Contracts ---
+kalshi:
+  enabled: false                              # Enable Kalshi binary event trading
+  mode: "demo"                                # "demo" = sandbox, "live" = real money
+  api_key_id: ""                              # Your Kalshi API key ID
+  private_key_path: "keys/kalshi_private.pem" # Path to RSA private key (PEM format)
+  max_cost_per_trade_cents: 500               # Max cost per order in cents ($5.00)
+  max_open_positions: 10                      # Max simultaneous positions
+  default_contract_count: 10                  # Default contracts per order
+  categories:                                 # Event categories to track
+    - "economics"
+    - "crypto"
+    - "politics"
+    - "finance"
+  # Arbitrage scanner
+  arbitrage:
+    enabled: false                             # Enable background arbitrage scanner
+    scan_interval_seconds: 120                 # How often to scan for opportunities
+    min_spread_cents: 3                        # Minimum spread to flag (after fees)
+    min_profit_cents: 5                        # Minimum total profit to alert on
+    fee_per_contract_cents: 2                  # Kalshi settlement fee per contract
+    auto_execute: false                        # DANGER: Auto-trade detected opportunities
+    max_auto_cost_cents: 500                   # Max cost for auto-executed arb trades ($5)
+    telegram_alerts: true                      # Send Telegram alerts on opportunities
+  # Spread Bot (market-making)
+  spread_bot:
+    enabled: false                             # Enable automated market-making
+    poll_interval_seconds: 15                  # How often to update quotes
+    default_spread_cents: 4                    # Target spread to capture
+    min_spread_cents: 2                        # Don't quote if spread < this
+    contracts_per_side: 5                      # Contracts per order
+    max_inventory_per_market: 20               # Max one-sided contracts before skewing
+    max_total_exposure_cents: 2000             # Max total $ at risk ($20)
+    inventory_skew_cents: 2                    # Price skew per inventory imbalance unit
+    stale_order_threshold_cents: 3             # Requote when price drifts this far
+    flatten_minutes_before_close: 30           # Auto-flatten before market closes
+    fee_per_contract_cents: 2                  # Kalshi settlement fee
+    telegram_alerts: true
+    target_tickers: []                         # Empty = auto-select best markets
+  # Whale Tracker
+  whale_tracker:
+    enabled: false                             # Monitor large trades across markets
+    scan_interval_seconds: 60                  # How often to scan for whales
+    min_contract_count: 50                     # Flag trades >= this many contracts
+    min_cost_cents: 2500                       # Or flag trades costing >= $25
+    max_markets_to_scan: 30                    # Top N markets by volume
+    telegram_alerts: true                      # Send whale alerts via Telegram
+    history_limit: 100                         # Keep last N whale trades
+  # MACD/CCI Technical Bot
+  technical_bot:
+    enabled: false                             # Enable technical indicator trading
+    scan_interval_seconds: 300                 # Run analysis every 5 min
+    candle_interval_minutes: 60                # 1hr candles (1=1min, 1440=1day)
+    candle_count: 100                          # Candles to fetch per market
+    macd_fast: 12                              # MACD fast EMA period
+    macd_slow: 26                              # MACD slow EMA period
+    macd_signal: 9                             # MACD signal line period
+    cci_period: 20                             # CCI lookback period
+    cci_overbought: 100                        # CCI bullish threshold
+    cci_oversold: -100                         # CCI bearish threshold
+    auto_trade: false                          # DANGER: auto-execute strong signals
+    contracts_per_trade: 5                     # Contracts per signal
+    max_positions: 5                           # Max concurrent positions
+    max_cost_per_trade_cents: 500              # Max $5 per trade
+    telegram_alerts: true
+    target_tickers: []                         # Empty = auto-select by volume
+    max_markets_to_scan: 20
+  # Sports Scanner (multi-league market tracker)
+  sports_scanner:
+    enabled: false                             # Enable sports market scanning
+    scan_interval_seconds: 120                 # How often to scan for sports markets
+    leagues:                                   # Which leagues to monitor
+      - "MLB"
+      - "NBA"
+      - "NFL"
+      - "NHL"
+      - "Soccer"
+      - "UFC"
+      - "WNBA"
+    min_volume: 10                             # Min volume to track a market
+    odds_move_alert_cents: 10                  # Alert when odds shift >= this
+    value_threshold_cents: 5                   # Min edge to flag as value bet
+    max_markets_per_league: 20                 # Max markets tracked per league
+    auto_trade: false                          # DANGER: auto-execute value bets
+    contracts_per_trade: 5
+    max_cost_per_trade_cents: 500              # Max $5 per trade
+    max_positions: 5                           # Max concurrent sports positions
+    telegram_alerts: true
+  # Market Maker Framework (advanced multi-strategy)
+  market_maker:
+    enabled: false                             # Enable advanced market maker
+    poll_interval_seconds: 10                  # Faster polling for tighter quotes
+    default_strategy: "midpoint"               # midpoint, vwap, or volatility
+    fallback_strategy: "volatility"            # Fallback when primary doesn't fit
+    base_spread_cents: 4                       # Base half-spread target
+    min_spread_cents: 2                        # Floor for dynamic spread
+    max_spread_cents: 12                       # Cap for dynamic spread
+    dynamic_spread: true                       # Auto-adjust based on volatility/inventory
+    contracts_per_level: 5                     # Contracts per quote level
+    quote_levels: 1                            # Price levels to quote (1 = top only)
+    max_inventory_per_market: 25               # Max one-sided contracts per market
+    max_total_inventory: 100                   # Portfolio-wide inventory cap
+    max_total_exposure_cents: 5000             # $50 max portfolio exposure
+    inventory_skew_cents: 2                    # Price skew per inventory unit
+    adverse_selection_trades: 3                # Pull quotes after N consecutive same-side
+    stale_quote_seconds: 60                    # Refresh quotes older than this
+    stale_price_threshold_cents: 3             # Refresh if price moved this far
+    flatten_minutes_before_close: 30           # Auto-flatten before market closes
+    fee_per_contract_cents: 2                  # Kalshi settlement fee
+    target_tickers: []                         # Empty = auto-select best markets
+    max_markets: 5                             # Max markets to quote simultaneously
+    min_market_volume: 100                     # Min volume to consider a market
+    rotation_interval_cycles: 50               # Re-score markets every N cycles
+    telegram_alerts: true
+  # Esports Scanner (multi-game market tracker)
+  esports_scanner:
+    enabled: false                             # Enable esports market scanning
+    scan_interval_seconds: 120                 # How often to scan for esports markets
+    games:                                     # Which games to monitor
+      - "CS2"
+      - "DotA2"
+      - "LoL"
+      - "Valorant"
+      - "Overwatch"
+    min_volume: 5                              # Min volume to track a market
+    odds_move_alert_cents: 10                  # Alert when odds shift >= this
+    value_threshold_cents: 5                   # Min edge to flag as value bet
+    max_markets_per_game: 20                   # Max markets tracked per game
+    auto_trade: false                          # DANGER: auto-execute value bets
+    contracts_per_trade: 5
+    max_cost_per_trade_cents: 500              # Max $5 per trade
+    max_positions: 5                           # Max concurrent esports positions
+    telegram_alerts: true
+  # AI Agent Bot (Claude-powered multi-agent analysis)
+  ai_agent:
+    enabled: false                             # Enable Claude-powered market analysis
+    scan_interval_seconds: 600                 # Every 10 min (each scan = 3 Claude calls per market)
+    agents:                                    # Agent personalities
+      - "analyst"                              # Fundamental probability estimation
+      - "contrarian"                           # Crowd sentiment reversal
+      - "momentum"                             # Trend following
+    auto_trade: false                          # DANGER: auto-execute on consensus
+    min_consensus_strength: 0.7                # Minimum agent agreement to trade
+    require_unanimous: false                   # Require all agents to agree
+    contracts_per_trade: 5
+    max_positions: 3                           # Conservative due to AI uncertainty
+    max_cost_per_trade_cents: 500              # Max $5 per trade
+    telegram_alerts: true
+    target_tickers: []                         # Empty = auto-select by volume
+    max_markets_to_analyze: 5                  # Limit Claude API calls
+
+# --- Portfolio Rebalancer ---
+rebalancer:
+  enabled: false                               # Enable portfolio rebalancer
+  auto_rebalance: false                        # Run rebalance on schedule (manual by default)
+  check_interval_seconds: 3600                 # Check allocations every hour
+  drift_threshold_percent: 5.0                 # Only rebalance if drift > 5%
+  min_trade_usd: 5.0                           # Skip trades smaller than $5
+  slippage_bps: 150                            # Slightly higher slippage for rebalance
+  targets:                                     # Target allocation percentages (must sum to 100)
+    SOL: 50
+    JTO: 15
+    WIF: 10
+    BONK: 10
+    PYTH: 10
+    RAY: 5
+  token_mints:                                 # SPL token mint addresses
+    JTO: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL"
+    WIF: "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm"
+    BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
+    PYTH: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3"
+    RAY: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"
+
+# --- Paper Trading (simulation mode) ---
+paper_trading:
+  enabled: false                      # When true, trades are simulated (no real swaps)
+  starting_balance_usd: 1000.0        # Virtual starting balance
+  simulated_slippage_bps: 10          # Simulated slippage (10 bps = 0.1%)
+  simulated_fee_bps: 5                # Simulated fees (5 bps = 0.05%)
 
 # --- Logging ---
 logging:

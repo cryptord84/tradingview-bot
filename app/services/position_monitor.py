@@ -68,26 +68,44 @@ class PositionMonitor:
             await asyncio.sleep(self.poll_interval)
 
     async def _check_positions(self):
-        """Check all open positions against current price."""
+        """Check all open positions against current price per token."""
         positions = get_open_positions()
         if not positions:
             return
 
         from app.services.jupiter_client import JupiterClient
+        from app.services.price_feed import get_price_feed
 
+        feed = get_price_feed()
         jupiter = JupiterClient()
-        try:
-            current_price = await jupiter.get_sol_price()
-        except Exception as e:
-            logger.warning(f"Price fetch failed, skipping check: {e}")
-            await jupiter.close()
-            return
-
-        logger.debug(
-            f"Checking {len(positions)} position(s) @ SOL=${current_price:.2f}"
-        )
 
         for pos in positions:
+            # Resolve the token symbol from the position (e.g. WIFUSDT → WIF)
+            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "")
+
+            # Try real-time price feed first (instant, no network call)
+            current_price = None
+            if feed.is_running:
+                pd = feed.get_price(token_symbol)
+                if pd and pd.price > 0:
+                    current_price = pd.price
+
+            # Fall back to Jupiter HTTP if feed unavailable
+            if current_price is None:
+                try:
+                    if token_symbol == "SOL":
+                        current_price = await jupiter.get_sol_price()
+                    else:
+                        current_price = await jupiter.get_token_price(token_symbol)
+                except Exception as e:
+                    logger.warning(f"Price fetch failed for {token_symbol}, skipping: {e}")
+                    continue
+
+            logger.debug(
+                f"Position #{pos['id']} {token_symbol} @ ${current_price:.6f} "
+                f"(TP=${pos['tp_price']:.6f} SL=${pos['sl_price']:.6f})"
+            )
+
             trigger = None
             effective_sl = pos["sl_price"]
 
@@ -165,10 +183,14 @@ class PositionMonitor:
         telegram = TelegramService()
 
         try:
-            # For long positions: sell SOL for USDC
-            input_mint = jupiter.sol_mint
+            # For long positions: sell target token for USDC
+            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "")
+            from app.services.trade_engine import TradeEngine
+            input_mint = TradeEngine._KNOWN_MINTS.get(token_symbol, jupiter.sol_mint)
             output_mint = jupiter.usdc_mint
-            amount_lamports = int(pos["amount_sol"] * 1_000_000_000)
+            decimals = TradeEngine._TOKEN_DECIMALS.get(token_symbol, 9)
+            # amount_sol stores the token quantity (legacy name)
+            amount_lamports = int(pos["amount_sol"] * (10 ** decimals))
 
             swap_result = None
             for attempt in range(self.max_retries):
@@ -251,7 +273,7 @@ class PositionMonitor:
                 tx_type="jupiter_swap",
                 direction="sell",
                 amount=pos["amount_sol"],
-                token="SOL",
+                token=token_symbol,
                 fee_sol=swap_fee_sol,
                 tx_signature=swap_result["tx_signature"],
                 status="success",

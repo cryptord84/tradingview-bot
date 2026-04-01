@@ -1,7 +1,9 @@
 """Kamino Lend client for USDC yield on idle funds."""
 
+import asyncio
 import base64
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -12,6 +14,10 @@ from app.config import get
 from app.database import log_wallet_tx
 
 logger = logging.getLogger("bot.kamino")
+
+# Module-level cache for Kamino balance — survives across KaminoClient instances
+_kamino_balance_cache: dict = {"value": 0.0, "timestamp": 0.0}
+_KAMINO_CACHE_TTL = 120  # 2 minutes — Kamino positions don't change often
 
 
 class KaminoClient:
@@ -60,30 +66,61 @@ class KaminoClient:
             return {"available": False, "error": str(e)}
 
     async def get_user_position(self, wallet_address: str) -> dict:
-        """Get user's deposited USDC balance in Kamino."""
-        try:
-            resp = await self._client.get(
-                f"{self.api_base}/kamino-market/{self.market}/users/{wallet_address}/obligations"
+        """Get user's deposited USDC balance in Kamino.
+
+        Uses a module-level cache (2 min TTL) and falls back to the last known
+        balance if the API is slow or errors out — prevents undercounting
+        purchasing power during trade decisions.
+        """
+        global _kamino_balance_cache
+
+        # Return cached value if fresh
+        now = time.time()
+        if now - _kamino_balance_cache["timestamp"] < _KAMINO_CACHE_TTL:
+            cached = _kamino_balance_cache["value"]
+            return {"deposited_usdc": cached, "has_position": cached > 0, "cached": True}
+
+        # Try up to 2 attempts with a short retry
+        last_error = None
+        for attempt in range(2):
+            try:
+                resp = await self._client.get(
+                    f"{self.api_base}/kamino-market/{self.market}/users/{wallet_address}/obligations",
+                    timeout=10,
+                )
+                resp.raise_for_status()
+                obligations = resp.json()
+
+                deposited_usdc = 0.0
+                for obligation in obligations:
+                    stats = obligation.get("refreshedStats", {})
+                    total_deposit = float(stats.get("userTotalDeposit", 0))
+                    if total_deposit > 0:
+                        deposited_usdc += total_deposit
+
+                # Update cache on success
+                _kamino_balance_cache["value"] = deposited_usdc
+                _kamino_balance_cache["timestamp"] = now
+
+                return {
+                    "deposited_usdc": deposited_usdc,
+                    "has_position": deposited_usdc > 0,
+                }
+            except Exception as e:
+                last_error = e
+                if attempt == 0:
+                    await asyncio.sleep(1)
+
+        # API failed — fall back to last known balance rather than reporting $0
+        cached = _kamino_balance_cache["value"]
+        if cached > 0:
+            logger.warning(
+                f"Kamino API failed ({last_error}), using last known balance: ${cached:.2f}"
             )
-            resp.raise_for_status()
-            obligations = resp.json()
+            return {"deposited_usdc": cached, "has_position": True, "stale": True}
 
-            deposited_usdc = 0.0
-            for obligation in obligations:
-                # refreshedStats.userTotalDeposit gives the real USDC value
-                # (accounts for cToken exchange rate automatically)
-                stats = obligation.get("refreshedStats", {})
-                total_deposit = float(stats.get("userTotalDeposit", 0))
-                if total_deposit > 0:
-                    deposited_usdc += total_deposit
-
-            return {
-                "deposited_usdc": deposited_usdc,
-                "has_position": deposited_usdc > 0,
-            }
-        except Exception as e:
-            logger.error(f"Failed to get Kamino position: {e}")
-            return {"deposited_usdc": 0.0, "has_position": False, "error": str(e)}
+        logger.error(f"Failed to get Kamino position (no cached fallback): {last_error}")
+        return {"deposited_usdc": 0.0, "has_position": False, "error": str(last_error)}
 
     async def deposit(self, keypair: Keypair, amount_usdc: float) -> dict:
         """Deposit USDC into Kamino Lend."""
@@ -163,6 +200,9 @@ class KaminoClient:
                     status="success",
                     notes=f"Kamino Lend {action}",
                 )
+
+                # Invalidate cache — balance just changed
+                _kamino_balance_cache["timestamp"] = 0
 
                 return {
                     "success": True,

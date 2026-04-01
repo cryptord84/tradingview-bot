@@ -143,6 +143,64 @@ def init_db():
 
         CREATE INDEX IF NOT EXISTS idx_backtests_strategy ON backtests(strategy_name, version);
 
+        CREATE TABLE IF NOT EXISTS kalshi_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            order_id TEXT,
+            ticker TEXT NOT NULL,
+            event_ticker TEXT,
+            title TEXT,
+            side TEXT NOT NULL,
+            action TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            price_cents INTEGER NOT NULL DEFAULT 0,
+            total_cost_cents INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            client_order_id TEXT,
+            notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS kalshi_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            opened_at TEXT NOT NULL,
+            closed_at TEXT,
+            ticker TEXT NOT NULL,
+            event_ticker TEXT,
+            title TEXT,
+            side TEXT NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0,
+            avg_price_cents INTEGER NOT NULL DEFAULT 0,
+            current_price_cents INTEGER,
+            invested_cents INTEGER NOT NULL DEFAULT 0,
+            pnl_cents INTEGER,
+            status TEXT NOT NULL DEFAULT 'open',
+            settled_payout_cents INTEGER,
+            close_date TEXT,
+            notes TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_kalshi_trades_ticker ON kalshi_trades(ticker);
+        CREATE INDEX IF NOT EXISTS idx_kalshi_trades_ts ON kalshi_trades(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_kalshi_positions_status ON kalshi_positions(status);
+
+        CREATE TABLE IF NOT EXISTS paper_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            amount_usd REAL NOT NULL DEFAULT 0,
+            price REAL NOT NULL DEFAULT 0,
+            fees_usd REAL NOT NULL DEFAULT 0,
+            balance_after REAL NOT NULL DEFAULT 0,
+            signal_confidence INTEGER DEFAULT 0,
+            claude_decision TEXT,
+            pnl_usd REAL,
+            status TEXT NOT NULL DEFAULT 'open'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
+        CREATE INDEX IF NOT EXISTS idx_paper_trades_ts ON paper_trades(timestamp);
+
         """)
     # Migration: add trail_sl_price column if not exists
     try:
@@ -624,6 +682,133 @@ def delete_backtest(backtest_id: int) -> bool:
     conn.commit()
     conn.close()
     return True
+
+
+def insert_kalshi_trade(trade: dict) -> int:
+    """Insert a Kalshi trade record."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO kalshi_trades
+        (timestamp, order_id, ticker, event_ticker, title, side, action,
+         count, price_cents, total_cost_cents, status, client_order_id, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            trade.get("timestamp", datetime.utcnow().isoformat()),
+            trade.get("order_id", ""),
+            trade["ticker"],
+            trade.get("event_ticker", ""),
+            trade.get("title", ""),
+            trade["side"],
+            trade["action"],
+            trade.get("count", 0),
+            trade.get("price_cents", 0),
+            trade.get("total_cost_cents", 0),
+            trade.get("status", "pending"),
+            trade.get("client_order_id", ""),
+            trade.get("notes", ""),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_kalshi_trades(limit: int = 50) -> list[dict]:
+    """Get recent Kalshi trades."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM kalshi_trades ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def insert_kalshi_position(pos: dict) -> int:
+    """Insert a Kalshi position record."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO kalshi_positions
+        (opened_at, ticker, event_ticker, title, side, count,
+         avg_price_cents, invested_cents, status, close_date, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            pos.get("opened_at", datetime.utcnow().isoformat()),
+            pos["ticker"],
+            pos.get("event_ticker", ""),
+            pos.get("title", ""),
+            pos["side"],
+            pos.get("count", 0),
+            pos.get("avg_price_cents", 0),
+            pos.get("invested_cents", 0),
+            pos.get("status", "open"),
+            pos.get("close_date", ""),
+            pos.get("notes", ""),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_kalshi_positions(status: str = "open") -> list[dict]:
+    """Get Kalshi positions by status."""
+    conn = get_db()
+    if status == "all":
+        rows = conn.execute(
+            "SELECT * FROM kalshi_positions ORDER BY opened_at DESC"
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM kalshi_positions WHERE status = ? ORDER BY opened_at DESC",
+            (status,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def close_kalshi_position(
+    position_id: int,
+    pnl_cents: int,
+    settled_payout_cents: int = 0,
+    status: str = "closed",
+) -> None:
+    """Close a Kalshi position."""
+    conn = get_db()
+    conn.execute(
+        """UPDATE kalshi_positions
+        SET closed_at=?, pnl_cents=?, settled_payout_cents=?, status=?
+        WHERE id=?""",
+        (
+            datetime.utcnow().isoformat(),
+            pnl_cents,
+            settled_payout_cents,
+            status,
+            position_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_kalshi_stats() -> dict:
+    """Get aggregated Kalshi trading stats."""
+    conn = get_db()
+    row = conn.execute("""
+        SELECT
+            COUNT(*) as total_positions,
+            SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_positions,
+            SUM(CASE WHEN pnl_cents > 0 THEN 1 ELSE 0 END) as winning,
+            SUM(CASE WHEN pnl_cents < 0 THEN 1 ELSE 0 END) as losing,
+            COALESCE(SUM(pnl_cents), 0) as total_pnl_cents,
+            COALESCE(SUM(invested_cents), 0) as total_invested_cents,
+            COALESCE(SUM(settled_payout_cents), 0) as total_payout_cents
+        FROM kalshi_positions
+    """).fetchone()
+    conn.close()
+    return dict(row) if row else {}
 
 
 def get_recent_signal_hash() -> Optional[str]:

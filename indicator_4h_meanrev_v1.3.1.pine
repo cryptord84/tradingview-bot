@@ -1,0 +1,240 @@
+// =============================================================================
+// Mean Reversion v1.3.1 — 4H ALERT INDICATOR (Multi-Token)
+//
+// Built directly from backtest_4H_meanrev_v1.3.pine (109 trades, +7.1%, PF 1.091)
+// Version bump to v1.3.1 for clean multi-token deployment.
+//
+// LONGS ONLY — buys dips at Bollinger Band lows with 6-factor confirmation.
+//
+// Profitable tokens (backtested):
+//   SOL (PF 1.091), JTO (PF 1.825), WIF (PF 1.582)
+//
+// Entry:
+//   HARD GATE: Price must touch/pierce lower Bollinger Band
+//   Then 4 of 6 confirmations required:
+//     1. RSI(14) < 35        2. Banker Fund Flow accumulation
+//     3. Volume > 1.3x avg   4. Choppiness < 55
+//     5. Swing bottom         6. Pivot SuperTrend bullish
+//
+// Exit (handled by position monitor):
+//   TP 4x ATR / SL 1.5x ATR (R:R 1:2.67)
+//
+// SETUP:
+//   1. Open TradingView -> token/USDT -> 4H timeframe
+//   2. Pine Editor -> paste this -> Add to chart
+//   3. Set your webhook secret in indicator settings
+//   4. Create alert: Condition = this indicator -> "Any alert() function call"
+//   5. Webhook URL: https://your-bot-url/webhook
+//   6. Expiration: max allowed, set calendar reminder to renew
+//   7. Repeat for each token: SOL, JTO, WIF
+// =============================================================================
+
+//@version=6
+indicator("Mean Reversion v1.3.1 — 4H Alerts", overlay=true, max_bars_back=500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+grp_wh = "Webhook"
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret", group=grp_wh)
+min_confirm = input.int(4, "Min Confirmations (of 6, after BB gate)", minval=1, maxval=6, group=grp_wh)
+
+grp_bb = "Bollinger Bands"
+bb_len  = input.int(20,    "Length",     group=grp_bb)
+bb_mult = input.float(2.0, "Multiplier", group=grp_bb)
+
+grp_rsi = "RSI"
+rsi_len = input.int(14,   "Length",          group=grp_rsi)
+rsi_os  = input.float(35, "Oversold (Long)", group=grp_rsi)
+
+grp_vol = "Volume"
+vol_ma_len     = input.int(20,    "MA Length",        group=grp_vol)
+vol_spike_mult = input.float(1.3, "Spike Multiplier", group=grp_vol)
+
+grp_chop = "Choppiness Index"
+chop_len       = input.int(14,   "Length",    group=grp_chop)
+chop_threshold = input.float(55, "Threshold", group=grp_chop)
+
+grp_st = "Pivot SuperTrend"
+pst_pivot_len = input.int(3,     "Pivot Length",    group=grp_st)
+pst_atr_mult  = input.float(2.0, "ATR Multiplier", group=grp_st)
+pst_atr_len   = input.int(10,    "ATR Length",      group=grp_st)
+
+grp_swing = "Swing Reversal"
+swing_lookback = input.int(3, "Lookback Bars", minval=2, maxval=20, group=grp_swing)
+
+grp_cool = "Cooldown"
+cooldown_bars = input.int(3, "Bars Between Signals", minval=0, maxval=20, group=grp_cool)
+
+grp_pos = "Position Sizing"
+pos_size_pct = input.float(15.0, "Position Size %", minval=1, maxval=50, group=grp_pos)
+
+// =============================================================================
+// HELPER: Weighted Simple Average (Banker Fund Flow)
+// =============================================================================
+
+_wsa(float src, int length, int weight) =>
+    var float s = 0.0
+    var float ma = 0.0
+    var float out = 0.0
+    s := nz(s[1]) - nz(src[length]) + src
+    ma := na(src[length]) ? na : s / length
+    out := na(out[1]) ? ma : (src * weight + out[1] * (length - weight)) / length
+    out
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+[bb_mid, bb_upper, bb_lower] = ta.bb(close, bb_len, bb_mult)
+rsi_val = ta.rsi(close, rsi_len)
+vol_ma = ta.sma(volume, vol_ma_len)
+vol_spike = volume > vol_ma * vol_spike_mult
+vol_ratio = volume / vol_ma
+atr_val = ta.atr(14)
+
+// Choppiness Index
+chop_atr = ta.atr(1)
+chop_sum = math.sum(chop_atr, chop_len)
+chop_hi = ta.highest(high, chop_len)
+chop_lo = ta.lowest(low, chop_len)
+chop_range = chop_hi - chop_lo
+chop_val = chop_range > 0 ? 100 * math.log10(chop_sum / chop_range) / math.log10(chop_len) : 50
+chop_ok = chop_val < chop_threshold
+
+// Pivot SuperTrend
+pivot_high = ta.pivothigh(high, pst_pivot_len, pst_pivot_len)
+pivot_low = ta.pivotlow(low, pst_pivot_len, pst_pivot_len)
+
+var float last_pivot_high = na
+var float last_pivot_low = na
+if not na(pivot_high)
+    last_pivot_high := pivot_high
+if not na(pivot_low)
+    last_pivot_low := pivot_low
+
+pst_atr = ta.atr(pst_atr_len)
+pivot_center = nz((last_pivot_high + last_pivot_low) / 2, close)
+pst_upper = pivot_center + pst_atr_mult * pst_atr
+pst_lower = pivot_center - pst_atr_mult * pst_atr
+
+var float pst_upper_band = na
+var float pst_lower_band = na
+var int pst_direction = 1
+
+pst_upper_band := nz(pst_upper_band[1])
+pst_lower_band := nz(pst_lower_band[1])
+
+if close > pst_upper_band[1]
+    pst_direction := -1
+if close < pst_lower_band[1]
+    pst_direction := 1
+
+pst_upper_band := pst_direction == 1 ? math.min(pst_upper, nz(pst_upper_band[1], pst_upper)) : pst_upper
+pst_lower_band := pst_direction == -1 ? math.max(pst_lower, nz(pst_lower_band[1], pst_lower)) : pst_lower
+
+pst_bullish = pst_direction == -1
+pst_line = pst_bullish ? pst_lower_band : pst_upper_band
+
+// Banker Fund Flow
+bff_pct = (close - ta.lowest(low, 27)) / (ta.highest(high, 27) - ta.lowest(low, 27)) * 100
+bff_wsa1 = _wsa(bff_pct, 5, 1)
+fund_flow_trend = (3 * bff_wsa1 - 2 * _wsa(bff_wsa1, 3, 1) - 50) * 1.032 + 50
+bff_typical = (2 * close + high + low + open) / 5
+bull_bear_line = ta.ema((bff_typical - ta.lowest(low, 34)) / (ta.highest(high, 34) - ta.lowest(low, 34)) * 100, 13)
+
+banker_bull = ta.crossover(fund_flow_trend, bull_bear_line) and bull_bear_line < 25
+banker_bull_recent = banker_bull or banker_bull[1] or banker_bull[2] or banker_bull[3]
+
+// Swing Reversal
+swing_bottom = low == ta.lowest(low, swing_lookback * 2 + 1) and close > open
+swing_bottom_recent = swing_bottom or swing_bottom[1] or swing_bottom[2] or swing_bottom[3]
+
+// =============================================================================
+// SCORING: BB touch REQUIRED, then 4 of 6 confirmations — LONGS ONLY
+// =============================================================================
+
+bb_long_gate = close <= bb_lower or low <= bb_lower
+
+confirm_rsi = rsi_val < rsi_os
+confirm_banker = banker_bull_recent
+confirm_vol = vol_spike
+confirm_chop = chop_ok
+confirm_swing = swing_bottom_recent
+confirm_trend = pst_bullish
+
+long_confirms = (confirm_rsi ? 1 : 0) + (confirm_banker ? 1 : 0) + (confirm_vol ? 1 : 0) + (confirm_chop ? 1 : 0) + (confirm_swing ? 1 : 0) + (confirm_trend ? 1 : 0)
+
+// Cooldown
+var int bars_since_signal = 100
+bars_since_signal := bars_since_signal + 1
+cooldown_ok = bars_since_signal >= cooldown_bars
+
+// =============================================================================
+// SIGNAL
+// =============================================================================
+
+long_signal = bb_long_gate and long_confirms >= min_confirm and cooldown_ok and barstate.isconfirmed
+
+if long_signal
+    bars_since_signal := 0
+
+// Confidence
+long_conf = math.min(100, math.round(long_confirms / 6.0 * 50 + (vol_spike ? 15 : 0) + (pst_bullish ? 15 : 0) + (banker_bull_recent ? 20 : 0)))
+
+calc_lev(c) => c >= 85 ? 5 : c >= 70 ? 3 : c >= 55 ? 2 : 1
+
+// =============================================================================
+// ALERT CONDITIONS
+// =============================================================================
+
+alertcondition(long_signal, "BUY Signal", "BUY")
+
+// =============================================================================
+// ALERT MESSAGE (webhook JSON)
+// =============================================================================
+
+if long_signal
+    alert('{"secret":"' + webhook_secret + '","signal_type":"BUY","symbol":"' + syminfo.ticker + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(long_conf) + ',"suggested_leverage":' + str.tostring(calc_lev(long_conf)) + ',"suggested_position_size_percent":' + str.tostring(pos_size_pct) + ',"bull_score":' + str.tostring(long_confirms) + ',"bear_score":0' + ',"banker_entry":' + str.tostring(banker_bull_recent ? 1 : 0) + ',"macd_divergence":0' + ',"rsi":' + str.tostring(math.round(rsi_val, 2)) + ',"atr":' + str.tostring(math.round(atr_val, 4)) + ',"bb_lower":' + str.tostring(math.round(bb_lower, 4)) + ',"choppiness":' + str.tostring(math.round(chop_val, 2)) + ',"vol_ratio":' + str.tostring(math.round(vol_ratio, 2)) + ',"timeframe":"' + timeframe.period + '"}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// VISUALS
+// =============================================================================
+
+p_bb_upper = plot(bb_upper, "BB Upper", color=color.new(color.blue, 60), linewidth=1)
+p_bb_lower = plot(bb_lower, "BB Lower", color=color.new(color.blue, 60), linewidth=1)
+plot(bb_mid, "BB Mid (SMA20)", color=color.new(color.orange, 40), linewidth=2)
+fill(p_bb_upper, p_bb_lower, color=color.new(color.blue, 92), title="BB Fill")
+plot(pst_line, "Pivot SuperTrend", color=pst_bullish ? color.green : color.red, linewidth=2, style=plot.style_linebr)
+
+plotshape(long_signal, "BUY", shape.triangleup, location.belowbar, color.lime, size=size.normal, text="MR BUY")
+plotshape(banker_bull, "Banker Bull", shape.triangleup, location.belowbar, color.new(color.teal, 20), size=size.tiny)
+plotshape(swing_bottom, "Swing Bottom", shape.diamond, location.belowbar, color.new(color.aqua, 30), size=size.tiny)
+
+bgcolor(close <= bb_lower ? color.new(color.green, 90) : na, title="BB Lower Touch")
+
+// =============================================================================
+// INFO TABLE
+// =============================================================================
+
+var table t = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 80), border_width=1)
+if barstate.islast
+    table.cell(t, 0, 0, "4H MR v1.3.1", text_color=color.aqua, text_size=size.small)
+    table.cell(t, 1, 0, "LONG ONLY", text_color=color.lime, text_size=size.small)
+    table.cell(t, 0, 1, "BB Gate", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 1, bb_long_gate ? "TOUCH" : "NO", text_color=bb_long_gate ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 2, "Confirms", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(long_confirms) + "/6", text_color=long_confirms >= min_confirm ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 3, "RSI", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(math.round(rsi_val, 1)), text_color=rsi_val < rsi_os ? color.lime : color.white, text_size=size.small)
+    table.cell(t, 0, 4, "P.SuperTrend", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 4, pst_bullish ? "BULL" : "BEAR", text_color=pst_bullish ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 0, 5, "Choppiness", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 5, str.tostring(math.round(chop_val, 1)), text_color=chop_ok ? color.lime : color.yellow, text_size=size.small)
+    table.cell(t, 0, 6, "Vol Spike", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 6, vol_spike ? str.tostring(math.round(vol_ratio, 1)) + "x" : "NO", text_color=vol_spike ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 7, "Banker", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 7, banker_bull_recent ? "ACCUM" : "-", text_color=banker_bull_recent ? color.teal : color.gray, text_size=size.small)
+    table.cell(t, 0, 8, "Cooldown", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 8, cooldown_ok ? "READY" : str.tostring(cooldown_bars - bars_since_signal) + " bars", text_color=cooldown_ok ? color.lime : color.yellow, text_size=size.small)

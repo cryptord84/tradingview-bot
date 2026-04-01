@@ -41,7 +41,10 @@
         <span class="text-slate-600">/</span>
         <span class="font-bold">SOL Bot Cheatsheet</span>
     </div>
-    <span class="text-xs text-slate-500">Last updated: 2026-03-31</span>
+    <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-500">Last updated: 2026-04-01</span>
+        <button onclick="exportPDF()" style="background:transparent;border:1px solid #475569;border-radius:6px;padding:3px 10px;color:#94a3b8;font-size:.7rem;cursor:pointer;font-family:inherit;">Export PDF</button>
+    </div>
 </header>
 
 <main class="max-w-6xl mx-auto p-6 space-y-6">
@@ -60,6 +63,10 @@
             <a href="#risk">🛡 Risk Settings</a>
             <a href="#telegram">📱 Telegram</a>
             <a href="#scout">🔍 Scout Service</a>
+            <a href="#paper">📝 Paper Trading</a>
+            <a href="#pricefeed">📡 Price Feed</a>
+            <a href="#rebalancer">⚖️ Rebalancer</a>
+            <a href="#kalshi">🎰 Kalshi Markets</a>
             <a href="#dashboard">📊 Dashboard</a>
             <a href="#test-plan">🧪 Test Plan</a>
             <a href="#troubleshoot">🔧 Troubleshoot</a>
@@ -96,6 +103,18 @@
                     <tr><td><code class="text-blue-300">scout_service.py</code></td><td class="text-slate-400">Multi-source intel scanner</td></tr>
                     <tr><td><code class="text-blue-300">kamino_client.py</code></td><td class="text-slate-400">Kamino vault deposits</td></tr>
                     <tr><td><code class="text-blue-300">news_service.py</code></td><td class="text-slate-400">Geo-risk headlines</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_client.py</code></td><td class="text-slate-400">Kalshi API client</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_arbitrage.py</code></td><td class="text-slate-400">3-strategy arb scanner</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_spread_bot.py</code></td><td class="text-slate-400">Basic market-making</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_market_maker.py</code></td><td class="text-slate-400">Advanced multi-strategy MM</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_whale_tracker.py</code></td><td class="text-slate-400">Large trade monitor</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_technical_bot.py</code></td><td class="text-slate-400">MACD/CCI indicator bot</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_ai_agent.py</code></td><td class="text-slate-400">3-agent Claude consensus</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_sports_scanner.py</code></td><td class="text-slate-400">7-league sports scanner</td></tr>
+                    <tr><td><code class="text-blue-300">kalshi_esports_scanner.py</code></td><td class="text-slate-400">5-game esports scanner</td></tr>
+                    <tr><td><code class="text-blue-300">price_feed.py</code></td><td class="text-slate-400">WebSocket + CoinGecko prices</td></tr>
+                    <tr><td><code class="text-blue-300">paper_trading.py</code></td><td class="text-slate-400">Simulated trade engine</td></tr>
+                    <tr><td><code class="text-blue-300">portfolio_rebalancer.py</code></td><td class="text-slate-400">Multi-token rebalancing</td></tr>
                 </table>
             </div>
             <div>
@@ -113,6 +132,23 @@
                     <tr><td><code class="text-green-300">GET /api/backtests</code></td><td class="text-slate-400">Backtest results</td></tr>
                     <tr><td><code class="text-green-300">GET /api/export/csv</code></td><td class="text-slate-400">Tax CSV download</td></tr>
                     <tr><td><code class="text-green-300">GET /health</code></td><td class="text-slate-400">Health check</td></tr>
+                    <tr><td colspan="2" style="color:var(--accent);font-size:.7rem;padding-top:8px;">KALSHI ENDPOINTS</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/kalshi/status</code></td><td class="text-slate-400">Client + balance</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/kalshi/markets</code></td><td class="text-slate-400">Browse markets</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/kalshi/positions</code></td><td class="text-slate-400">Open positions</td></tr>
+                    <tr><td><code class="text-green-300">POST /api/kalshi/order</code></td><td class="text-slate-400">Place order</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/kalshi/arbitrage/*</code></td><td class="text-slate-400">Arb scanner</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/spread/*</code></td><td class="text-slate-400">Spread bot</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/mm/*</code></td><td class="text-slate-400">Market maker</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/whales</code></td><td class="text-slate-400">Whale tracker</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/tech/*</code></td><td class="text-slate-400">Technical bot</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/ai/*</code></td><td class="text-slate-400">AI agent bot</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/sports/*</code></td><td class="text-slate-400">Sports scanner</td></tr>
+                    <tr><td><code class="text-green-300">*/kalshi/esports/*</code></td><td class="text-slate-400">Esports scanner</td></tr>
+                    <tr><td colspan="2" style="color:var(--accent);font-size:.7rem;padding-top:8px;">TRADING TOOLS</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/paper/*</code></td><td class="text-slate-400">Paper trading</td></tr>
+                    <tr><td><code class="text-green-300">*/rebalancer/*</code></td><td class="text-slate-400">Portfolio rebalancer</td></tr>
+                    <tr><td><code class="text-green-300">GET /api/prices</code></td><td class="text-slate-400">Real-time prices</td></tr>
                 </table>
             </div>
         </div>
@@ -496,6 +532,159 @@ curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
         </div>
     </div>
 
+    <!-- Kalshi Prediction Markets -->
+    <div class="card p-5" id="kalshi">
+        <h2>🎰 Kalshi Prediction Markets</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>Setup</h3>
+                <p class="text-sm text-slate-400 mb-2">Kalshi uses RSA 2048-bit keypair authentication via the <code>kalshi-python</code> SDK (v2.1.4).</p>
+                <table>
+                    <tr><th>Config Key</th><th>Description</th></tr>
+                    <tr><td><code>kalshi.mode</code></td><td>"demo" (sandbox) or "live"</td></tr>
+                    <tr><td><code>kalshi.api_key_id</code></td><td>Your Kalshi API key ID</td></tr>
+                    <tr><td><code>kalshi.private_key_path</code></td><td>Path to RSA PEM file</td></tr>
+                </table>
+                <code class="cmd mt-2"># Generate RSA key pair
+openssl genrsa -out keys/kalshi_private.pem 2048
+openssl rsa -in keys/kalshi_private.pem -pubout -out keys/kalshi_public.pem
+# Upload public key to kalshi.com/account/api-keys</code>
+
+                <h3 class="mt-3">Binary Contracts</h3>
+                <p class="text-sm text-slate-400">YES/NO contracts at $0.01&ndash;$0.99 each. Win pays $1.00, lose pays $0.00. Kalshi fee: 2&cent; per contract on settlement.</p>
+            </div>
+            <div>
+                <h3>9 Integrated Services</h3>
+                <table>
+                    <tr><th>Service</th><th>Purpose</th><th>Poll</th></tr>
+                    <tr><td><span class="badge badge-blue">Client</span></td><td>Core API: markets, orders, positions</td><td>&mdash;</td></tr>
+                    <tr><td><span class="badge badge-green">Arbitrage</span></td><td>YES/NO spread + bracket + crossed book</td><td>120s</td></tr>
+                    <tr><td><span class="badge badge-green">Spread Bot</span></td><td>Basic two-sided market-making</td><td>15s</td></tr>
+                    <tr><td><span class="badge badge-green">Market Maker</span></td><td>Multi-strategy: midpoint, VWAP, volatility</td><td>10s</td></tr>
+                    <tr><td><span class="badge badge-yellow">Whale Tracker</span></td><td>Large trade monitor (&ge;50 contracts)</td><td>60s</td></tr>
+                    <tr><td><span class="badge badge-yellow">Technical Bot</span></td><td>MACD(12/26/9) + CCI(20) signals</td><td>300s</td></tr>
+                    <tr><td><span class="badge badge-yellow">AI Agent</span></td><td>3 Claude agents: analyst, contrarian, momentum</td><td>600s</td></tr>
+                    <tr><td><span class="badge badge-blue">Sports</span></td><td>MLB, NBA, NFL, NHL, Soccer, UFC, WNBA</td><td>120s</td></tr>
+                    <tr><td><span class="badge badge-blue">Esports</span></td><td>CS2, DotA2, LoL, Valorant, Overwatch</td><td>120s</td></tr>
+                </table>
+            </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div>
+                <h3>Arbitrage Strategies</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li><strong>YES/NO Spread</strong>: Buy both when YES+NO &lt; 100&cent; minus fees</li>
+                    <li><strong>Bracket Sum</strong>: Multi-outcome events where ask prices sum &lt; 100%</li>
+                    <li><strong>Crossed Book</strong>: Bid &gt; ask anomalies in high-volume markets</li>
+                </ul>
+            </div>
+            <div>
+                <h3>Market Maker Strategies</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li><strong>Midpoint</strong>: Symmetric quotes around orderbook mid</li>
+                    <li><strong>VWAP</strong>: Anchored to volume-weighted average price</li>
+                    <li><strong>Volatility</strong>: Dynamic spread widening in choppy markets</li>
+                    <li>Inventory skew + adverse selection detection</li>
+                    <li>Portfolio-level risk caps across all markets</li>
+                </ul>
+            </div>
+            <div>
+                <h3>AI Agent Consensus</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li><strong>Analyst</strong>: Fundamental probability estimation</li>
+                    <li><strong>Contrarian</strong>: Crowd sentiment reversal</li>
+                    <li><strong>Momentum</strong>: Trend following</li>
+                    <li>Weighted vote by confidence, min 70% strength to trade</li>
+                </ul>
+            </div>
+        </div>
+        <div class="warn mt-4">&#9888;&#65039; All Kalshi bots default to <code>enabled: false</code> and <code>auto_trade: false</code>. Enable manually in <code>config.yaml</code> or via dashboard toggles. Auto-trade requires explicit opt-in per bot.</div>
+    </div>
+
+    <!-- Paper Trading -->
+    <div class="card p-5" id="paper">
+        <h2>📝 Paper Trading</h2>
+        <p class="text-sm text-slate-400 mb-3">Simulate trades without executing real swaps. Virtual portfolio tracks P&L, win rate, Sharpe ratio, and max drawdown.</p>
+        <table>
+            <tr><th>Setting</th><th>Config Key</th><th>Default</th></tr>
+            <tr><td>Enable paper mode</td><td><code>paper_trading.enabled</code></td><td><code>false</code></td></tr>
+            <tr><td>Starting balance</td><td><code>paper_trading.starting_balance_usd</code></td><td><code>1000.0</code></td></tr>
+            <tr><td>Simulated slippage</td><td><code>paper_trading.simulated_slippage_bps</code></td><td><code>10</code> (0.1%)</td></tr>
+            <tr><td>Simulated fees</td><td><code>paper_trading.simulated_fee_bps</code></td><td><code>5</code> (0.05%)</td></tr>
+        </table>
+        <h3>API Endpoints</h3>
+        <table>
+            <tr><td><code class="text-green-300">GET /api/paper/portfolio</code></td><td class="text-slate-400">Virtual balances + open positions</td></tr>
+            <tr><td><code class="text-green-300">GET /api/paper/trades</code></td><td class="text-slate-400">Paper trade history</td></tr>
+            <tr><td><code class="text-green-300">GET /api/paper/stats</code></td><td class="text-slate-400">Win rate, Sharpe, drawdown</td></tr>
+            <tr><td><code class="text-green-300">POST /api/paper/reset</code></td><td class="text-slate-400">Reset virtual portfolio</td></tr>
+            <tr><td><code class="text-green-300">POST /api/paper/toggle</code></td><td class="text-slate-400">Toggle paper/live mode</td></tr>
+        </table>
+        <div class="tip mt-3">When paper trading is enabled, all webhook signals route to the paper engine instead of Jupiter. Toggle from dashboard or config.</div>
+    </div>
+
+    <!-- Price Feed -->
+    <div class="card p-5" id="pricefeed">
+        <h2>📡 Real-Time Price Feed</h2>
+        <p class="text-sm text-slate-400 mb-3">WebSocket-based price streaming with CoinGecko polling fallback for non-Binance tokens.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <h3>Binance WebSocket (primary)</h3>
+                <ul class="text-sm text-slate-300 space-y-1">
+                    <li>Tokens: SOL, JTO, WIF, BONK</li>
+                    <li>Stream: <code class="text-xs">wss://stream.binance.us:9443</code></li>
+                    <li>Update speed: sub-second</li>
+                    <li>Auto-reconnect with exponential backoff</li>
+                </ul>
+            </div>
+            <div>
+                <h3>CoinGecko Polling (fallback)</h3>
+                <ul class="text-sm text-slate-300 space-y-1">
+                    <li>Tokens: PYTH, RAY (not listed on Binance.us)</li>
+                    <li>Poll interval: 30s (configurable)</li>
+                    <li>No API key required</li>
+                </ul>
+            </div>
+        </div>
+        <table class="mt-3">
+            <tr><th>Setting</th><th>Config Key</th><th>Default</th></tr>
+            <tr><td>Enable price feed</td><td><code>price_feed.enabled</code></td><td><code>true</code></td></tr>
+            <tr><td>CoinGecko poll interval</td><td><code>price_feed.coingecko_poll_seconds</code></td><td><code>30</code></td></tr>
+            <tr><td>Max reconnect backoff</td><td><code>price_feed.reconnect_max_seconds</code></td><td><code>30</code></td></tr>
+        </table>
+    </div>
+
+    <!-- Portfolio Rebalancer -->
+    <div class="card p-5" id="rebalancer">
+        <h2>⚖️ Portfolio Rebalancer</h2>
+        <p class="text-sm text-slate-400 mb-3">Monitors target allocations and auto-rebalances via Jupiter swaps when drift exceeds threshold.</p>
+        <h3>Default Target Allocations</h3>
+        <div class="flex gap-3 flex-wrap text-sm mb-3">
+            <span class="badge badge-green">SOL 50%</span>
+            <span class="badge badge-blue">JTO 15%</span>
+            <span class="badge badge-blue">WIF 10%</span>
+            <span class="badge badge-blue">BONK 10%</span>
+            <span class="badge badge-blue">PYTH 10%</span>
+            <span class="badge badge-blue">RAY 5%</span>
+        </div>
+        <table>
+            <tr><th>Setting</th><th>Config Key</th><th>Default</th></tr>
+            <tr><td>Enable rebalancer</td><td><code>rebalancer.enabled</code></td><td><code>false</code></td></tr>
+            <tr><td>Auto-rebalance</td><td><code>rebalancer.auto_rebalance</code></td><td><code>false</code></td></tr>
+            <tr><td>Check interval</td><td><code>rebalancer.check_interval_seconds</code></td><td><code>3600</code> (1hr)</td></tr>
+            <tr><td>Drift threshold</td><td><code>rebalancer.drift_threshold_percent</code></td><td><code>5.0</code></td></tr>
+            <tr><td>Min trade size</td><td><code>rebalancer.min_trade_usd</code></td><td><code>5.0</code></td></tr>
+        </table>
+        <h3>API Endpoints</h3>
+        <table>
+            <tr><td><code class="text-green-300">GET /api/rebalancer/status</code></td><td class="text-slate-400">Current vs target allocations + drift</td></tr>
+            <tr><td><code class="text-green-300">POST /api/rebalancer/calculate</code></td><td class="text-slate-400">Dry-run: preview needed trades</td></tr>
+            <tr><td><code class="text-green-300">POST /api/rebalancer/execute</code></td><td class="text-slate-400">Execute rebalance now</td></tr>
+            <tr><td><code class="text-green-300">POST /api/rebalancer/toggle</code></td><td class="text-slate-400">Toggle auto-rebalance mode</td></tr>
+        </table>
+        <div class="warn mt-3">&#9888;&#65039; Rebalancing executes real Jupiter swaps. Use <code>calculate</code> to preview trades before executing. Auto-rebalance requires explicit opt-in.</div>
+    </div>
+
     <!-- Dashboard -->
     <div class="card p-5" id="dashboard">
         <h2>📊 Dashboard</h2>
@@ -519,7 +708,11 @@ curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
             <tr><td>Positions</td><td>Open/closed positions with live P&L, TP/SL, trailing SL indicator</td><td>30s</td></tr>
             <tr><td>Position Analytics</td><td>Equity curve, outcome doughnut, timeframe breakdown, monthly P&L</td><td>60s</td></tr>
             <tr><td>Scout Intel</td><td>Multi-source intelligence results (top 3, expandable, hideable)</td><td>Manual</td></tr>
-            <tr><td>Backtest Tracker</td><td>Strategy comparison table — sortable, filterable, hideable</td><td>Manual</td></tr>
+            <tr><td>Live Prices</td><td>Multi-token price tiles: SOL, JUP, JTO, RAY, PYTH, BONK, WIF</td><td>30s</td></tr>
+            <tr><td>Paper Trading</td><td>Virtual portfolio with P&L, win rate, Sharpe, drawdown, trade history</td><td>30s</td></tr>
+            <tr><td>Portfolio Rebalancer</td><td>Current vs target allocations, drift %, preview/execute trades</td><td>60s</td></tr>
+            <tr><td>Kalshi Markets</td><td>9 sections: Markets, Arb, Spread Bot, MM, Whales, Tech, AI, Sports, Esports</td><td>15-120s</td></tr>
+            <tr><td>Backtest Tracker</td><td>Strategy comparison table &mdash; sortable, filterable, hideable</td><td>Manual</td></tr>
             <tr><td>Risk Settings</td><td>Live-editable risk parameters</td><td>Manual</td></tr>
         </table>
     </div>
@@ -698,5 +891,23 @@ curl -X POST http://localhost:8000/webhook \
     TradingView SOL Bot Cheatsheet &mdash; <a href="/">← Dashboard</a> · <a href="/changelog">Changelog</a>
 </footer>
 
+<script>
+function exportPDF() {
+    const btn = document.querySelector('[onclick="exportPDF()"]');
+    btn.textContent = 'Preparing...';
+    btn.disabled = true;
+    // Hide header buttons for clean print
+    const style = document.createElement('style');
+    style.id = 'print-style';
+    style.textContent = '@media print { button, header { display: none !important; } body { padding: 16px; } .card { break-inside: avoid; } @page { margin: 0.5in; size: A4; } }';
+    document.head.appendChild(style);
+    setTimeout(() => {
+        window.print();
+        document.getElementById('print-style').remove();
+        btn.textContent = 'Export PDF';
+        btn.disabled = false;
+    }, 100);
+}
+</script>
 </body>
 </html>

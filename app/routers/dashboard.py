@@ -9,13 +9,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_backtests, insert_backtest, delete_backtest
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
 from app import state
 from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
+from app.services.paper_trading import get_paper_trader
 from app.services.scout_service import get_latest_report, get_all_reports, ScoutService
 
 logger = logging.getLogger("bot.dashboard")
@@ -90,6 +91,33 @@ async def get_sol_price():
         price = await jupiter.get_sol_price()
         market = await jupiter.get_market_data()
         return {"price": price, "market_data": market}
+    finally:
+        await jupiter.close()
+
+
+@router.get("/prices")
+async def get_token_prices():
+    """Get live prices for all tracked tokens.
+
+    Uses the real-time PriceFeed (WebSocket) when available,
+    falls back to Jupiter HTTP polling otherwise.
+    """
+    from app.services.price_feed import get_price_feed
+
+    feed = get_price_feed()
+    if feed.is_running:
+        prices = feed.get_all_prices()
+        if prices:
+            return {"prices": prices}
+
+    # Fallback: HTTP polling via Jupiter
+    jupiter = JupiterClient()
+    try:
+        prices = await jupiter.get_multi_token_prices()
+        return {"prices": prices}
+    except Exception as e:
+        logger.error(f"Multi-token price error: {e}")
+        return {"prices": {}}
     finally:
         await jupiter.close()
 
@@ -588,6 +616,24 @@ async def import_backtests_from_reports():
         except Exception as e:
             errors.append(f"{fname}: {e}")
 
+    # Also scan xlsx files (skip those that have a matching .report.txt already imported)
+    for xlsx_file in sorted(exports_dir.glob("*.xlsx")):
+        fname = xlsx_file.name
+        if fname in existing:
+            continue
+        # Skip if a .report.txt version was already imported
+        report_name = fname.replace(".xlsx", ".report.txt")
+        if report_name in existing:
+            continue
+
+        try:
+            bt = _parse_xlsx(xlsx_file)
+            if bt and bt.get("total_trades", 0) > 0:
+                insert_backtest(bt)
+                imported += 1
+        except Exception as e:
+            errors.append(f"{fname}: {e}")
+
     return {"imported": imported, "errors": errors, "total_in_db": len(get_backtests(limit=500))}
 
 
@@ -596,6 +642,687 @@ async def remove_backtest(backtest_id: int):
     """Delete a backtest record."""
     delete_backtest(backtest_id)
     return {"status": "ok"}
+
+
+def _parse_xlsx(filepath):
+    """Parse a TradingView xlsx export into a backtest dict."""
+    import re
+    try:
+        import openpyxl
+    except ImportError:
+        return None
+
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    filename = filepath.name
+
+    def sheet_dict(name):
+        if name not in wb.sheetnames:
+            return {}
+        ws = wb[name]
+        d = {}
+        for row in ws.iter_rows(max_col=6, values_only=False):
+            key = row[0].value
+            if key and key not in d:
+                d[key] = {c.column_letter: c.value for c in row[1:] if c.value is not None}
+        return d
+
+    perf = sheet_dict("Performance")
+    trades = sheet_dict("Trades analysis")
+    risk = sheet_dict("Risk-adjusted performance")
+    props = sheet_dict("Properties")
+
+    def val(d, key, col="B"):
+        return d.get(key, {}).get(col)
+
+    def pct(d, key):
+        return d.get(key, {}).get("C")
+
+    # Strategy name/version from filename
+    name_match = re.match(r"(.+?)_(v[\d.]+)", filename)
+    if name_match:
+        strategy_name = name_match.group(1).replace("_", " ")
+        version = name_match.group(2)
+    else:
+        strategy_name = filename.split("_")[0]
+        version = "unknown"
+
+    # Symbol from Properties sheet
+    symbol_raw = val(props, "Symbol", "B") or ""
+    symbol = symbol_raw.split(":")[-1] if ":" in symbol_raw else symbol_raw
+
+    # Timeframe
+    tf_raw = val(props, "Timeframe", "B") or ""
+    tf_map = {"4 hours": "4H", "1 hour": "1H", "2 hours": "2H", "1 day": "D", "1 week": "W",
+              "240": "4H", "60": "1H", "120": "2H", "d": "D", "w": "W"}
+    timeframe = tf_map.get(str(tf_raw).lower(), tf_raw)
+
+    # Period from Properties
+    trading_range = val(props, "Trading range", "B") or val(props, "Backtesting range", "B") or ""
+    period_start, period_end = None, None
+    if "—" in str(trading_range):
+        parts = str(trading_range).split("—")
+        period_start = parts[0].strip()
+        period_end = parts[1].strip()
+
+    total = int(val(trades, "Total trades", "B") or 0)
+    winners = int(val(trades, "Winning trades", "B") or 0)
+    losers = int(val(trades, "Losing trades", "B") or 0)
+
+    return {
+        "strategy_name": strategy_name,
+        "version": version,
+        "timeframe": timeframe,
+        "symbol": symbol,
+        "period_start": period_start,
+        "period_end": period_end,
+        "initial_capital": val(perf, "Initial capital", "B"),
+        "net_profit_usd": val(perf, "Net profit", "B"),
+        "net_profit_pct": pct(perf, "Net profit"),
+        "gross_profit": val(perf, "Gross profit", "B"),
+        "gross_loss": val(perf, "Gross loss", "B"),
+        "profit_factor": val(risk, "Profit factor", "B"),
+        "total_trades": total,
+        "winning_trades": winners,
+        "losing_trades": losers,
+        "win_rate": pct(trades, "Percent profitable"),
+        "avg_win": val(trades, "Avg winning trade", "B"),
+        "avg_loss": val(trades, "Avg losing trade", "B"),
+        "win_loss_ratio": val(trades, "Ratio avg win / avg loss", "B"),
+        "largest_win": val(trades, "Largest winning trade", "B"),
+        "largest_loss": val(trades, "Largest losing trade", "B"),
+        "max_drawdown": val(perf, "Max equity drawdown (intrabar)", "B"),
+        "sharpe_ratio": val(risk, "Sharpe ratio", "B"),
+        "sortino_ratio": val(risk, "Sortino ratio", "B"),
+        "long_trades": int(val(trades, "Total trades", "D") or 0),
+        "long_win_rate": pct(trades, "Percent profitable") if not val(trades, "Total trades", "D") else None,
+        "long_pnl": val(perf, "Net profit", "D"),
+        "short_trades": 0,
+        "short_win_rate": None,
+        "short_pnl": None,
+        "source_file": filename,
+        "notes": "",
+        "status": "tested",
+        "created_at": _extract_date_from_filename(filename),
+    }
+
+
+def _extract_date_from_filename(filename: str):
+    """Extract date from filename like ..._2026-03-31.xlsx → 2026-03-31T00:00:00"""
+    import re
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", filename)
+    if m:
+        return m.group(1) + "T00:00:00"
+    return None
+
+
+# ── Kalshi Event Contracts ────────────────────────────────────────
+
+@router.get("/kalshi/status")
+async def kalshi_status():
+    """Get Kalshi connection status, balance, and stats."""
+    from app.services.kalshi_client import get_kalshi_client
+
+    client = get_kalshi_client()
+    stats = get_kalshi_stats()
+
+    result = {
+        "enabled": client.enabled,
+        "mode": client.mode,
+        "configured": bool(client.api_key_id and client.private_key_path),
+        "stats": stats,
+    }
+
+    if client.enabled and client.api_key_id:
+        try:
+            balance = client.get_balance()
+            result["balance"] = balance
+            result["connected"] = True
+        except Exception as e:
+            result["connected"] = False
+            result["error"] = str(e)[:100]
+    else:
+        result["connected"] = False
+
+    return result
+
+
+@router.get("/kalshi/markets")
+async def kalshi_markets(query: str = "", status: str = "open", limit: int = 20):
+    """Search or list Kalshi markets."""
+    from app.services.kalshi_client import get_kalshi_client
+
+    client = get_kalshi_client()
+    if not client.enabled:
+        raise HTTPException(400, "Kalshi is not enabled in config")
+
+    try:
+        if query:
+            markets = client.search_markets(query, limit=limit)
+        else:
+            markets = client.get_markets(status=status, limit=limit)
+        return {"markets": markets, "total": len(markets)}
+    except Exception as e:
+        raise HTTPException(500, f"Kalshi API error: {e}")
+
+
+@router.get("/kalshi/market/{ticker}")
+async def kalshi_market_detail(ticker: str):
+    """Get detailed market info including orderbook."""
+    from app.services.kalshi_client import get_kalshi_client
+
+    client = get_kalshi_client()
+    if not client.enabled:
+        raise HTTPException(400, "Kalshi is not enabled in config")
+
+    try:
+        market = client.get_market(ticker)
+        orderbook = client.get_orderbook(ticker)
+        trades = client.get_market_trades(ticker, limit=10)
+        return {"market": market, "orderbook": orderbook, "recent_trades": trades}
+    except Exception as e:
+        raise HTTPException(500, f"Kalshi API error: {e}")
+
+
+@router.get("/kalshi/positions")
+async def kalshi_positions(status: str = "all"):
+    """Get Kalshi positions from local DB + live data."""
+    from app.services.kalshi_client import get_kalshi_client
+
+    db_positions = get_kalshi_positions(status=status)
+
+    client = get_kalshi_client()
+    live_positions = []
+    if client.enabled and client.api_key_id:
+        try:
+            live_positions = client.get_positions()
+        except Exception:
+            pass
+
+    return {
+        "db_positions": db_positions,
+        "live_positions": live_positions,
+        "stats": get_kalshi_stats(),
+    }
+
+
+@router.get("/kalshi/trades")
+async def kalshi_trade_history(limit: int = 50):
+    """Get Kalshi trade history from local DB."""
+    trades = get_kalshi_trades(limit=min(limit, 200))
+    return {"trades": trades, "total": len(trades)}
+
+
+@router.post("/kalshi/order")
+async def kalshi_place_order(body: dict):
+    """Place a Kalshi order. Body: {ticker, side, price, count?, action?}"""
+    from app.services.kalshi_client import get_kalshi_client
+    from app.database import insert_kalshi_trade
+
+    client = get_kalshi_client()
+    if not client.enabled:
+        raise HTTPException(400, "Kalshi is not enabled in config")
+
+    ticker = body.get("ticker")
+    side = body.get("side")
+    price = body.get("price")
+    if not all([ticker, side, price]):
+        raise HTTPException(400, "Required: ticker, side (yes/no), price (cents 1-99)")
+
+    action = body.get("action", "buy")
+    count = body.get("count")
+
+    try:
+        result = client.place_order(
+            ticker=ticker,
+            side=side,
+            action=action,
+            count=count,
+            yes_price=price if side == "yes" else None,
+            no_price=price if side == "no" else None,
+        )
+
+        # Log to DB
+        insert_kalshi_trade({
+            "order_id": result.get("order", {}).get("order_id", ""),
+            "ticker": ticker,
+            "title": body.get("title", ""),
+            "side": side,
+            "action": action,
+            "count": count or client.default_count,
+            "price_cents": price,
+            "total_cost_cents": price * (count or client.default_count),
+            "status": result.get("order", {}).get("status", "pending"),
+        })
+
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        raise HTTPException(500, f"Order failed: {e}")
+
+
+@router.get("/kalshi/portfolio")
+async def kalshi_portfolio():
+    """Get full Kalshi portfolio summary with live P&L."""
+    from app.services.kalshi_client import get_kalshi_client
+
+    client = get_kalshi_client()
+    if not client.enabled:
+        raise HTTPException(400, "Kalshi is not enabled in config")
+
+    try:
+        summary = client.get_portfolio_summary()
+        summary["db_stats"] = get_kalshi_stats()
+        return summary
+    except Exception as e:
+        raise HTTPException(500, f"Portfolio error: {e}")
+
+
+# ── Kalshi Arbitrage ──────────────────────────────────────────────
+
+@router.get("/kalshi/arbitrage/status")
+async def kalshi_arb_status():
+    """Get arbitrage scanner status."""
+    from app.services.kalshi_arbitrage import get_arbitrage_scanner
+    scanner = get_arbitrage_scanner()
+    return scanner.get_status()
+
+
+@router.get("/kalshi/arbitrage/opportunities")
+async def kalshi_arb_opportunities():
+    """Get current arbitrage opportunities."""
+    from app.services.kalshi_arbitrage import get_arbitrage_scanner
+    scanner = get_arbitrage_scanner()
+    return {"opportunities": scanner.get_opportunities()}
+
+
+@router.post("/kalshi/arbitrage/scan")
+async def kalshi_arb_scan_now():
+    """Manually trigger an arbitrage scan."""
+    from app.services.kalshi_arbitrage import get_arbitrage_scanner
+    scanner = get_arbitrage_scanner()
+    results = await scanner.scan_all()
+    return {"opportunities": results, "total": len(results)}
+
+
+@router.post("/kalshi/arbitrage/toggle")
+async def kalshi_arb_toggle(body: dict):
+    """Toggle auto-execute or scanner. Body: {auto_execute?: bool, enabled?: bool}"""
+    from app.services.kalshi_arbitrage import get_arbitrage_scanner
+    scanner = get_arbitrage_scanner()
+
+    if "auto_execute" in body:
+        scanner.auto_execute = bool(body["auto_execute"])
+    if "enabled" in body:
+        if body["enabled"] and not scanner._running:
+            scanner.enabled = True
+            scanner.start()
+        elif not body["enabled"]:
+            scanner.stop()
+            scanner.enabled = False
+
+    return scanner.get_status()
+
+
+# ── Kalshi Spread Bot ─────────────────────────────────────────────
+
+@router.get("/kalshi/spread/status")
+async def kalshi_spread_status():
+    """Get spread bot status and all market states."""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    return bot.get_status()
+
+
+@router.post("/kalshi/spread/start")
+async def kalshi_spread_start():
+    """Start the spread bot."""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    if bot._running:
+        return {"status": "already_running"}
+    bot.start()
+    return {"status": "started"}
+
+
+@router.post("/kalshi/spread/stop")
+async def kalshi_spread_stop():
+    """Stop the spread bot and cancel all orders."""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    await bot.stop()
+    return {"status": "stopped"}
+
+
+@router.post("/kalshi/spread/kill")
+async def kalshi_spread_kill():
+    """Emergency kill switch."""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    bot.kill()
+    return {"status": "killed"}
+
+
+@router.post("/kalshi/spread/flatten")
+async def kalshi_spread_flatten(body: dict = {}):
+    """Flatten positions. Body: {ticker: "..."} for one market, or {} for all."""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    ticker = body.get("ticker")
+    if ticker:
+        await bot.flatten_market(ticker)
+        return {"status": "flattened", "ticker": ticker}
+    else:
+        await bot.flatten_all()
+        return {"status": "flattened_all"}
+
+
+@router.post("/kalshi/spread/market")
+async def kalshi_spread_add_market(body: dict):
+    """Add/remove a market from spread bot. Body: {ticker, action: "add"|"remove"}"""
+    from app.services.kalshi_spread_bot import get_spread_bot
+    bot = get_spread_bot()
+    ticker = body.get("ticker")
+    action = body.get("action", "add")
+    if not ticker:
+        raise HTTPException(400, "ticker required")
+    if action == "add":
+        bot.add_market(ticker)
+    elif action == "remove":
+        bot.remove_market(ticker)
+        await bot.flatten_market(ticker)
+    return {"status": "ok", "targets": bot.target_tickers}
+
+
+# ── Kalshi Whale Tracker ──────────────────────────────────────────
+
+@router.get("/kalshi/whales")
+async def kalshi_whales(limit: int = 50):
+    """Get detected whale trades."""
+    from app.services.kalshi_whale_tracker import get_whale_tracker
+    tracker = get_whale_tracker()
+    return {"whales": tracker.get_whales(limit=min(limit, 100)), "status": tracker.get_status()}
+
+
+@router.post("/kalshi/whales/scan")
+async def kalshi_whale_scan():
+    """Manually trigger a whale scan."""
+    from app.services.kalshi_whale_tracker import get_whale_tracker
+    tracker = get_whale_tracker()
+    results = await tracker.scan()
+    return {"new_whales": results, "total": len(results)}
+
+
+@router.post("/kalshi/whales/toggle")
+async def kalshi_whale_toggle(body: dict):
+    """Start/stop whale tracker. Body: {enabled: bool}"""
+    from app.services.kalshi_whale_tracker import get_whale_tracker
+    tracker = get_whale_tracker()
+    if body.get("enabled") and not tracker._running:
+        tracker.enabled = True
+        tracker.start()
+    elif not body.get("enabled"):
+        tracker.stop()
+        tracker.enabled = False
+    return tracker.get_status()
+
+
+# ── Kalshi Technical Bot (MACD/CCI) ──────────────────────────────
+
+@router.get("/kalshi/tech/status")
+async def kalshi_tech_status():
+    """Get technical bot status."""
+    from app.services.kalshi_technical_bot import get_technical_bot
+    bot = get_technical_bot()
+    return bot.get_status()
+
+
+@router.get("/kalshi/tech/signals")
+async def kalshi_tech_signals(limit: int = 50):
+    """Get recent technical signals."""
+    from app.services.kalshi_technical_bot import get_technical_bot
+    bot = get_technical_bot()
+    return {"signals": bot.get_signals(limit=min(limit, 100)), "status": bot.get_status()}
+
+
+@router.post("/kalshi/tech/scan")
+async def kalshi_tech_scan():
+    """Manually trigger a technical analysis scan."""
+    from app.services.kalshi_technical_bot import get_technical_bot
+    bot = get_technical_bot()
+    results = await bot.scan_all()
+    return {"signals": results, "total": len(results)}
+
+
+@router.post("/kalshi/tech/toggle")
+async def kalshi_tech_toggle(body: dict):
+    """Start/stop technical bot. Body: {enabled?: bool, auto_trade?: bool}"""
+    from app.services.kalshi_technical_bot import get_technical_bot
+    bot = get_technical_bot()
+    if "auto_trade" in body:
+        bot.auto_trade = bool(body["auto_trade"])
+    if "enabled" in body:
+        if body["enabled"] and not bot._running:
+            bot.enabled = True
+            bot.start()
+        elif not body["enabled"]:
+            bot.stop()
+            bot.enabled = False
+    return bot.get_status()
+
+
+# ── Kalshi AI Agent Bot ──────────────────────────────────────────
+
+@router.get("/kalshi/ai/status")
+async def kalshi_ai_status():
+    """Get AI agent bot status."""
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+    bot = get_ai_agent_bot()
+    return bot.get_status()
+
+
+@router.get("/kalshi/ai/decisions")
+async def kalshi_ai_decisions(limit: int = 20):
+    """Get recent AI consensus decisions."""
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+    bot = get_ai_agent_bot()
+    return {"decisions": bot.get_decisions(limit=min(limit, 50)), "status": bot.get_status()}
+
+
+@router.post("/kalshi/ai/analyze")
+async def kalshi_ai_analyze():
+    """Manually trigger AI agent analysis."""
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+    bot = get_ai_agent_bot()
+    results = await bot.analyze_markets()
+    return {"decisions": results, "total": len(results)}
+
+
+@router.post("/kalshi/ai/toggle")
+async def kalshi_ai_toggle(body: dict):
+    """Start/stop AI agent bot. Body: {enabled?, auto_trade?}"""
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+    bot = get_ai_agent_bot()
+    if "auto_trade" in body:
+        bot.auto_trade = bool(body["auto_trade"])
+    if "enabled" in body:
+        if body["enabled"] and not bot._running:
+            bot.enabled = True
+            bot.start()
+        elif not body["enabled"]:
+            bot.stop()
+            bot.enabled = False
+    return bot.get_status()
+
+
+# =========================================================================
+# KALSHI SPORTS SCANNER
+# =========================================================================
+
+@router.get("/kalshi/sports/status")
+async def kalshi_sports_status():
+    """Get sports scanner status."""
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    return get_sports_scanner().get_status()
+
+
+@router.get("/kalshi/sports/markets")
+async def kalshi_sports_markets(league: str = None, limit: int = 50):
+    """Get tracked sports markets, optionally by league."""
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    return {"markets": get_sports_scanner().get_markets_by_league(league), "status": get_sports_scanner().get_status()}
+
+
+@router.get("/kalshi/sports/value-bets")
+async def kalshi_sports_value_bets(limit: int = 20):
+    """Get recent value bet opportunities."""
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    return {"value_bets": get_sports_scanner().get_value_bets(limit=min(limit, 50))}
+
+
+@router.post("/kalshi/sports/scan")
+async def kalshi_sports_scan():
+    """Manually trigger sports market scan."""
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    result = await get_sports_scanner().scan()
+    return result
+
+
+@router.post("/kalshi/sports/toggle")
+async def kalshi_sports_toggle(body: dict):
+    """Start/stop sports scanner. Body: {enabled?, auto_trade?}"""
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    scanner = get_sports_scanner()
+    if "auto_trade" in body:
+        scanner.auto_trade = bool(body["auto_trade"])
+    if "enabled" in body:
+        if body["enabled"] and not scanner._running:
+            scanner.enabled = True
+            scanner.start()
+        elif not body["enabled"]:
+            scanner.stop()
+            scanner.enabled = False
+    return scanner.get_status()
+
+
+# =========================================================================
+# KALSHI MARKET MAKER FRAMEWORK
+# =========================================================================
+
+@router.get("/kalshi/mm/status")
+async def kalshi_mm_status():
+    """Get market maker status."""
+    from app.services.kalshi_market_maker import get_market_maker
+    return get_market_maker().get_status()
+
+
+@router.get("/kalshi/mm/fills")
+async def kalshi_mm_fills(limit: int = 50):
+    """Get recent fills."""
+    from app.services.kalshi_market_maker import get_market_maker
+    return {"fills": get_market_maker().get_fills(limit=min(limit, 200))}
+
+
+@router.get("/kalshi/mm/pnl")
+async def kalshi_mm_pnl():
+    """Get P&L breakdown by market and strategy."""
+    from app.services.kalshi_market_maker import get_market_maker
+    mm = get_market_maker()
+    return {
+        "by_market": mm.get_pnl_by_market(),
+        "by_strategy": mm.get_pnl_by_strategy(),
+        "total_pnl_cents": mm._total_pnl_cents,
+        "total_pnl_usd": round(mm._total_pnl_cents / 100, 2),
+    }
+
+
+@router.post("/kalshi/mm/start")
+async def kalshi_mm_start():
+    """Start the market maker."""
+    from app.services.kalshi_market_maker import get_market_maker
+    mm = get_market_maker()
+    mm.enabled = True
+    mm.start()
+    return mm.get_status()
+
+
+@router.post("/kalshi/mm/stop")
+async def kalshi_mm_stop():
+    """Stop the market maker gracefully."""
+    from app.services.kalshi_market_maker import get_market_maker
+    mm = get_market_maker()
+    await mm.stop()
+    mm.enabled = False
+    return mm.get_status()
+
+
+@router.post("/kalshi/mm/kill")
+async def kalshi_mm_kill():
+    """Emergency kill switch."""
+    from app.services.kalshi_market_maker import get_market_maker
+    mm = get_market_maker()
+    mm.kill()
+    return mm.get_status()
+
+
+@router.post("/kalshi/mm/flatten")
+async def kalshi_mm_flatten(body: dict = None):
+    """Flatten one or all markets. Body: {ticker?}"""
+    from app.services.kalshi_market_maker import get_market_maker
+    mm = get_market_maker()
+    if body and body.get("ticker"):
+        result = await mm.flatten_market(body["ticker"])
+        return result
+    await mm.flatten_all()
+    return {"status": "all_flattened"}
+
+
+# =========================================================================
+# KALSHI ESPORTS SCANNER
+# =========================================================================
+
+@router.get("/kalshi/esports/status")
+async def kalshi_esports_status():
+    """Get esports scanner status."""
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    return get_esports_scanner().get_status()
+
+
+@router.get("/kalshi/esports/markets")
+async def kalshi_esports_markets(game: str = None, limit: int = 50):
+    """Get tracked esports markets, optionally by game."""
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    return {"markets": get_esports_scanner().get_markets_by_game(game), "status": get_esports_scanner().get_status()}
+
+
+@router.get("/kalshi/esports/value-bets")
+async def kalshi_esports_value_bets(limit: int = 20):
+    """Get recent esports value bet opportunities."""
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    return {"value_bets": get_esports_scanner().get_value_bets(limit=min(limit, 50))}
+
+
+@router.post("/kalshi/esports/scan")
+async def kalshi_esports_scan():
+    """Manually trigger esports market scan."""
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    result = await get_esports_scanner().scan()
+    return result
+
+
+@router.post("/kalshi/esports/toggle")
+async def kalshi_esports_toggle(body: dict):
+    """Start/stop esports scanner. Body: {enabled?, auto_trade?}"""
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    scanner = get_esports_scanner()
+    if "auto_trade" in body:
+        scanner.auto_trade = bool(body["auto_trade"])
+    if "enabled" in body:
+        if body["enabled"] and not scanner._running:
+            scanner.enabled = True
+            scanner.start()
+        elif not body["enabled"]:
+            scanner.stop()
+            scanner.enabled = False
+    return scanner.get_status()
 
 
 def _parse_report_txt(text: str, filename: str) -> dict:
@@ -679,4 +1406,114 @@ def _parse_report_txt(text: str, filename: str) -> dict:
         "source_file": filename,
         "notes": "",
         "status": status,
+        "created_at": _extract_date_from_filename(filename),
     }
+
+
+# =============================================================================
+# PAPER TRADING ENDPOINTS
+# =============================================================================
+
+
+@router.get("/paper/portfolio")
+async def get_paper_portfolio():
+    """Get current paper trading portfolio state."""
+    paper = get_paper_trader()
+    return paper.get_paper_portfolio()
+
+
+@router.get("/paper/trades")
+async def get_paper_trade_history(limit: int = 50):
+    """Get paper trade history."""
+    paper = get_paper_trader()
+    trades = paper.get_paper_trades(limit=min(limit, 200))
+    return {"trades": trades, "total": len(trades)}
+
+
+@router.get("/paper/stats")
+async def get_paper_trading_stats():
+    """Get paper trading statistics."""
+    paper = get_paper_trader()
+    return paper.get_paper_stats()
+
+
+@router.post("/paper/reset")
+async def reset_paper_portfolio():
+    """Reset paper portfolio to starting balance."""
+    paper = get_paper_trader()
+    return paper.reset()
+
+
+@router.post("/paper/toggle")
+async def toggle_paper_mode():
+    """Enable/disable paper trading mode."""
+    import yaml
+
+    config_path = Path("config.yaml")
+    if not config_path.exists():
+        raise HTTPException(status_code=500, detail="config.yaml not found")
+
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f)
+
+    current = cfg.get("paper_trading", {}).get("enabled", False)
+    cfg.setdefault("paper_trading", {})["enabled"] = not current
+
+    with open(config_path, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=False)
+
+    reload_config()
+    new_state = not current
+    logger.info(f"Paper trading mode {'enabled' if new_state else 'disabled'}")
+    return {"enabled": new_state, "status": "ok"}
+
+
+# =============================================================================
+# PORTFOLIO REBALANCER
+# =============================================================================
+
+@router.get("/rebalancer/status")
+async def rebalancer_status():
+    """Current allocations vs targets, drift, last rebalance."""
+    from app.services.portfolio_rebalancer import get_rebalancer
+    rebalancer = get_rebalancer()
+    return await rebalancer.get_status()
+
+
+@router.post("/rebalancer/calculate")
+async def rebalancer_calculate():
+    """Dry-run: show what trades would be needed to rebalance."""
+    from app.services.portfolio_rebalancer import get_rebalancer
+    rebalancer = get_rebalancer()
+    try:
+        current = await rebalancer.get_current_allocations()
+        trades = rebalancer.calculate_rebalance(current)
+        return {
+            "status": "calculated",
+            "current_allocations": {k: round(v, 2) for k, v in current["allocations"].items()},
+            "targets": rebalancer.targets,
+            "total_usd": round(current["total_usd"], 2),
+            "trades": trades,
+        }
+    except Exception as e:
+        logger.error(f"Rebalancer calculate error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rebalancer/execute")
+async def rebalancer_execute():
+    """Execute rebalance now."""
+    from app.services.portfolio_rebalancer import get_rebalancer
+    rebalancer = get_rebalancer()
+    result = await rebalancer.execute_rebalance()
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
+
+
+@router.post("/rebalancer/toggle")
+async def rebalancer_toggle():
+    """Enable/disable auto-rebalance."""
+    from app.services.portfolio_rebalancer import get_rebalancer
+    rebalancer = get_rebalancer()
+    return rebalancer.toggle_auto()

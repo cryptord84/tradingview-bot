@@ -87,7 +87,8 @@ def _build_context(
 - Timeframe: {signal.timeframe}
 
 ## Wallet Status
-- Balance: {wallet_balance_sol:.4f} SOL (${wallet_balance_usd:.2f})
+- SOL Balance: {wallet_balance_sol:.4f} SOL (${wallet_balance_sol * sol_price:.2f})
+- Total Purchasing Power: ${wallet_balance_usd:.2f} (USDC wallet + Kamino deposits + SOL value)
 - Current SOL Price: ${sol_price:.2f}
 """
 
@@ -115,12 +116,19 @@ def _build_context(
     if risk_params:
         context += f"""
 ## Risk Parameters
-- Max Purchase: {risk_params.get('max_purchase_sol', 'N/A')} SOL / ${risk_params.get('max_purchase_usd', 'N/A')}
+- Max Purchase: ${risk_params.get('max_purchase_usd', 'N/A')} USD
 - Max Leverage: {risk_params.get('max_leverage', 'N/A')}x
 - Daily Loss Limit: {risk_params.get('daily_loss_limit_percent', 'N/A')}%
-- Low Balance Shutdown: {risk_params.get('low_balance_shutdown_sol', 'N/A')} SOL
+- Low Balance Shutdown: ${risk_params.get('low_balance_shutdown_usd', 'N/A')} USD
 - Today's P&L: ${risk_params.get('today_pnl_usd', 0):.2f}
 - Geo Risk Weight: {risk_params.get('geo_risk_weight', 0.7)}
+
+## Balance Breakdown
+- USDC in Wallet: ${risk_params.get('usdc_wallet', 0):.2f}
+- USDC in Kamino: ${risk_params.get('usdc_kamino', 0):.2f}
+- Tradeable USDC (wallet + Kamino): ${risk_params.get('tradeable_usd', 0):.2f}
+- SOL value: ${wallet_balance_sol * sol_price:.2f}
+- Total portfolio: ${risk_params.get('total_usd', 0):.2f}
 """
 
     context += "\n## Your Decision\nRespond with ONLY the JSON object. No markdown fences, no extra text."

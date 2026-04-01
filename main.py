@@ -23,6 +23,7 @@ from app.services.wallet_service import WalletService
 from app.utils.csv_backup import run_daily_backup
 from app.services.scout_service import scout_scheduler
 from app.services.position_monitor import get_position_monitor
+from app.services.price_feed import get_price_feed
 
 # --- Logging Setup ---
 LOG_DIR = Path("logs")
@@ -34,17 +35,42 @@ try:
 except Exception:
     pass
 
+
+class ColoredFormatter(logging.Formatter):
+    """Adds ANSI colors to terminal log output by level."""
+
+    RESET = "\033[0m"
+    COLORS = {
+        logging.DEBUG: "\033[36m",     # cyan
+        logging.INFO: "",              # default (no color)
+        logging.WARNING: "\033[33m",   # yellow
+        logging.ERROR: "\033[31m",     # red
+        logging.CRITICAL: "\033[1;31m",  # bold red
+    }
+
+    def format(self, record):
+        color = self.COLORS.get(record.levelno, "")
+        msg = super().format(record)
+        if color:
+            return f"{color}{msg}{self.RESET}"
+        return msg
+
+
+_log_fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+_console = logging.StreamHandler(sys.stdout)
+_console.setFormatter(ColoredFormatter(_log_fmt))
+
+_file = logging.handlers.RotatingFileHandler(
+    log_cfg.get("file", "logs/bot.log"),
+    maxBytes=(log_cfg.get("max_size_mb", 50)) * 1024 * 1024,
+    backupCount=log_cfg.get("backup_count", 5),
+)
+_file.setFormatter(logging.Formatter(_log_fmt))
+
 logging.basicConfig(
     level=getattr(logging, (log_cfg.get("level") or get("server", "log_level", "INFO")).upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.handlers.RotatingFileHandler(
-            log_cfg.get("file", "logs/bot.log"),
-            maxBytes=(log_cfg.get("max_size_mb", 50)) * 1024 * 1024,
-            backupCount=log_cfg.get("backup_count", 5),
-        ),
-    ],
+    handlers=[_console, _file],
 )
 logger = logging.getLogger("bot")
 
@@ -72,10 +98,79 @@ async def lifespan(app: FastAPI):
     # Start daily scout scheduler (3:30 AM X.com scan)
     scout_task = asyncio.create_task(scout_scheduler())
 
+    # Start real-time price feed (Binance WS + CoinGecko polling)
+    price_feed = get_price_feed()
+    if price_feed.enabled:
+        price_feed.start()
+        logger.info("Real-time price feed started")
+
     # Start position monitor (TP/SL auto-close)
     pos_monitor = get_position_monitor()
     if pos_monitor.enabled:
         pos_monitor_task = pos_monitor.start()
+
+    # Start Kalshi arbitrage scanner
+    from app.services.kalshi_arbitrage import get_arbitrage_scanner
+    arb_scanner = get_arbitrage_scanner()
+    if arb_scanner.enabled:
+        arb_scanner.start()
+        logger.info("Kalshi arbitrage scanner started")
+
+    # Start Kalshi spread bot
+    from app.services.kalshi_spread_bot import get_spread_bot
+    spread_bot = get_spread_bot()
+    if spread_bot.enabled:
+        spread_bot.start()
+        logger.info("Kalshi spread bot started")
+
+    # Start Kalshi whale tracker
+    from app.services.kalshi_whale_tracker import get_whale_tracker
+    whale_tracker = get_whale_tracker()
+    if whale_tracker.enabled:
+        whale_tracker.start()
+        logger.info("Kalshi whale tracker started")
+
+    # Start Kalshi technical bot
+    from app.services.kalshi_technical_bot import get_technical_bot
+    tech_bot = get_technical_bot()
+    if tech_bot.enabled:
+        tech_bot.start()
+        logger.info("Kalshi technical bot started")
+
+    # Start Kalshi market maker
+    from app.services.kalshi_market_maker import get_market_maker
+    market_maker = get_market_maker()
+    if market_maker.enabled:
+        market_maker.start()
+        logger.info("Kalshi market maker started")
+
+    # Start Kalshi sports scanner
+    from app.services.kalshi_sports_scanner import get_sports_scanner
+    sports_scanner = get_sports_scanner()
+    if sports_scanner.enabled:
+        sports_scanner.start()
+        logger.info("Kalshi sports scanner started")
+
+    # Start Kalshi esports scanner
+    from app.services.kalshi_esports_scanner import get_esports_scanner
+    esports_scanner = get_esports_scanner()
+    if esports_scanner.enabled:
+        esports_scanner.start()
+        logger.info("Kalshi esports scanner started")
+
+    # Start Kalshi AI agent bot
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+    ai_bot = get_ai_agent_bot()
+    if ai_bot.enabled:
+        ai_bot.start()
+        logger.info("Kalshi AI agent bot started")
+
+    # Start portfolio rebalancer (auto-rebalance mode)
+    from app.services.portfolio_rebalancer import get_rebalancer
+    rebalancer = get_rebalancer()
+    if rebalancer.enabled and rebalancer.auto_rebalance:
+        rebalancer.start()
+        logger.info("Portfolio rebalancer auto-loop started")
 
     # Auto-deposit idle USDC into Kamino on startup
     kamino = KaminoClient()
@@ -91,6 +186,16 @@ async def lifespan(app: FastAPI):
             await wallet.close()
         except Exception as e:
             logger.warning(f"Startup Kamino deposit failed: {e}")
+
+    # Prime Kamino balance cache so first trade decision has full purchasing power
+    if kamino.enabled:
+        try:
+            wallet = WalletService()
+            pos = await kamino.get_user_position(wallet.public_key)
+            logger.info(f"Startup: Kamino balance cached — ${pos.get('deposited_usdc', 0):.2f} USDC")
+            await wallet.close()
+        except Exception as e:
+            logger.warning(f"Startup Kamino cache prime failed: {e}")
     await kamino.close()
 
     logger.info("Bot initialized successfully")
@@ -98,12 +203,32 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down bot")
+    if price_feed.enabled:
+        await price_feed.stop()
     if _tg_handler:
         await _tg_handler.stop()
     tg_task.cancel()
     await ngrok.stop()
     if pos_monitor.enabled:
         await pos_monitor.stop()
+    if arb_scanner.enabled:
+        arb_scanner.stop()
+    if spread_bot.enabled:
+        await spread_bot.stop()
+    if whale_tracker.enabled:
+        whale_tracker.stop()
+    if tech_bot.enabled:
+        tech_bot.stop()
+    if sports_scanner.enabled:
+        sports_scanner.stop()
+    if market_maker.enabled:
+        await market_maker.stop()
+    if esports_scanner.enabled:
+        esports_scanner.stop()
+    if ai_bot.enabled:
+        ai_bot.stop()
+    if rebalancer.enabled and rebalancer.auto_rebalance:
+        await rebalancer.stop()
 
 
 app = FastAPI(

@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -60,10 +61,14 @@ def encrypt_private_key(private_key_b58: str, password: str) -> str:
 class WalletService:
     """Query wallet balance and manage SOL transactions."""
 
+    # Cache TTL in seconds — avoids hammering the free Solana RPC
+    _CACHE_TTL = 15
+
     def __init__(self):
         self.rpc_url = get("wallet", "rpc_url", "https://api.mainnet-beta.solana.com")
         self._client = httpx.AsyncClient(timeout=15)
         self._keypair: Optional[Keypair] = None
+        self._cache: dict[str, tuple[float, float]] = {}  # key -> (timestamp, value)
 
     def get_keypair(self) -> Keypair:
         if self._keypair is None:
@@ -88,13 +93,36 @@ class WalletService:
         resp.raise_for_status()
         return resp.json()["result"]["value"]
 
+    def _get_cached(self, key: str) -> Optional[float]:
+        """Return cached value if still fresh, else None."""
+        if key in self._cache:
+            ts, val = self._cache[key]
+            if time.time() - ts < self._CACHE_TTL:
+                return val
+        return None
+
+    def _set_cached(self, key: str, val: float):
+        self._cache[key] = (time.time(), val)
+
+    def invalidate_cache(self):
+        """Clear cache — call after trades to get fresh balances."""
+        self._cache.clear()
+
     async def get_balance_sol(self) -> float:
-        """Get wallet balance in SOL."""
+        """Get wallet balance in SOL (cached for 15s)."""
+        cached = self._get_cached("sol")
+        if cached is not None:
+            return cached
         lamports = await self.get_balance_lamports()
-        return lamports / 1_000_000_000
+        sol = lamports / 1_000_000_000
+        self._set_cached("sol", sol)
+        return sol
 
     async def get_usdc_balance(self) -> float:
-        """Get USDC SPL token balance (6 decimals)."""
+        """Get USDC SPL token balance (cached for 15s)."""
+        cached = self._get_cached("usdc")
+        if cached is not None:
+            return cached
         try:
             usdc_mint = get("jupiter", "usdc_mint", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
             resp = await self._client.post(
@@ -122,6 +150,7 @@ class WalletService:
                 parsed = account.get("account", {}).get("data", {}).get("parsed", {})
                 amount = parsed.get("info", {}).get("tokenAmount", {}).get("uiAmount", 0.0)
                 total += amount or 0.0
+            self._set_cached("usdc", total)
             return total
         except Exception as e:
             logger.warning(f"Could not fetch USDC balance: {e}")

@@ -1,0 +1,63 @@
+==================================================================
+  TRADINGVIEW BACKTEST REPORT
+  File      : SOL_Mean_Reversion_v1.4_—_4H_Backtest_BINANCE_SOLUSDT_2026-03-30.xlsx
+  Symbol    : BINANCE:SOLUSDT  |  Timeframe: 4 hours
+  Period    : Jul 13, 2021, 16:00 — Mar 30, 2026, 16:00
+  Capital   : $10,000.00
+==================================================================
+
+── PERFORMANCE SUMMARY ──────────────────────────────────────────
+  Net Profit          : $+0.00  (-0.08%)
+  Gross Profit        : $0.00
+  Gross Loss          : -$0.00
+  Profit Factor       : 0.000
+  Buy & Hold Return   : $+0.00  (strategy underperformed)
+  Commission Paid     : $0.00
+
+── TRADES ───────────────────────────────────────────────────────
+  Total Trades        : 3
+  Winners / Losers    : 0 / 0
+  Win Rate            : 33.33%
+  Expected Payoff     : $+0.00 per trade
+
+── RISK / REWARD ────────────────────────────────────────────────
+  Avg Win             : $0.00
+  Avg Loss            : -$0.00
+  Win/Loss Ratio      : N/A
+  Largest Win         : $+0.00
+  Largest Loss        : $+0.00
+  Max Drawdown (EOB)  : -$0.00
+  Max Drawdown (IB)   : -$0.00
+
+── RISK-ADJUSTED ────────────────────────────────────────────────
+  Sharpe Ratio        : N/A
+  Sortino Ratio       : N/A
+
+── LONG vs SHORT ────────────────────────────────────────────────
+  Long  :   0 trades  |  0 wins (33.3%)  |  P&L: $+0.00
+  Short :   0 trades  |  0 wins (0.0%)  |  P&L: $+0.00
+
+── STREAKS ──────────────────────────────────────────────────────
+  Max Consec Wins     : 0
+  Max Consec Losses   : 0
+
+── BEST 5 TRADES ────────────────────────────────────────────────
+  1. $   +0.00  2021-07-14 00:00:00   MR Long Exit
+  2. $   +0.00  2021-07-16 08:00:00   MR Long Exit
+  3. $   +0.00  2025-01-15 16:00:00   MR Long Exit
+
+── WORST 5 TRADES ───────────────────────────────────────────────
+  1. $   +0.00  2021-07-14 00:00:00   MR Long Exit
+  2. $   +0.00  2021-07-16 08:00:00   MR Long Exit
+  3. $   +0.00  2025-01-15 16:00:00   MR Long Exit
+
+── ALL TRADES (Trade # | P&L | Signal | Date) ───────────────────
+   1. $   +0.00  2021-07-14 00:00:00   MR Long Exit
+   2. $   +0.00  2021-07-16 08:00:00   MR Long Exit
+   3. $   +0.00  2025-01-15 16:00:00   MR Long Exit
+
+── EQUITY CURVE (ASCII) ─────────────────────────────────────────
+
+==================================================================
+  Paste this report to Claude for strategy analysis.
+==================================================================

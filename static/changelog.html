@@ -188,7 +188,10 @@ footer a:hover { color: var(--green); }
 </head>
 <body>
 
-<a href="/" class="back-link">[ &lt; BACK TO DASHBOARD ]</a>
+<div style="display:flex;justify-content:space-between;align-items:center;">
+  <a href="/" class="back-link">[ &lt; BACK TO DASHBOARD ]</a>
+  <button onclick="exportPDF()" style="background:transparent;border:1px solid var(--green-dark);padding:4px 12px;color:var(--green-dim);font-family:var(--mono);font-size:.7rem;letter-spacing:1px;cursor:pointer;transition:color .15s,border-color .15s;" onmouseover="this.style.color='var(--green)';this.style.borderColor='var(--green)'" onmouseout="this.style.color='var(--green-dim)';this.style.borderColor='var(--green-dark)'">[ EXPORT PDF ]</button>
+</div>
 
 <h1>CHANGELOG</h1>
 <div class="subtitle">Trinity Trading Bot // Full Disclosure of All Changes</div>
@@ -199,10 +202,125 @@ footer a:hover { color: var(--green); }
 <div class="version-block">
   <div class="version-header">
     <div>
+      <span class="version-tag">v1.6 Trading Infrastructure</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-31</span>
+    </div>
+    <span class="version-status status-active">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Paper Trading Mode &mdash; simulated trade engine with virtual portfolio, P&amp;L tracking, and Sharpe ratio</li>
+      <li><span class="change-type type-feature">feature</span> WebSocket Price Feed &mdash; real-time prices via Binance WS (SOL/JTO/WIF/BONK) + CoinGecko polling (PYTH/RAY)</li>
+      <li><span class="change-type type-feature">feature</span> Portfolio Rebalancer &mdash; multi-token allocation management with drift detection and Jupiter swap execution</li>
+      <li><span class="change-type type-perf">perf</span> Dashboard price refresh reduced from 30s to 5s via in-memory WebSocket price cache</li>
+      <li><span class="change-type type-perf">perf</span> Wallet balance caching (15s TTL) &mdash; prevents Solana RPC 429 rate limiting</li>
+      <li><span class="change-type type-fix">fix</span> Binance API 400 error &mdash; fixed JSON encoding (removed spaces) and removed unlisted tokens (RAY, PYTH)</li>
+      <li><span class="change-type type-fix">fix</span> PYTH and RAY prices now correctly fetched via CoinGecko fallback</li>
+      <li><span class="change-type type-infra">infra</span> Colored terminal logging &mdash; warnings yellow, errors red, debug cyan for visual monitoring</li>
+      <li><span class="change-type type-infra">infra</span> Paper trades persisted to SQLite <code>paper_trades</code> table</li>
+      <li><span class="change-type type-infra">infra</span> Cache invalidation on trade execution for fresh balance reads</li>
+      <li><span class="change-type type-infra">infra</span> Dashboard cards: Paper Trading (stats + trade history), Portfolio Rebalancer (allocations + drift)</li>
+      <li><span class="change-type type-infra">infra</span> PDF export buttons added to Cheatsheet and Changelog pages</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">New Services: </span><span class="metric-value good">3</span></div>
+      <div class="metric"><span class="metric-label">New Endpoints: </span><span class="metric-value">9</span></div>
+      <div class="metric"><span class="metric-label">Price Sources: </span><span class="metric-value">2</span></div>
+      <div class="metric"><span class="metric-label">Rebalance Tokens: </span><span class="metric-value">6</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">v1.5 Kalshi Prediction Markets</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-31</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Kalshi Client &mdash; RSA-authenticated API client via kalshi-python SDK, demo + live modes</li>
+      <li><span class="change-type type-feature">feature</span> Arbitrage Scanner &mdash; 3 strategies: YES/NO spread, bracket sum, crossed orderbook detection</li>
+      <li><span class="change-type type-feature">feature</span> Spread Bot &mdash; basic two-sided market-making with inventory skew and auto-flatten</li>
+      <li><span class="change-type type-feature">feature</span> Market Maker Framework &mdash; advanced multi-strategy quoting (midpoint, VWAP, volatility-adjusted)</li>
+      <li><span class="change-type type-perf">perf</span> Market Maker: dynamic spread sizing, adverse selection detection, portfolio-level risk limits</li>
+      <li><span class="change-type type-perf">perf</span> Market Maker: auto market scoring/rotation, P&amp;L attribution by market and strategy</li>
+      <li><span class="change-type type-feature">feature</span> Whale Tracker &mdash; monitors large trades (&ge;50 contracts / $25+) with Telegram alerts</li>
+      <li><span class="change-type type-feature">feature</span> MACD/CCI Technical Bot &mdash; pure Python MACD(12/26/9) + CCI(20) indicator signals on candlestick data</li>
+      <li><span class="change-type type-feature">feature</span> AI Agent Bot &mdash; 3-agent Claude consensus (analyst, contrarian, momentum) with weighted voting</li>
+      <li><span class="change-type type-feature">feature</span> Sports Scanner &mdash; 7 leagues: MLB, NBA, NFL, NHL, Soccer, UFC, WNBA odds tracking + value bets</li>
+      <li><span class="change-type type-feature">feature</span> Esports Scanner &mdash; 5 games: CS2, DotA2, LoL, Valorant, Overwatch market tracking</li>
+      <li><span class="change-type type-infra">infra</span> SQLite tables: kalshi_trades + kalshi_positions with full query functions</li>
+      <li><span class="change-type type-infra">infra</span> 40+ new REST API endpoints for all Kalshi services</li>
+      <li><span class="change-type type-infra">infra</span> Dashboard: unified Kalshi card with 9 sections, live controls, league/game filters</li>
+      <li><span class="change-type type-infra">infra</span> All services: singleton pattern, asyncio background tasks, start/stop lifecycle in main.py</li>
+      <li><span class="change-type type-infra">infra</span> All services default to enabled: false + auto_trade: false for safety</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">Services: </span><span class="metric-value good">9</span></div>
+      <div class="metric"><span class="metric-label">API Endpoints: </span><span class="metric-value">40+</span></div>
+      <div class="metric"><span class="metric-label">MM Strategies: </span><span class="metric-value">3</span></div>
+      <div class="metric"><span class="metric-label">AI Agents: </span><span class="metric-value">3</span></div>
+      <div class="metric"><span class="metric-label">Sports Leagues: </span><span class="metric-value">7</span></div>
+      <div class="metric"><span class="metric-label">Esports Games: </span><span class="metric-value">5</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
+      <span class="version-tag">v1.4 Multi-Token Expansion</span>
+      <span class="version-date">&nbsp;&nbsp;2026-03-31</span>
+    </div>
+    <span class="version-status status-superseded">superseded</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Multi-token backtesting &mdash; all 3 strategies tested across 7 Solana tokens (SOL, JUP, JTO, RAY, PYTH, BONK, WIF)</li>
+      <li><span class="change-type type-feature">feature</span> Multi-token alert deployment &mdash; best-performing token/strategy pairs selected for live trading</li>
+      <li><span class="change-type type-feature">feature</span> XLSX backtest import &mdash; parser reads TradingView xlsx exports (Performance, Trades, Risk sheets)</li>
+      <li><span class="change-type type-feature">feature</span> Backtest Tracker sort &mdash; clickable column headers to sort by PF, Win Rate, Trades, etc.</li>
+      <li><span class="change-type type-feature">feature</span> Scout hide feature &mdash; hide individual scout results with X button + reset counter</li>
+      <li><span class="change-type type-feature">feature</span> Bittensor/TAO scout category &mdash; monitors @const_anto, @markjeffrey, @bittensor_, @tao_dot_com</li>
+      <li><span class="change-type type-perf">perf</span> Scout ad/spam filter &mdash; blocks paid indicators, promotions, and ad domains from results</li>
+      <li><span class="change-type type-fix">fix</span> Model ID fix &mdash; claude-sonnet-4-6 was invalid; now uses CLI shorthand &ldquo;sonnet&rdquo; (resolves to Sonnet 4.6)</li>
+      <li><span class="change-type type-fix">fix</span> /status now shows all 3 active indicators (was missing 4H v1.3)</li>
+      <li><span class="change-type type-fix">fix</span> Backtest dates now extracted from filename instead of import timestamp</li>
+      <li><span class="change-type type-infra">infra</span> Cheatsheet updated &mdash; added Position Monitor, Scout, Analytics, Backtest, 7 new Telegram commands</li>
+      <li><span class="change-type type-infra">infra</span> Backtests/ directory created with clean named scripts per active strategy</li>
+    </ul>
+    <div class="metrics-row" style="flex-direction:column;gap:8px;">
+      <div style="color:var(--green-dim);font-size:.65rem;letter-spacing:2px;">MEAN REVERSION v1.3 (4H) &mdash; BEST MULTI-TOKEN RESULTS</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        <div class="metric"><span class="metric-label">JTO: </span><span class="metric-value good">PF 1.825</span></div>
+        <div class="metric"><span class="metric-label">WIF: </span><span class="metric-value good">PF 1.582</span></div>
+        <div class="metric"><span class="metric-label">SOL: </span><span class="metric-value good">PF 1.091</span></div>
+        <div class="metric"><span class="metric-label">BONK: </span><span class="metric-value warn">PF 0.970</span></div>
+        <div class="metric"><span class="metric-label">JUP: </span><span class="metric-value bad">PF 0.687</span></div>
+      </div>
+      <div style="color:var(--green-dim);font-size:.65rem;letter-spacing:2px;">CONFLUENCE v3.5 (1H) &mdash; BEST MULTI-TOKEN RESULTS</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;">
+        <div class="metric"><span class="metric-label">BONK: </span><span class="metric-value good">PF 2.327</span></div>
+        <div class="metric"><span class="metric-label">PYTH: </span><span class="metric-value good">PF 1.811</span></div>
+        <div class="metric"><span class="metric-label">RAY: </span><span class="metric-value good">PF 1.418</span></div>
+        <div class="metric"><span class="metric-label">WIF: </span><span class="metric-value good">PF 1.254</span></div>
+        <div class="metric"><span class="metric-label">JUP: </span><span class="metric-value bad">PF 0.635</span></div>
+      </div>
+      <div style="color:var(--green-dim);font-size:.65rem;letter-spacing:2px;">CONFLUENCE v2 (DAILY) &mdash; SOL-ONLY (insufficient trades on other tokens)</div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
       <span class="version-tag">v1.3 (4H) + v3.5 (1H) + v2 (Daily)</span>
       <span class="version-date">&nbsp;&nbsp;2026-03-30</span>
     </div>
-    <span class="version-status status-active">LIVE</span>
+    <span class="version-status status-superseded">superseded</span>
   </div>
   <div class="version-body">
     <ul>
@@ -646,8 +764,25 @@ footer a:hover { color: var(--green); }
 <footer>
   TRINITY TRADING BOT &nbsp;|&nbsp;
   <a href="/">DASHBOARD</a> &nbsp;|&nbsp;
-  CLAUDE AI + JUPITER DEX + SOLANA
+  CLAUDE AI + JUPITER DEX + SOLANA + KALSHI
 </footer>
 
+<script>
+function exportPDF() {
+  const btn = document.querySelector('[onclick="exportPDF()"]');
+  btn.textContent = '[ PREPARING... ]';
+  btn.style.pointerEvents = 'none';
+  const style = document.createElement('style');
+  style.id = 'print-style';
+  style.textContent = '@media print { button { display: none !important; } .back-link { display: none !important; } body::after { display: none !important; } body { padding: 16px; } .version-block { break-inside: avoid; } @page { margin: 0.5in; size: A4; } }';
+  document.head.appendChild(style);
+  setTimeout(() => {
+    window.print();
+    document.getElementById('print-style').remove();
+    btn.textContent = '[ EXPORT PDF ]';
+    btn.style.pointerEvents = '';
+  }, 100);
+}
+</script>
 </body>
 </html>

@@ -396,6 +396,16 @@ main {
 .card-positions { grid-column: 1 / -1; }
 .card-analytics { grid-column: 1 / -1; }
 .card-backtests { grid-column: 1 / -1; }
+.card-kalshi { grid-column: 1 / -1; }
+.kalshi-stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px; }
+.kalshi-stat { background:rgba(0,20,0,0.5); border:1px solid var(--green-dark); border-radius:4px; padding:8px 10px; text-align:center; }
+.kalshi-stat .stat-value { font-size:1rem; font-weight:700; color:var(--green); font-family:var(--mono); }
+.kalshi-stat .stat-label { font-size:.52rem; color:var(--green-dim); letter-spacing:1px; margin-top:2px; }
+.kalshi-mode-badge { display:inline-block; padding:2px 8px; border-radius:3px; font-size:.6rem; letter-spacing:2px; font-family:var(--mono); }
+.kalshi-mode-badge.demo { background:rgba(255,215,0,0.15); color:var(--yellow); border:1px solid rgba(255,215,0,0.3); }
+.kalshi-mode-badge.live { background:rgba(0,255,65,0.15); color:var(--green); border:1px solid var(--green-dark); }
+.kalshi-mode-badge.offline { background:rgba(255,34,34,0.15); color:var(--red); border:1px solid rgba(255,34,34,0.3); }
+.kalshi-search { background:#000; color:var(--green); border:1px solid var(--green-dark); font-family:var(--mono); font-size:.65rem; padding:4px 8px; width:220px; }
 .bt-sort { cursor:pointer; user-select:none; position:relative; white-space:nowrap; }
 .bt-sort:hover { color: var(--green); }
 .bt-sort::after { content:''; margin-left:3px; font-size:.55rem; }
@@ -569,15 +579,58 @@ footer {
 footer a { color: var(--green-dim); text-decoration: none; }
 footer a:hover { color: var(--green); }
 
+/* ── PRICE TICKER ── */
+.card-prices { grid-column: 1 / -1; }
+.price-ticker-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+.price-tile {
+  background: rgba(0,255,65,0.03);
+  border: 1px solid var(--green-dark);
+  border-radius: 6px;
+  padding: 12px;
+  text-align: center;
+  transition: border-color 0.3s;
+}
+.price-tile:hover { border-color: var(--green-dim); }
+.price-tile-symbol {
+  font-family: var(--vt);
+  font-size: 1.1rem;
+  color: var(--green);
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+}
+.price-tile-price {
+  font-family: var(--vt);
+  font-size: 1.4rem;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.price-tile-change {
+  font-size: 0.75rem;
+  letter-spacing: 1px;
+}
+.price-tile-range {
+  font-size: 0.65rem;
+  color: var(--green-dim);
+  margin-top: 4px;
+}
+.price-tile-change.up { color: var(--green); }
+.price-tile-change.down { color: var(--red); }
+
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-backtests,.card-settings,.card-costs { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-backtests,.card-kalshi,.card-settings,.card-costs,.card-prices { grid-column: 1; }
+  .kalshi-stats-grid { grid-template-columns: repeat(3, 1fr); }
   .analytics-grid { grid-template-columns: repeat(2, 1fr); }
   .analytics-charts { grid-template-columns: 1fr; }
   .settings-columns { grid-template-columns: 1fr; }
   .wallet-grid { grid-template-columns: 1fr 1px 1fr; }
   .status-grid { grid-template-columns: repeat(3,1fr); }
   .hero-title { font-size: 2.2rem; }
+  .price-ticker-grid { grid-template-columns: repeat(3, 1fr); }
 }
 </style>
 </head>
@@ -707,6 +760,332 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <!-- TOKEN PRICES -->
+  <div class="card card-prices" data-label="// LIVE PRICES">
+    <div class="price-ticker-grid" id="price-ticker-grid">
+      <div class="price-tile" id="price-SOL"><div class="price-tile-symbol">SOL</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-JTO"><div class="price-tile-symbol">JTO</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-WIF"><div class="price-tile-symbol">WIF</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-BONK"><div class="price-tile-symbol">BONK</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-PYTH"><div class="price-tile-symbol">PYTH</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-RAY"><div class="price-tile-symbol">RAY</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+    </div>
+  </div>
+
+  <!-- PORTFOLIO REBALANCER -->
+  <div class="card" data-label="// PORTFOLIO REBALANCER" style="grid-column: 1 / -1;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Portfolio Allocations</span>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="rebal-auto-badge" style="font-size:.55rem;padding:2px 8px;border:1px solid var(--green-dark);color:var(--green-dim);letter-spacing:1px;">AUTO: OFF</span>
+        <span id="rebal-total" style="font-size:.7rem;color:var(--green);letter-spacing:1px;">$--</span>
+        <button onclick="calculateRebalance()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ CALCULATE ]</button>
+        <button onclick="executeRebalance()" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ REBALANCE ]</button>
+        <button onclick="toggleAutoRebalance()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ TOGGLE AUTO ]</button>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="rebal-table" style="width:100%;">
+        <thead><tr>
+          <th style="text-align:left;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">TOKEN</th>
+          <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">TARGET %</th>
+          <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">CURRENT %</th>
+          <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">DRIFT</th>
+          <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">BALANCE</th>
+          <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">VALUE USD</th>
+        </tr></thead>
+        <tbody id="rebal-tbody">
+          <tr><td colspan="6" style="text-align:center;padding:20px;color:var(--green-dim);font-size:.65rem;">Loading allocations...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div id="rebal-trades" style="margin-top:12px;border-top:1px solid var(--green-dark);padding-top:10px;display:none;">
+      <div style="color:var(--green-dim);font-size:.55rem;letter-spacing:2px;margin-bottom:6px;">CALCULATED TRADES</div>
+      <div id="rebal-trades-list" style="font-size:.65rem;color:var(--green);"></div>
+    </div>
+    <div id="rebal-result" style="margin-top:8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;min-height:1em;"></div>
+    <div style="margin-top:8px;display:flex;gap:20px;font-size:.55rem;color:var(--green-dim);letter-spacing:1px;">
+      <span>DRIFT THRESHOLD: <span id="rebal-threshold">5.0</span>%</span>
+      <span>MIN TRADE: $<span id="rebal-min-trade">5.00</span></span>
+      <span>LAST REBALANCE: <span id="rebal-last-time">--</span></span>
+    </div>
+  </div>
+
+  <!-- KALSHI EVENT CONTRACTS -->
+  <div class="card card-kalshi" data-label="// KALSHI EVENT CONTRACTS">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Prediction Markets</span>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="kalshi-mode-badge" class="kalshi-mode-badge offline">OFFLINE</span>
+        <input type="text" id="kalshi-search" class="kalshi-search" placeholder="Search markets..." onkeydown="if(event.key==='Enter')searchKalshiMarkets()">
+        <button onclick="searchKalshiMarkets()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ SEARCH ]</button>
+      </div>
+    </div>
+    <div class="kalshi-stats-grid" id="kalshi-stats">
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-balance">--</div><div class="stat-label">BALANCE</div></div>
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-open">0</div><div class="stat-label">OPEN POSITIONS</div></div>
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-total">0</div><div class="stat-label">TOTAL TRADES</div></div>
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-pnl">$0.00</div><div class="stat-label">TOTAL P&L</div></div>
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-winrate">0%</div><div class="stat-label">WIN RATE</div></div>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="kalshi-markets-table">
+        <thead><tr>
+          <th>Market</th><th>Yes</th><th>No</th><th>Volume</th><th>Closes</th><th>Action</th>
+        </tr></thead>
+        <tbody id="kalshi-markets-tbody"></tbody>
+      </table>
+    </div>
+    <div id="kalshi-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
+      Kalshi integration pending account approval. Configure API keys in config.yaml to connect.
+    </div>
+    <div style="margin-top:12px;">
+      <div class="section-title" style="font-size:.6rem;margin-bottom:6px;">Positions</div>
+      <table id="kalshi-positions-table" style="display:none;">
+        <thead><tr>
+          <th>Market</th><th>Side</th><th>Qty</th><th>Avg Cost</th><th>Current</th><th>P&L</th><th>Status</th>
+        </tr></thead>
+        <tbody id="kalshi-positions-tbody"></tbody>
+      </table>
+      <div id="kalshi-positions-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No positions yet.
+      </div>
+    </div>
+    <!-- Arbitrage Scanner -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Arbitrage Scanner</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="arb-status-badge" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="runArbScan()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ SCAN NOW ]</button>
+          <button onclick="toggleArbScanner()" id="arb-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="arb-scan-count">0</div><div class="stat-label">SCANS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="arb-found">0</div><div class="stat-label">FOUND</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="arb-current">0</div><div class="stat-label">ACTIVE</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="arb-last-scan">--</div><div class="stat-label">LAST SCAN</div></div>
+      </div>
+      <table id="arb-table" style="display:none;">
+        <thead><tr>
+          <th>Strategy</th><th>Market</th><th>Spread</th><th>Profit/Contract</th><th>Max Profit</th><th>Action</th>
+        </tr></thead>
+        <tbody id="arb-tbody"></tbody>
+      </table>
+      <div id="arb-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No arbitrage opportunities detected. Click SCAN NOW or START to begin scanning.
+      </div>
+    </div>
+    <!-- Spread Bot (Market Making) -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Spread Bot (Market Maker)</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="spread-status-badge" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="toggleSpreadBot()" id="spread-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="flattenSpreadBot()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ FLATTEN ALL ]</button>
+          <button onclick="killSpreadBot()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">[ KILL ]</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="spread-pnl">$0.00</div><div class="stat-label">P&L</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="spread-markets">0</div><div class="stat-label">MARKETS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="spread-cycles">0</div><div class="stat-label">CYCLES</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="spread-spread">--</div><div class="stat-label">SPREAD</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="spread-inventory">0</div><div class="stat-label">NET INV</div></div>
+      </div>
+      <table id="spread-markets-table" style="display:none;">
+        <thead><tr>
+          <th>Market</th><th>Mid</th><th>YES Bid</th><th>NO Bid</th><th>YES Inv</th><th>NO Inv</th><th>Captured</th><th>Status</th>
+        </tr></thead>
+        <tbody id="spread-markets-tbody"></tbody>
+      </table>
+      <div id="spread-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        Spread bot idle. Click START to begin market-making on auto-selected markets.
+      </div>
+    </div>
+    <!-- Whale Tracker -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Whale Tracker</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="whale-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="scanWhales()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ SCAN ]</button>
+          <button onclick="toggleWhaleTracker()" id="whale-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+        </div>
+      </div>
+      <table id="whale-table" style="display:none;">
+        <thead><tr>
+          <th>Time</th><th>Market</th><th>Side</th><th>Qty</th><th>Price</th><th>Cost</th>
+        </tr></thead>
+        <tbody id="whale-tbody"></tbody>
+      </table>
+      <div id="whale-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No whale trades detected yet.
+      </div>
+    </div>
+    <!-- Technical Bot (MACD/CCI) -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">MACD/CCI Technical Bot</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="tech-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="scanTech()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ SCAN ]</button>
+          <button onclick="toggleTechBot()" id="tech-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="toggleAutoTrade()" id="tech-auto-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">AUTO: OFF</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="tech-signals">0</div><div class="stat-label">SIGNALS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="tech-trades">0</div><div class="stat-label">TRADES</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="tech-positions">0/5</div><div class="stat-label">POSITIONS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="tech-config">12/26/9</div><div class="stat-label">MACD</div></div>
+      </div>
+      <table id="tech-table" style="display:none;">
+        <thead><tr>
+          <th>Time</th><th>Market</th><th>Side</th><th>Strength</th><th>MACD</th><th>CCI</th><th>Price</th><th>Conf</th>
+        </tr></thead>
+        <tbody id="tech-tbody"></tbody>
+      </table>
+      <div id="tech-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No technical signals yet. Click SCAN or START to analyze contract price charts.
+      </div>
+    </div>
+    <!-- AI Agent Bot -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">AI Agent Team (Claude)</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="ai-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="runAIAnalysis()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ ANALYZE ]</button>
+          <button onclick="toggleAIBot()" id="ai-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="toggleAIAutoTrade()" id="ai-auto-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">AUTO: OFF</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="ai-decisions">0</div><div class="stat-label">DECISIONS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="ai-trades">0</div><div class="stat-label">TRADES</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="ai-positions">0/3</div><div class="stat-label">POSITIONS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="ai-agents">3</div><div class="stat-label">AGENTS</div></div>
+      </div>
+      <table id="ai-table" style="display:none;">
+        <thead><tr>
+          <th>Market</th><th>Consensus</th><th>Strength</th><th>Edge</th><th>Agents</th><th>Unanimous</th>
+        </tr></thead>
+        <tbody id="ai-tbody"></tbody>
+      </table>
+      <div id="ai-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No AI decisions yet. Click ANALYZE to run 3-agent analysis on top markets.
+      </div>
+    </div>
+
+    <!-- Sports Scanner -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Sports Scanner (7 Leagues)</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="sports-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="scanSports()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ SCAN ]</button>
+          <button onclick="toggleSportsScanner()" id="sports-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="toggleSportsAutoTrade()" id="sports-auto-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">AUTO: OFF</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="sports-markets">0</div><div class="stat-label">MARKETS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="sports-value-bets">0</div><div class="stat-label">VALUE BETS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="sports-trades">0</div><div class="stat-label">TRADES</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="sports-scans">0</div><div class="stat-label">SCANS</div></div>
+      </div>
+      <!-- League filter buttons -->
+      <div id="sports-leagues" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        <button onclick="filterSportsLeague(null)" class="sports-league-btn active" style="background:var(--green-dark);border:1px solid var(--green-dim);color:var(--green);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">ALL</button>
+        <button onclick="filterSportsLeague('MLB')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#9918; MLB</button>
+        <button onclick="filterSportsLeague('NBA')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#127936; NBA</button>
+        <button onclick="filterSportsLeague('NFL')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#127944; NFL</button>
+        <button onclick="filterSportsLeague('NHL')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#127954; NHL</button>
+        <button onclick="filterSportsLeague('Soccer')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#9917; Soccer</button>
+        <button onclick="filterSportsLeague('UFC')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#129354; UFC</button>
+        <button onclick="filterSportsLeague('WNBA')" class="sports-league-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">&#127936; WNBA</button>
+      </div>
+      <table id="sports-table" style="display:none;">
+        <thead><tr>
+          <th>League</th><th>Market</th><th>YES</th><th>NO</th><th>Move</th><th>Vol</th>
+        </tr></thead>
+        <tbody id="sports-tbody"></tbody>
+      </table>
+      <div id="sports-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No sports markets found. Click SCAN to search across 7 leagues.
+      </div>
+    </div>
+
+    <!-- Esports Scanner -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Esports Scanner (5 Games)</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="esports-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="scanEsports()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ SCAN ]</button>
+          <button onclick="toggleEsportsScanner()" id="esports-toggle-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="toggleEsportsAutoTrade()" id="esports-auto-btn" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">AUTO: OFF</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="esports-markets">0</div><div class="stat-label">MARKETS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="esports-value-bets">0</div><div class="stat-label">VALUE BETS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="esports-trades">0</div><div class="stat-label">TRADES</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="esports-scans">0</div><div class="stat-label">SCANS</div></div>
+      </div>
+      <!-- Game filter buttons -->
+      <div id="esports-games" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        <button onclick="filterEsportsGame(null)" class="esports-game-btn active" style="background:var(--green-dark);border:1px solid var(--green-dim);color:var(--green);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">ALL</button>
+        <button onclick="filterEsportsGame('CS2')" class="esports-game-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">CS2</button>
+        <button onclick="filterEsportsGame('DotA2')" class="esports-game-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">DotA2</button>
+        <button onclick="filterEsportsGame('LoL')" class="esports-game-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">LoL</button>
+        <button onclick="filterEsportsGame('Valorant')" class="esports-game-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">Valorant</button>
+        <button onclick="filterEsportsGame('Overwatch')" class="esports-game-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.5rem;padding:2px 8px;cursor:pointer;letter-spacing:1px;">Overwatch</button>
+      </div>
+      <table id="esports-table" style="display:none;">
+        <thead><tr>
+          <th>Game</th><th>Market</th><th>YES</th><th>NO</th><th>Move</th><th>Vol</th>
+        </tr></thead>
+        <tbody id="esports-tbody"></tbody>
+      </table>
+      <div id="esports-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        No esports markets found. Click SCAN to search across 5 games.
+      </div>
+    </div>
+
+    <!-- Market Maker Framework -->
+    <div style="margin-top:16px;border-top:1px solid var(--green-dark);padding-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Market Maker Framework</span>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span id="mm-status" style="font-size:.55rem;color:var(--green-dim);">IDLE</span>
+          <button onclick="startMM()" id="mm-start-btn" style="background:transparent;border:none;color:var(--yellow);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ START ]</button>
+          <button onclick="flattenMM()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">FLATTEN</button>
+          <button onclick="killMM()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;cursor:pointer;">KILL</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px;">
+        <div class="kalshi-stat"><div class="stat-value" id="mm-pnl">$0.00</div><div class="stat-label">P&L</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="mm-fills">0</div><div class="stat-label">FILLS</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="mm-spread-captured">0</div><div class="stat-label">SPREAD CAP</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="mm-adverse">0</div><div class="stat-label">ADV SEL</div></div>
+        <div class="kalshi-stat"><div class="stat-value" id="mm-markets-count">0</div><div class="stat-label">MARKETS</div></div>
+      </div>
+      <table id="mm-table" style="display:none;">
+        <thead><tr>
+          <th>Market</th><th>Strategy</th><th>Spread</th><th>Mid</th><th>Inv</th><th>P&L</th><th>Score</th>
+        </tr></thead>
+        <tbody id="mm-tbody"></tbody>
+      </table>
+      <div id="mm-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        Market maker idle. Click START to begin multi-strategy quoting.
+      </div>
+    </div>
+  </div>
+
   <!-- COMPONENT STATUS -->
   <div class="card card-status" data-label="// SYSTEM STATUS">
     <div class="status-grid" id="status-grid">
@@ -825,6 +1204,70 @@ footer a:hover { color: var(--green); }
         </tr></thead>
         <tbody id="positions-history-tbody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- PAPER TRADING -->
+  <div class="card card-paper" data-label="// PAPER TRADING" style="grid-column: 1 / -1;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Paper Trading</span>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="paper-mode-badge" style="font-family:var(--mono);font-size:.65rem;letter-spacing:2px;padding:2px 8px;border:1px solid var(--green-dim);color:var(--green-dim);">LIVE</span>
+        <button onclick="togglePaperMode()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ TOGGLE ]</button>
+        <button onclick="resetPaper()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ RESET ]</button>
+      </div>
+    </div>
+
+    <!-- KPI Row -->
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px;">
+      <div style="text-align:center;">
+        <div id="paper-starting" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">$1,000</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">STARTING BAL</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="paper-equity" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">$1,000</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">CURRENT EQUITY</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="paper-pnl" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">$0.00</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">TOTAL P&L</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="paper-winrate" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">0%</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">WIN RATE</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="paper-trades-count" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">0</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">TOTAL TRADES</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="paper-drawdown" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">0%</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">MAX DRAWDOWN</div>
+      </div>
+    </div>
+
+    <!-- Extra stats row -->
+    <div style="display:flex;gap:24px;font-family:var(--mono);font-size:.62rem;color:var(--green-dim);margin-bottom:14px;">
+      <span>Sharpe: <span id="paper-sharpe" style="color:var(--green);">--</span></span>
+      <span>Avg Win: <span id="paper-avg-win" style="color:var(--green);">--</span></span>
+      <span>Avg Loss: <span id="paper-avg-loss" style="color:var(--red);">--</span></span>
+      <span>Best: <span id="paper-best" style="color:var(--green);">--</span></span>
+      <span>Worst: <span id="paper-worst" style="color:var(--red);">--</span></span>
+      <span>Open: <span id="paper-open-count" style="color:var(--green);">0</span></span>
+    </div>
+
+    <!-- Trade History Table -->
+    <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">RECENT PAPER TRADES</div>
+    <div style="overflow-x:auto;">
+      <table id="paper-trades-table">
+        <thead><tr>
+          <th>Time</th><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>Fees</th><th>P&L</th><th>Balance</th><th>Status</th>
+        </tr></thead>
+        <tbody id="paper-trades-tbody"></tbody>
+      </table>
+    </div>
+    <div id="paper-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
+      No paper trades yet. Enable paper mode and wait for signals.
     </div>
   </div>
 
@@ -1831,6 +2274,93 @@ async function loadPositions() {
 }
 
 // ── POSITION ANALYTICS ──
+// ── PAPER TRADING ──
+async function loadPaperStatus() {
+  try {
+    const r = await fetch(`${API}/api/paper/stats`);
+    const d = await r.json();
+
+    const badge = document.getElementById('paper-mode-badge');
+    if (d.enabled) {
+      badge.textContent = 'PAPER';
+      badge.style.color = 'var(--yellow)';
+      badge.style.borderColor = 'var(--yellow)';
+    } else {
+      badge.textContent = 'LIVE';
+      badge.style.color = 'var(--green)';
+      badge.style.borderColor = 'var(--green-dim)';
+    }
+
+    setText('paper-starting', `$${(d.starting_balance||1000).toLocaleString()}`);
+    setText('paper-equity', `$${(d.current_equity||0).toLocaleString(undefined,{minimumFractionDigits:2})}`);
+
+    const pnl = d.total_pnl || 0;
+    const pnlEl = document.getElementById('paper-pnl');
+    if (pnlEl) {
+      pnlEl.textContent = `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}`;
+      pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    setText('paper-winrate', `${(d.win_rate||0).toFixed(1)}%`);
+    setText('paper-trades-count', `${d.total_trades||0}`);
+    setText('paper-drawdown', `${(d.max_drawdown_pct||0).toFixed(1)}%`);
+    setText('paper-sharpe', `${(d.sharpe_estimate||0).toFixed(2)}`);
+    setText('paper-avg-win', `$${(d.avg_win||0).toFixed(2)}`);
+    setText('paper-avg-loss', `$${(d.avg_loss||0).toFixed(2)}`);
+    setText('paper-best', `$${(d.best_trade||0).toFixed(2)}`);
+    setText('paper-worst', `$${(d.worst_trade||0).toFixed(2)}`);
+    setText('paper-open-count', `${d.open_positions||0}`);
+
+    // Load trade history
+    const tr = await fetch(`${API}/api/paper/trades?limit=20`);
+    const td = await tr.json();
+    const tbody = document.getElementById('paper-trades-tbody');
+    const empty = document.getElementById('paper-empty');
+    const table = document.getElementById('paper-trades-table');
+
+    if (!td.trades || td.trades.length === 0) {
+      if (table) table.style.display = 'none';
+      if (empty) empty.style.display = 'block';
+    } else {
+      if (table) table.style.display = '';
+      if (empty) empty.style.display = 'none';
+      tbody.innerHTML = td.trades.map(t => {
+        const pnlVal = t.pnl_usd || 0;
+        const pnlColor = pnlVal > 0 ? 'var(--green)' : pnlVal < 0 ? 'var(--red)' : 'var(--green-dim)';
+        const sideColor = t.side === 'BUY' ? 'var(--green)' : t.side === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+        const ts = t.timestamp ? t.timestamp.replace('T',' ').slice(0,19) : '--';
+        return `<tr>
+          <td>${ts}</td>
+          <td>${t.symbol||'--'}</td>
+          <td style="color:${sideColor}">${t.side||'--'}</td>
+          <td>$${(t.amount_usd||0).toFixed(2)}</td>
+          <td>$${(t.price||0).toFixed(4)}</td>
+          <td>$${(t.fees_usd||0).toFixed(4)}</td>
+          <td style="color:${pnlColor}">${pnlVal !== 0 ? (pnlVal>0?'+':'') + '$' + pnlVal.toFixed(2) : '--'}</td>
+          <td>$${(t.balance_after||0).toFixed(2)}</td>
+          <td>${t.status||'--'}</td>
+        </tr>`;
+      }).join('');
+    }
+  } catch(e) { console.error('Paper status error:', e); }
+}
+
+async function resetPaper() {
+  if (!confirm('Reset paper portfolio? All paper trades will be deleted.')) return;
+  try {
+    await fetch(`${API}/api/paper/reset`, { method: 'POST' });
+    loadPaperStatus();
+  } catch(e) { console.error('Paper reset error:', e); }
+}
+
+async function togglePaperMode() {
+  try {
+    const r = await fetch(`${API}/api/paper/toggle`, { method: 'POST' });
+    const d = await r.json();
+    loadPaperStatus();
+  } catch(e) { console.error('Paper toggle error:', e); }
+}
+
 let equityChart = null;
 let outcomeChart = null;
 
@@ -2355,6 +2885,845 @@ async function saveSettings() {
   } catch(e) { console.error('Save error:', e); }
 }
 
+// ── LIVE PRICES ──
+function formatPrice(p) {
+  if (p == null) return '$--';
+  if (p < 0.001) return '$' + p.toFixed(7);
+  if (p < 1) return '$' + p.toFixed(5);
+  if (p < 10) return '$' + p.toFixed(3);
+  return '$' + p.toFixed(2);
+}
+
+async function loadPrices() {
+  try {
+    const r = await fetch(`${API}/api/prices`);
+    const d = await r.json();
+    const prices = d.prices || {};
+    for (const [sym, info] of Object.entries(prices)) {
+      const tile = document.getElementById('price-' + sym);
+      if (!tile) continue;
+      const priceEl = tile.querySelector('.price-tile-price');
+      const changeEl = tile.querySelector('.price-tile-change');
+      const rangeEl = tile.querySelector('.price-tile-range');
+      priceEl.textContent = formatPrice(info.price);
+      const chg = info.change_24h || 0;
+      changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+      changeEl.className = 'price-tile-change ' + (chg >= 0 ? 'up' : 'down');
+      if (info.high_24h != null && info.low_24h != null) {
+        rangeEl.textContent = 'L ' + formatPrice(info.low_24h) + '  H ' + formatPrice(info.high_24h);
+      }
+    }
+  } catch(e) { console.error('Prices error:', e); }
+}
+
+// ── KALSHI ──
+async function loadKalshiStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/status`);
+    const d = await r.json();
+    const badge = document.getElementById('kalshi-mode-badge');
+    if (d.connected) {
+      badge.className = 'kalshi-mode-badge ' + d.mode;
+      badge.textContent = d.mode.toUpperCase();
+      if (d.balance) {
+        const bal = d.balance.balance || d.balance.available_balance || 0;
+        document.getElementById('kalshi-balance').textContent = '$' + (bal / 100).toFixed(2);
+      }
+    } else if (d.enabled) {
+      badge.className = 'kalshi-mode-badge demo';
+      badge.textContent = d.configured ? 'CONNECTING' : 'NOT CONFIGURED';
+    } else {
+      badge.className = 'kalshi-mode-badge offline';
+      badge.textContent = 'DISABLED';
+    }
+    const s = d.stats || {};
+    document.getElementById('kalshi-open').textContent = s.open_positions || 0;
+    document.getElementById('kalshi-total').textContent = s.total_positions || 0;
+    const pnl = (s.total_pnl_cents || 0) / 100;
+    const pnlEl = document.getElementById('kalshi-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+    pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    const closed = (s.total_positions || 0) - (s.open_positions || 0);
+    const wins = s.winning || 0;
+    const wr = closed > 0 ? ((wins / closed) * 100).toFixed(0) : '0';
+    document.getElementById('kalshi-winrate').textContent = wr + '%';
+  } catch(e) { console.error('Kalshi status error:', e); }
+}
+
+async function searchKalshiMarkets() {
+  const query = document.getElementById('kalshi-search').value.trim();
+  const tbody = document.getElementById('kalshi-markets-tbody');
+  const empty = document.getElementById('kalshi-empty');
+  try {
+    const url = query
+      ? `${API}/api/kalshi/markets?query=${encodeURIComponent(query)}&limit=15`
+      : `${API}/api/kalshi/markets?limit=15`;
+    const r = await fetch(url);
+    const d = await r.json();
+    const markets = d.markets || [];
+    if (markets.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'block';
+      empty.textContent = query ? 'No markets found for "' + query + '"' : 'No open markets found.';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = markets.map(m => {
+      const yes = m.yes_ask || m.yes_bid || m.last_price || '--';
+      const no = m.no_ask || m.no_bid || (yes !== '--' ? 100 - yes : '--');
+      const vol = m.volume || m.volume_24h || '--';
+      const close = m.close_time ? new Date(m.close_time).toLocaleDateString() : '--';
+      const title = (m.title || m.ticker || '').substring(0, 60);
+      return `<tr>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${m.title || ''}">${title}</td>
+        <td style="color:var(--green)">${yes !== '--' ? yes + '¢' : '--'}</td>
+        <td style="color:var(--red)">${no !== '--' ? no + '¢' : '--'}</td>
+        <td>${vol}</td>
+        <td>${close}</td>
+        <td><span style="font-size:.55rem;color:var(--green-dim);cursor:pointer;" onclick="alert('Order placement coming soon. Configure API keys first.')">[ TRADE ]</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    empty.style.display = 'block';
+    empty.textContent = 'Error loading markets: ' + e.message;
+  }
+}
+
+async function loadKalshiPositions() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/positions`);
+    const d = await r.json();
+    const positions = d.live_positions || d.db_positions || [];
+    const tbody = document.getElementById('kalshi-positions-tbody');
+    const table = document.getElementById('kalshi-positions-table');
+    const empty = document.getElementById('kalshi-positions-empty');
+    if (positions.length === 0) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+    table.style.display = 'table';
+    empty.style.display = 'none';
+    tbody.innerHTML = positions.map(p => {
+      const ticker = p.ticker || '';
+      const side = p.side || (p.position > 0 ? 'yes' : 'no');
+      const count = Math.abs(p.count || p.position || 0);
+      const avg = p.avg_price_cents || p.avg_cost_cents || '--';
+      const cur = p.current_price_cents || '--';
+      const pnl = p.pnl_cents || p.unrealized_pnl_cents || 0;
+      const pnlUsd = (pnl / 100).toFixed(2);
+      const status = p.status || 'open';
+      return `<tr>
+        <td>${ticker}</td>
+        <td style="color:${side==='yes'?'var(--green)':'var(--red)'}">${side.toUpperCase()}</td>
+        <td>${count}</td>
+        <td>${avg !== '--' ? avg + '¢' : '--'}</td>
+        <td>${cur !== '--' ? cur + '¢' : '--'}</td>
+        <td style="color:${pnl>=0?'var(--green)':'var(--red)'}">${pnl>=0?'+':''}$${pnlUsd}</td>
+        <td>${status}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Kalshi positions error:', e); }
+}
+
+// ── KALSHI ARBITRAGE ──
+async function loadArbStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/arbitrage/status`);
+    const d = await r.json();
+    document.getElementById('arb-scan-count').textContent = d.scan_count || 0;
+    document.getElementById('arb-found').textContent = d.total_found || 0;
+    document.getElementById('arb-current').textContent = d.current_opportunities || 0;
+    const badge = document.getElementById('arb-status-badge');
+    const btn = document.getElementById('arb-toggle-btn');
+    if (d.running) {
+      badge.textContent = 'SCANNING';
+      badge.style.color = 'var(--green)';
+      btn.textContent = '[ STOP ]';
+    } else {
+      badge.textContent = 'IDLE';
+      badge.style.color = 'var(--green-dim)';
+      btn.textContent = '[ START ]';
+    }
+    if (d.last_scan) {
+      const t = new Date(d.last_scan);
+      document.getElementById('arb-last-scan').textContent = t.toLocaleTimeString();
+    }
+    if (d.current_opportunities > 0) loadArbOpportunities();
+  } catch(e) { console.error('Arb status error:', e); }
+}
+
+async function loadArbOpportunities() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/arbitrage/opportunities`);
+    const d = await r.json();
+    const opps = d.opportunities || [];
+    const tbody = document.getElementById('arb-tbody');
+    const table = document.getElementById('arb-table');
+    const empty = document.getElementById('arb-empty');
+    if (opps.length === 0) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+    table.style.display = 'table';
+    empty.style.display = 'none';
+    tbody.innerHTML = opps.map(o => {
+      const stratLabel = {yes_no_spread:'YES/NO Spread', bracket_sum:'Bracket Sum', crossed_book:'Crossed Book'}[o.strategy] || o.strategy;
+      const profitColor = o.profit_per_contract_cents >= 5 ? 'var(--green)' : 'var(--yellow)';
+      return `<tr>
+        <td style="font-size:.6rem;">${stratLabel}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${o.title}">${o.title.substring(0,40)}</td>
+        <td>${o.spread_cents}¢</td>
+        <td style="color:${profitColor}">${o.profit_per_contract_cents}¢</td>
+        <td style="color:var(--green)">$${(o.max_profit_cents/100).toFixed(2)}</td>
+        <td><span style="font-size:.55rem;color:var(--yellow);cursor:pointer;" onclick="alert('Ticker: ${o.market_ticker}\\nStrategy: ${stratLabel}\\nSpread: ${o.spread_cents}¢\\nProfit: ${o.profit_per_contract_cents}¢/contract\\nMax: $${(o.max_profit_cents/100).toFixed(2)} (${o.max_contracts} contracts)\\n\\nAuto-execute from config or place manually.')">[ DETAILS ]</span></td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Arb opportunities error:', e); }
+}
+
+async function runArbScan() {
+  document.getElementById('arb-status-badge').textContent = 'SCANNING...';
+  document.getElementById('arb-status-badge').style.color = 'var(--yellow)';
+  try {
+    const r = await fetch(`${API}/api/kalshi/arbitrage/scan`, {method:'POST'});
+    const d = await r.json();
+    const opps = d.opportunities || [];
+    document.getElementById('arb-current').textContent = opps.length;
+    loadArbStatus();
+    loadArbOpportunities();
+  } catch(e) {
+    alert('Scan error: ' + e.message);
+    loadArbStatus();
+  }
+}
+
+async function toggleArbScanner() {
+  const btn = document.getElementById('arb-toggle-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/arbitrage/toggle`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({enabled: starting}),
+    });
+    loadArbStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── KALSHI SPREAD BOT ──
+async function loadSpreadStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/spread/status`);
+    const d = await r.json();
+    const badge = document.getElementById('spread-status-badge');
+    const btn = document.getElementById('spread-toggle-btn');
+    if (d.kill_switch) {
+      badge.textContent = 'KILLED'; badge.style.color = 'var(--red)';
+      btn.textContent = '[ START ]';
+    } else if (d.running) {
+      badge.textContent = 'RUNNING'; badge.style.color = 'var(--green)';
+      btn.textContent = '[ STOP ]';
+    } else {
+      badge.textContent = 'IDLE'; badge.style.color = 'var(--green-dim)';
+      btn.textContent = '[ START ]';
+    }
+    const pnl = d.total_pnl_cents || 0;
+    const pnlEl = document.getElementById('spread-pnl');
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + (pnl/100).toFixed(2);
+    pnlEl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+    document.getElementById('spread-markets').textContent = d.active_markets || 0;
+    document.getElementById('spread-cycles').textContent = d.cycle_count || 0;
+    document.getElementById('spread-spread').textContent = (d.config?.spread_cents || '--') + '¢';
+
+    const markets = d.markets || {};
+    const entries = Object.values(markets);
+    const totalInv = entries.reduce((s, m) => s + Math.abs(m.net_inventory || 0), 0);
+    document.getElementById('spread-inventory').textContent = totalInv;
+
+    const tbody = document.getElementById('spread-markets-tbody');
+    const table = document.getElementById('spread-markets-table');
+    const empty = document.getElementById('spread-empty');
+    if (entries.length === 0) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+    table.style.display = 'table';
+    empty.style.display = 'none';
+    tbody.innerHTML = entries.map(m => {
+      const net = m.net_inventory || 0;
+      const invColor = net === 0 ? 'var(--green-dim)' : (Math.abs(net) > 10 ? 'var(--red)' : 'var(--yellow)');
+      const hasOrders = m.yes_order_id || m.no_order_id;
+      return `<tr>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${m.title}">${(m.title||m.ticker).substring(0,35)}</td>
+        <td>${m.mid_price?.toFixed(0) || '--'}¢</td>
+        <td style="color:var(--green)">${m.yes_order_price || '--'}¢</td>
+        <td style="color:var(--red)">${m.no_order_price || '--'}¢</td>
+        <td>${m.yes_position || 0}</td>
+        <td>${m.no_position || 0}</td>
+        <td style="color:var(--green)">+${(m.spread_captured_cents||0)}¢</td>
+        <td style="color:${hasOrders ? 'var(--green)' : 'var(--green-dim)'}">${hasOrders ? 'QUOTING' : 'IDLE'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Spread status error:', e); }
+}
+
+async function toggleSpreadBot() {
+  const btn = document.getElementById('spread-toggle-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    const endpoint = starting ? 'start' : 'stop';
+    await fetch(`${API}/api/kalshi/spread/${endpoint}`, {method:'POST'});
+    loadSpreadStatus();
+  } catch(e) { alert('Spread bot error: ' + e.message); }
+}
+
+async function flattenSpreadBot() {
+  if (!confirm('Flatten all spread bot positions at market price?')) return;
+  try {
+    await fetch(`${API}/api/kalshi/spread/flatten`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body:'{}',
+    });
+    loadSpreadStatus();
+  } catch(e) { alert('Flatten error: ' + e.message); }
+}
+
+async function killSpreadBot() {
+  if (!confirm('KILL SWITCH: Stop all spread bot activity immediately?')) return;
+  try {
+    await fetch(`${API}/api/kalshi/spread/kill`, {method:'POST'});
+    loadSpreadStatus();
+  } catch(e) { alert('Kill error: ' + e.message); }
+}
+
+// ── KALSHI WHALE TRACKER ──
+async function loadWhales() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/whales`);
+    const d = await r.json();
+    const s = d.status || {};
+    const badge = document.getElementById('whale-status');
+    const btn = document.getElementById('whale-toggle-btn');
+    badge.textContent = s.running ? 'TRACKING' : 'IDLE';
+    badge.style.color = s.running ? 'var(--green)' : 'var(--green-dim)';
+    btn.textContent = s.running ? '[ STOP ]' : '[ START ]';
+
+    const whales = d.whales || [];
+    const tbody = document.getElementById('whale-tbody');
+    const table = document.getElementById('whale-table');
+    const empty = document.getElementById('whale-empty');
+    if (whales.length === 0) { table.style.display='none'; empty.style.display='block'; return; }
+    table.style.display='table'; empty.style.display='none';
+    tbody.innerHTML = whales.slice(0,20).map(w => {
+      const t = w.ts ? new Date(w.ts).toLocaleTimeString() : '--';
+      const sideColor = w.side==='yes' ? 'var(--green)' : 'var(--red)';
+      return `<tr>
+        <td style="font-size:.6rem;">${t}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${w.title}">${(w.title||w.ticker).substring(0,35)}</td>
+        <td style="color:${sideColor}">${w.side.toUpperCase()}</td>
+        <td><b>${w.count}</b></td>
+        <td>${w.price_cents}¢</td>
+        <td style="color:var(--yellow)">$${w.cost_usd.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Whale load error:', e); }
+}
+
+async function scanWhales() {
+  document.getElementById('whale-status').textContent = 'SCANNING...';
+  try { await fetch(`${API}/api/kalshi/whales/scan`, {method:'POST'}); loadWhales(); }
+  catch(e) { alert('Scan error: ' + e.message); loadWhales(); }
+}
+
+async function toggleWhaleTracker() {
+  const starting = document.getElementById('whale-toggle-btn').textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/whales/toggle`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({enabled: starting}),
+    });
+    loadWhales();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── KALSHI TECHNICAL BOT ──
+async function loadTechStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/tech/signals`);
+    const d = await r.json();
+    const s = d.status || {};
+    const badge = document.getElementById('tech-status');
+    const btn = document.getElementById('tech-toggle-btn');
+    const autoBtn = document.getElementById('tech-auto-btn');
+    badge.textContent = s.running ? 'SCANNING' : 'IDLE';
+    badge.style.color = s.running ? 'var(--green)' : 'var(--green-dim)';
+    btn.textContent = s.running ? '[ STOP ]' : '[ START ]';
+    autoBtn.textContent = s.auto_trade ? 'AUTO: ON' : 'AUTO: OFF';
+    autoBtn.style.color = s.auto_trade ? 'var(--green)' : 'var(--green-dim)';
+
+    document.getElementById('tech-signals').textContent = s.total_signals || 0;
+    document.getElementById('tech-trades').textContent = s.total_trades || 0;
+    document.getElementById('tech-positions').textContent = `${s.active_positions||0}/${s.max_positions||5}`;
+    document.getElementById('tech-config').textContent = s.config?.macd || '12/26/9';
+
+    const signals = d.signals || [];
+    const tbody = document.getElementById('tech-tbody');
+    const table = document.getElementById('tech-table');
+    const empty = document.getElementById('tech-empty');
+    if (signals.length === 0) { table.style.display='none'; empty.style.display='block'; return; }
+    table.style.display='table'; empty.style.display='none';
+    tbody.innerHTML = signals.slice(0,15).map(s => {
+      const t = s.timestamp ? new Date(s.timestamp).toLocaleTimeString() : '--';
+      const sideColor = s.side==='yes' ? 'var(--green)' : 'var(--red)';
+      const strIcon = {strong:'⚡',moderate:'📈',weak:'📉'}[s.strength]||'';
+      const confColor = s.confidence >= 0.7 ? 'var(--green)' : s.confidence >= 0.5 ? 'var(--yellow)' : 'var(--green-dim)';
+      return `<tr>
+        <td style="font-size:.6rem;">${t}</td>
+        <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${s.title}">${(s.title||s.ticker).substring(0,30)}</td>
+        <td style="color:${sideColor}">${s.side.toUpperCase()}</td>
+        <td>${strIcon} ${s.strength}</td>
+        <td>${s.macd_hist?.toFixed(3) || '--'}</td>
+        <td style="color:${s.cci>100?'var(--green)':s.cci<-100?'var(--red)':'var(--green-dim)'}">${s.cci?.toFixed(0) || '--'}</td>
+        <td>${s.price_cents}¢</td>
+        <td style="color:${confColor}">${(s.confidence*100).toFixed(0)}%</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.error('Tech status error:', e); }
+}
+
+async function scanTech() {
+  document.getElementById('tech-status').textContent = 'SCANNING...';
+  try { await fetch(`${API}/api/kalshi/tech/scan`, {method:'POST'}); loadTechStatus(); }
+  catch(e) { alert('Scan error: ' + e.message); loadTechStatus(); }
+}
+
+async function toggleTechBot() {
+  const starting = document.getElementById('tech-toggle-btn').textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/tech/toggle`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({enabled: starting}),
+    });
+    loadTechStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+async function toggleAutoTrade() {
+  const btn = document.getElementById('tech-auto-btn');
+  const enabling = btn.textContent.includes('OFF');
+  if (enabling && !confirm('Enable auto-trading? The bot will execute trades on strong signals.')) return;
+  try {
+    await fetch(`${API}/api/kalshi/tech/toggle`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({auto_trade: enabling}),
+    });
+    loadTechStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── Sports Scanner ──
+let _sportsLeagueFilter = null;
+
+async function loadSportsStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/sports/status`);
+    const d = await r.json();
+    document.getElementById('sports-status').textContent = d.running ? 'RUNNING' : 'IDLE';
+    document.getElementById('sports-status').style.color = d.running ? 'var(--green)' : 'var(--green-dim)';
+    document.getElementById('sports-toggle-btn').textContent = d.running ? '[ STOP ]' : '[ START ]';
+    document.getElementById('sports-markets').textContent = d.total_markets || 0;
+    document.getElementById('sports-value-bets').textContent = d.value_bets || 0;
+    document.getElementById('sports-trades').textContent = d.trades_executed || 0;
+    document.getElementById('sports-scans').textContent = d.scan_count || 0;
+    document.getElementById('sports-auto-btn').textContent = d.auto_trade ? 'AUTO: ON' : 'AUTO: OFF';
+    document.getElementById('sports-auto-btn').style.color = d.auto_trade ? 'var(--green)' : 'var(--green-dim)';
+
+    // Load markets
+    const leagueParam = _sportsLeagueFilter ? `?league=${_sportsLeagueFilter}` : '';
+    const r2 = await fetch(`${API}/api/kalshi/sports/markets${leagueParam}`);
+    const d2 = await r2.json();
+    const markets = d2.markets || [];
+    const tbody = document.getElementById('sports-tbody');
+    const table = document.getElementById('sports-table');
+    const empty = document.getElementById('sports-empty');
+    if (markets.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+    table.style.display = 'table'; empty.style.display = 'none';
+    tbody.innerHTML = markets.slice(0, 30).map(m => {
+      const moveColor = m.price_change > 0 ? 'var(--green)' : m.price_change < 0 ? 'var(--red)' : 'var(--green-dim)';
+      const moveStr = m.price_change > 0 ? `+${m.price_change}` : m.price_change < 0 ? `${m.price_change}` : '--';
+      return `<tr>
+        <td style="font-size:.5rem">${m.league}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.title}</td>
+        <td>${m.yes_price}¢</td>
+        <td>${m.no_price}¢</td>
+        <td style="color:${moveColor}">${moveStr}¢</td>
+        <td>${m.volume}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.warn('Sports status error:', e); }
+}
+
+function filterSportsLeague(league) {
+  _sportsLeagueFilter = league;
+  document.querySelectorAll('.sports-league-btn').forEach(b => {
+    b.style.background = 'transparent';
+    b.style.color = 'var(--green-dim)';
+    b.style.borderColor = 'var(--green-dark)';
+  });
+  event.target.style.background = 'var(--green-dark)';
+  event.target.style.color = 'var(--green)';
+  event.target.style.borderColor = 'var(--green-dim)';
+  loadSportsStatus();
+}
+
+async function scanSports() {
+  document.getElementById('sports-status').textContent = 'SCANNING...';
+  try { await fetch(`${API}/api/kalshi/sports/scan`, {method:'POST'}); loadSportsStatus(); }
+  catch(e) { alert('Scan error: ' + e.message); loadSportsStatus(); }
+}
+
+async function toggleSportsScanner() {
+  const btn = document.getElementById('sports-toggle-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/sports/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:starting})});
+    loadSportsStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+async function toggleSportsAutoTrade() {
+  const btn = document.getElementById('sports-auto-btn');
+  const enabling = btn.textContent.includes('OFF');
+  try {
+    await fetch(`${API}/api/kalshi/sports/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({auto_trade:enabling})});
+    loadSportsStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── Market Maker Framework ──
+async function loadMMStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/mm/status`);
+    const d = await r.json();
+    document.getElementById('mm-status').textContent = d.kill_switch ? 'KILLED' : d.running ? 'RUNNING' : 'IDLE';
+    document.getElementById('mm-status').style.color = d.kill_switch ? 'var(--red)' : d.running ? 'var(--green)' : 'var(--green-dim)';
+    document.getElementById('mm-start-btn').textContent = d.running ? '[ STOP ]' : '[ START ]';
+    document.getElementById('mm-pnl').textContent = `$${(d.total_pnl_usd||0).toFixed(2)}`;
+    document.getElementById('mm-pnl').style.color = (d.total_pnl_cents||0) >= 0 ? 'var(--green)' : 'var(--red)';
+    document.getElementById('mm-fills').textContent = d.total_fills || 0;
+    document.getElementById('mm-spread-captured').textContent = d.total_spread_captured || 0;
+    document.getElementById('mm-adverse').textContent = d.total_adverse_selections || 0;
+    document.getElementById('mm-markets-count').textContent = d.active_markets || 0;
+
+    const markets = d.markets || {};
+    const entries = Object.values(markets);
+    const tbody = document.getElementById('mm-tbody');
+    const table = document.getElementById('mm-table');
+    const empty = document.getElementById('mm-empty');
+    if (entries.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+    table.style.display = 'table'; empty.style.display = 'none';
+    tbody.innerHTML = entries.map(m => {
+      const pnlColor = m.realized_pnl_cents >= 0 ? 'var(--green)' : 'var(--red)';
+      const invColor = m.net_inventory > 0 ? 'var(--green)' : m.net_inventory < 0 ? 'var(--red)' : 'var(--green-dim)';
+      return `<tr>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.title || m.ticker}</td>
+        <td>${m.active_strategy}</td>
+        <td>${m.spread}\u00a2</td>
+        <td>${m.mid_price}\u00a2</td>
+        <td style="color:${invColor}">${m.net_inventory > 0 ? '+' : ''}${m.net_inventory}</td>
+        <td style="color:${pnlColor}">${m.realized_pnl_cents}\u00a2</td>
+        <td>${m.score}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.warn('MM status error:', e); }
+}
+
+async function startMM() {
+  const btn = document.getElementById('mm-start-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    if (starting) {
+      await fetch(`${API}/api/kalshi/mm/start`, {method:'POST'});
+    } else {
+      await fetch(`${API}/api/kalshi/mm/stop`, {method:'POST'});
+    }
+    loadMMStatus();
+  } catch(e) { alert('MM toggle error: ' + e.message); }
+}
+
+async function flattenMM() {
+  if (!confirm('Flatten all market maker positions?')) return;
+  try { await fetch(`${API}/api/kalshi/mm/flatten`, {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'}); loadMMStatus(); }
+  catch(e) { alert('Flatten error: ' + e.message); }
+}
+
+async function killMM() {
+  if (!confirm('KILL market maker? This stops all activity immediately.')) return;
+  try { await fetch(`${API}/api/kalshi/mm/kill`, {method:'POST'}); loadMMStatus(); }
+  catch(e) { alert('Kill error: ' + e.message); }
+}
+
+// ── Esports Scanner ──
+let _esportsGameFilter = null;
+
+async function loadEsportsStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/esports/status`);
+    const d = await r.json();
+    document.getElementById('esports-status').textContent = d.running ? 'RUNNING' : 'IDLE';
+    document.getElementById('esports-status').style.color = d.running ? 'var(--green)' : 'var(--green-dim)';
+    document.getElementById('esports-toggle-btn').textContent = d.running ? '[ STOP ]' : '[ START ]';
+    document.getElementById('esports-markets').textContent = d.total_markets || 0;
+    document.getElementById('esports-value-bets').textContent = d.value_bets || 0;
+    document.getElementById('esports-trades').textContent = d.trades_executed || 0;
+    document.getElementById('esports-scans').textContent = d.scan_count || 0;
+    document.getElementById('esports-auto-btn').textContent = d.auto_trade ? 'AUTO: ON' : 'AUTO: OFF';
+    document.getElementById('esports-auto-btn').style.color = d.auto_trade ? 'var(--green)' : 'var(--green-dim)';
+
+    const gameParam = _esportsGameFilter ? `?game=${_esportsGameFilter}` : '';
+    const r2 = await fetch(`${API}/api/kalshi/esports/markets${gameParam}`);
+    const d2 = await r2.json();
+    const markets = d2.markets || [];
+    const tbody = document.getElementById('esports-tbody');
+    const table = document.getElementById('esports-table');
+    const empty = document.getElementById('esports-empty');
+    if (markets.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+    table.style.display = 'table'; empty.style.display = 'none';
+    tbody.innerHTML = markets.slice(0, 30).map(m => {
+      const moveColor = m.price_change > 0 ? 'var(--green)' : m.price_change < 0 ? 'var(--red)' : 'var(--green-dim)';
+      const moveStr = m.price_change > 0 ? `+${m.price_change}` : m.price_change < 0 ? `${m.price_change}` : '--';
+      return `<tr>
+        <td style="font-size:.5rem">${m.game}</td>
+        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${m.title}</td>
+        <td>${m.yes_price}¢</td>
+        <td>${m.no_price}¢</td>
+        <td style="color:${moveColor}">${moveStr}¢</td>
+        <td>${m.volume}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.warn('Esports status error:', e); }
+}
+
+function filterEsportsGame(game) {
+  _esportsGameFilter = game;
+  document.querySelectorAll('.esports-game-btn').forEach(b => {
+    b.style.background = 'transparent';
+    b.style.color = 'var(--green-dim)';
+    b.style.borderColor = 'var(--green-dark)';
+  });
+  event.target.style.background = 'var(--green-dark)';
+  event.target.style.color = 'var(--green)';
+  event.target.style.borderColor = 'var(--green-dim)';
+  loadEsportsStatus();
+}
+
+async function scanEsports() {
+  document.getElementById('esports-status').textContent = 'SCANNING...';
+  try { await fetch(`${API}/api/kalshi/esports/scan`, {method:'POST'}); loadEsportsStatus(); }
+  catch(e) { alert('Scan error: ' + e.message); loadEsportsStatus(); }
+}
+
+async function toggleEsportsScanner() {
+  const btn = document.getElementById('esports-toggle-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/esports/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:starting})});
+    loadEsportsStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+async function toggleEsportsAutoTrade() {
+  const btn = document.getElementById('esports-auto-btn');
+  const enabling = btn.textContent.includes('OFF');
+  try {
+    await fetch(`${API}/api/kalshi/esports/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({auto_trade:enabling})});
+    loadEsportsStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── AI Agent Bot ──
+async function loadAIStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/ai/status`);
+    const d = await r.json();
+    document.getElementById('ai-status').textContent = d.running ? 'RUNNING' : 'IDLE';
+    document.getElementById('ai-status').style.color = d.running ? 'var(--green)' : 'var(--green-dim)';
+    document.getElementById('ai-toggle-btn').textContent = d.running ? '[ STOP ]' : '[ START ]';
+    document.getElementById('ai-decisions').textContent = d.total_decisions || 0;
+    document.getElementById('ai-trades').textContent = d.trades_executed || 0;
+    document.getElementById('ai-positions').textContent = `${d.open_positions || 0}/${d.max_positions || 3}`;
+    document.getElementById('ai-agents').textContent = (d.agents || []).length || 3;
+    document.getElementById('ai-auto-btn').textContent = d.auto_trade ? 'AUTO: ON' : 'AUTO: OFF';
+    document.getElementById('ai-auto-btn').style.color = d.auto_trade ? 'var(--green)' : 'var(--green-dim)';
+    // Load decisions
+    const r2 = await fetch(`${API}/api/kalshi/ai/decisions?limit=10`);
+    const d2 = await r2.json();
+    const decisions = d2.decisions || [];
+    const tbody = document.getElementById('ai-tbody');
+    const table = document.getElementById('ai-table');
+    const empty = document.getElementById('ai-empty');
+    if (decisions.length === 0) { table.style.display = 'none'; empty.style.display = 'block'; return; }
+    table.style.display = 'table'; empty.style.display = 'none';
+    tbody.innerHTML = decisions.map(c => {
+      const strengthPct = (c.strength * 100).toFixed(0);
+      const edgePct = c.avg_edge ? (c.avg_edge * 100).toFixed(1) : '--';
+      const agentList = (c.agents || []).map(a => `${a.agent}:${a.side}`).join(', ');
+      return `<tr>
+        <td>${c.ticker || '--'}</td>
+        <td style="color:${c.consensus === 'yes' ? 'var(--green)' : c.consensus === 'no' ? 'var(--red)' : 'var(--yellow)'}">${(c.consensus || 'SKIP').toUpperCase()}</td>
+        <td>${strengthPct}%</td>
+        <td>${edgePct}%</td>
+        <td style="font-size:.5rem">${agentList}</td>
+        <td>${c.unanimous ? 'YES' : 'NO'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) { console.warn('AI status error:', e); }
+}
+
+async function runAIAnalysis() {
+  document.getElementById('ai-status').textContent = 'ANALYZING...';
+  try { await fetch(`${API}/api/kalshi/ai/analyze`, {method:'POST'}); loadAIStatus(); }
+  catch(e) { alert('Analysis error: ' + e.message); loadAIStatus(); }
+}
+
+async function toggleAIBot() {
+  const btn = document.getElementById('ai-toggle-btn');
+  const starting = btn.textContent.includes('START');
+  try {
+    await fetch(`${API}/api/kalshi/ai/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled:starting})});
+    loadAIStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+async function toggleAIAutoTrade() {
+  const btn = document.getElementById('ai-auto-btn');
+  const enabling = btn.textContent.includes('OFF');
+  try {
+    await fetch(`${API}/api/kalshi/ai/toggle`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({auto_trade:enabling})});
+    loadAIStatus();
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
+// ── REBALANCER ──
+async function loadRebalancerStatus() {
+  try {
+    const r = await fetch(`${API}/api/rebalancer/status`);
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('rebal-tbody').innerHTML =
+        '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--red);font-size:.65rem;">' + d.error + '</td></tr>';
+      return;
+    }
+    const badge = document.getElementById('rebal-auto-badge');
+    badge.textContent = 'AUTO: ' + (d.auto_rebalance ? 'ON' : 'OFF');
+    badge.style.color = d.auto_rebalance ? 'var(--green)' : 'var(--green-dim)';
+    badge.style.borderColor = d.auto_rebalance ? 'var(--green)' : 'var(--green-dark)';
+    document.getElementById('rebal-total').textContent = '$' + (d.total_usd || 0).toFixed(2);
+    document.getElementById('rebal-threshold').textContent = (d.drift_threshold || 5).toFixed(1);
+    document.getElementById('rebal-min-trade').textContent = (d.min_trade_usd || 5).toFixed(2);
+    document.getElementById('rebal-last-time').textContent = d.last_rebalance || '--';
+    const tbody = document.getElementById('rebal-tbody');
+    const tokens = Object.keys(d.targets || {});
+    if (tokens.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--green-dim);font-size:.65rem;">No targets configured</td></tr>';
+      return;
+    }
+    let rows = '';
+    for (const sym of tokens) {
+      const target = d.targets[sym] || 0;
+      const current = (d.current_allocations || {})[sym] || 0;
+      const drift = (d.drift || {})[sym] || 0;
+      const absDrift = Math.abs(drift);
+      const threshold = d.drift_threshold || 5;
+      let driftColor = 'var(--green)';
+      if (absDrift >= threshold) driftColor = 'var(--red)';
+      else if (absDrift >= threshold * 0.6) driftColor = 'var(--yellow)';
+      const balance = (d.balances || {})[sym] || 0;
+      const value = (d.values_usd || {})[sym] || 0;
+      const driftSign = drift >= 0 ? '+' : '';
+      rows += '<tr style="border-bottom:1px solid rgba(0,59,0,0.4);">' +
+        '<td style="padding:6px 8px;font-size:.7rem;color:var(--green);font-weight:700;">' + sym + '</td>' +
+        '<td style="padding:6px 8px;font-size:.7rem;color:var(--green-dim);text-align:right;">' + target.toFixed(1) + '%</td>' +
+        '<td style="padding:6px 8px;font-size:.7rem;color:var(--green);text-align:right;">' + current.toFixed(1) + '%</td>' +
+        '<td style="padding:6px 8px;font-size:.7rem;text-align:right;color:' + driftColor + ';">' + driftSign + drift.toFixed(1) + '%</td>' +
+        '<td style="padding:6px 8px;font-size:.65rem;color:var(--green-dim);text-align:right;">' + (sym === 'BONK' ? balance.toFixed(0) : balance.toFixed(4)) + '</td>' +
+        '<td style="padding:6px 8px;font-size:.7rem;color:var(--green);text-align:right;">$' + value.toFixed(2) + '</td>' +
+        '</tr>';
+    }
+    tbody.innerHTML = rows;
+  } catch(e) { console.error('Rebalancer status error:', e); }
+}
+
+async function calculateRebalance() {
+  const result = document.getElementById('rebal-result');
+  const tradesDiv = document.getElementById('rebal-trades');
+  const tradesList = document.getElementById('rebal-trades-list');
+  result.textContent = 'Calculating...';
+  result.style.color = 'var(--yellow)';
+  try {
+    const r = await fetch(`${API}/api/rebalancer/calculate`, {method:'POST'});
+    const d = await r.json();
+    if (d.trades && d.trades.length > 0) {
+      let html = '';
+      for (const t of d.trades) {
+        const color = t.action === 'sell' ? 'var(--red)' : 'var(--green)';
+        html += '<div style="padding:3px 0;color:' + color + ';">' +
+          t.action.toUpperCase() + ' ' + t.symbol + ': $' + t.amount_usd.toFixed(2) +
+          ' (drift: ' + (t.drift_pct >= 0 ? '+' : '') + t.drift_pct.toFixed(1) + '%)</div>';
+      }
+      tradesList.innerHTML = html;
+      tradesDiv.style.display = 'block';
+      result.textContent = d.trades.length + ' trade(s) needed to rebalance';
+      result.style.color = 'var(--yellow)';
+    } else {
+      tradesDiv.style.display = 'none';
+      result.textContent = 'Portfolio is within drift threshold - no trades needed';
+      result.style.color = 'var(--green)';
+    }
+  } catch(e) {
+    result.textContent = 'Error: ' + e.message;
+    result.style.color = 'var(--red)';
+  }
+}
+
+async function executeRebalance() {
+  if (!confirm('Execute portfolio rebalance now? This will swap tokens via Jupiter.')) return;
+  const result = document.getElementById('rebal-result');
+  result.textContent = 'Executing rebalance...';
+  result.style.color = 'var(--yellow)';
+  try {
+    const r = await fetch(`${API}/api/rebalancer/execute`, {method:'POST'});
+    const d = await r.json();
+    if (d.status === 'executed') {
+      result.textContent = 'Rebalance complete: ' + d.trades_executed + ' trade(s) executed';
+      result.style.color = 'var(--green)';
+    } else if (d.status === 'balanced') {
+      result.textContent = d.message || 'Portfolio already balanced';
+      result.style.color = 'var(--green)';
+    } else {
+      result.textContent = 'Error: ' + (d.error || d.detail || 'unknown');
+      result.style.color = 'var(--red)';
+    }
+    loadRebalancerStatus();
+  } catch(e) {
+    result.textContent = 'Error: ' + e.message;
+    result.style.color = 'var(--red)';
+  }
+}
+
+async function toggleAutoRebalance() {
+  try {
+    const r = await fetch(`${API}/api/rebalancer/toggle`, {method:'POST'});
+    const d = await r.json();
+    const badge = document.getElementById('rebal-auto-badge');
+    badge.textContent = 'AUTO: ' + (d.auto_rebalance ? 'ON' : 'OFF');
+    badge.style.color = d.auto_rebalance ? 'var(--green)' : 'var(--green-dim)';
+    badge.style.borderColor = d.auto_rebalance ? 'var(--green)' : 'var(--green-dark)';
+  } catch(e) { alert('Toggle error: ' + e.message); }
+}
+
 // ── INIT ──
 loadStats();
 loadTrades();
@@ -2362,17 +3731,41 @@ loadWalletTxLog();
 loadScout();
 loadPositions();
 loadAnalytics();
+loadPrices();
 initBtSort();
 loadBacktests();
 loadSettings();
+loadPaperStatus();
 loadSystemStatus();
+loadKalshiStatus();
+loadArbStatus();
+loadSpreadStatus();
+loadWhales();
+loadTechStatus();
+loadAIStatus();
+loadSportsStatus();
+loadEsportsStatus();
+loadMMStatus();
+loadRebalancerStatus();
 
 setInterval(loadStats, 30000);
 setInterval(loadTrades, 60000);
 setInterval(loadWalletTxLog, 60000);
 setInterval(loadPositions, 30000);
 setInterval(loadAnalytics, 60000);
+setInterval(loadPrices, 5000);
+setInterval(loadPaperStatus, 30000);
 setInterval(loadSystemStatus, 20000);
+setInterval(loadKalshiStatus, 60000);
+setInterval(loadArbStatus, 60000);
+setInterval(loadSpreadStatus, 15000);
+setInterval(loadWhales, 60000);
+setInterval(loadTechStatus, 60000);
+setInterval(loadAIStatus, 60000);
+setInterval(loadSportsStatus, 120000);
+setInterval(loadEsportsStatus, 120000);
+setInterval(loadMMStatus, 15000);
+setInterval(loadRebalancerStatus, 60000);
 </script>
 </body>
 </html>

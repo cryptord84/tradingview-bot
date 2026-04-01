@@ -1,0 +1,65 @@
+==================================================================
+  TRADINGVIEW BACKTEST REPORT
+  File      : SOL_Mean_Reversion_v1_—_4H_Backtest_COINBASE_SOLUSD_2026-03-30.xlsx
+  Symbol    : COINBASE:SOLUSD  |  Timeframe: 4 hours
+  Period    : Jan 18, 2023, 20:00 — Mar 30, 2026, 16:00
+  Capital   : $1,000.00
+==================================================================
+
+── PERFORMANCE SUMMARY ──────────────────────────────────────────
+  Net Profit          : $+6.60  (+0.66%)
+  Gross Profit        : $11.70
+  Gross Loss          : -$5.10
+  Profit Factor       : 2.294
+  Buy & Hold Return   : $+2,802.72  (strategy underperformed)
+  Commission Paid     : $0.91
+
+── TRADES ───────────────────────────────────────────────────────
+  Total Trades        : 3
+  Winners / Losers    : 2 / 1
+  Win Rate            : 66.67%
+  Expected Payoff     : $+2.20 per trade
+
+── RISK / REWARD ────────────────────────────────────────────────
+  Avg Win             : $5.85
+  Avg Loss            : -$5.10
+  Win/Loss Ratio      : 1.15
+  Largest Win         : $+9.87
+  Largest Loss        : $-5.10
+  Max Drawdown (EOB)  : -$0.00
+  Max Drawdown (IB)   : -$9.80
+
+── RISK-ADJUSTED ────────────────────────────────────────────────
+  Sharpe Ratio        : -0.678
+  Sortino Ratio       : -0.707
+
+── LONG vs SHORT ────────────────────────────────────────────────
+  Long  :   2 trades  |  1 wins (50.0%)  |  P&L: $+4.77  |  PF: 1.935
+  Short :   1 trades  |  1 wins (100.0%)  |  P&L: $+1.83
+
+── STREAKS ──────────────────────────────────────────────────────
+  Max Consec Wins     : 1
+  Max Consec Losses   : 1
+
+── BEST 5 TRADES ────────────────────────────────────────────────
+  1. $   +9.87  2023-01-20 20:00:00   BB Mid / RSI Exit
+  2. $   +1.83  2025-04-03 12:00:00   BB Mid / RSI Exit
+  3. $   -5.10  2023-07-31 16:00:00   MR Long Exit
+
+── WORST 5 TRADES ───────────────────────────────────────────────
+  1. $   -5.10  2023-07-31 16:00:00   MR Long Exit
+  2. $   +1.83  2025-04-03 12:00:00   BB Mid / RSI Exit
+  3. $   +9.87  2023-01-20 20:00:00   BB Mid / RSI Exit
+
+── ALL TRADES (Trade # | P&L | Signal | Date) ───────────────────
+   1. $   +9.87  2023-01-20 20:00:00   BB Mid / RSI Exit
+   2. $   -5.10  2023-07-31 16:00:00   MR Long Exit
+   3. $   +1.83  2025-04-03 12:00:00   BB Mid / RSI Exit
+
+── EQUITY CURVE (ASCII) ─────────────────────────────────────────
+  █▁▃
+  start: $0.00   min: $+4.77   max: $+9.87   final: $+6.60
+
+==================================================================
+  Paste this report to Claude for strategy analysis.
+==================================================================

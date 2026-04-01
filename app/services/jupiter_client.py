@@ -1,6 +1,7 @@
 """Jupiter v6 API client for Solana DEX trading."""
 
 import base64
+import json
 import logging
 from typing import Optional
 
@@ -139,6 +140,25 @@ class JupiterClient:
             "route_plan": quote.get("routePlan", []),
         }
 
+    # Binance trading pair symbols for tracked tokens
+    # Only tokens actually listed on Binance.us (RAY, PYTH not available)
+    BINANCE_SYMBOLS = {
+        "SOL": "SOLUSDT",
+        "JTO": "JTOUSDT",
+        "WIF": "WIFUSDT",
+        "BONK": "BONKUSDT",
+    }
+
+    # CoinGecko IDs as fallback
+    COINGECKO_IDS = {
+        "SOL": "solana",
+        "JTO": "jito-governance-token",
+        "WIF": "dogwifcoin",
+        "BONK": "bonk",
+        "PYTH": "pyth-network",
+        "RAY": "raydium",
+    }
+
     async def get_sol_price(self) -> float:
         """Get SOL/USD price. Tries Binance first (no key, no rate limit), then CoinGecko."""
         try:
@@ -164,6 +184,85 @@ class JupiterClient:
         )
         resp.raise_for_status()
         return float(resp.json()["solana"]["usd"])
+
+    async def get_token_price(self, symbol: str) -> float:
+        """Get price for any tracked token. Binance first, CoinGecko fallback."""
+        symbol = symbol.upper()
+        # Try Binance
+        binance_pair = self.BINANCE_SYMBOLS.get(symbol)
+        if binance_pair:
+            try:
+                resp = await self._client.get(
+                    "https://api.binance.us/api/v3/ticker/price",
+                    params={"symbol": binance_pair},
+                )
+                resp.raise_for_status()
+                return float(resp.json()["price"])
+            except Exception:
+                pass
+        # Fallback to CoinGecko
+        cg_id = self.COINGECKO_IDS.get(symbol)
+        if cg_id:
+            resp = await self._client.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={"ids": cg_id, "vs_currencies": "usd"},
+            )
+            resp.raise_for_status()
+            return float(resp.json()[cg_id]["usd"])
+        raise ValueError(f"Unknown token: {symbol}")
+
+    async def get_multi_token_prices(self) -> dict:
+        """Get prices + 24h change for all tracked tokens. Returns dict of symbol -> {price, change_24h}."""
+        result = {}
+        # Try Binance 24h ticker for all tokens at once
+        try:
+            symbols = list(self.BINANCE_SYMBOLS.values())
+            resp = await self._client.get(
+                "https://api.binance.us/api/v3/ticker/24hr",
+                params={"symbols": json.dumps(symbols, separators=(",", ":"))},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            binance_to_token = {v: k for k, v in self.BINANCE_SYMBOLS.items()}
+            for ticker in data:
+                sym = binance_to_token.get(ticker["symbol"])
+                if sym:
+                    result[sym] = {
+                        "price": float(ticker["lastPrice"]),
+                        "change_24h": float(ticker["priceChangePercent"]),
+                        "high_24h": float(ticker["highPrice"]),
+                        "low_24h": float(ticker["lowPrice"]),
+                        "volume_24h": float(ticker["quoteVolume"]),
+                    }
+        except Exception as e:
+            logger.warning(f"Binance multi-price failed: {e}")
+
+        # Fill missing tokens from CoinGecko
+        missing = [s for s in self.COINGECKO_IDS if s not in result]
+        if missing:
+            try:
+                cg_ids = ",".join(self.COINGECKO_IDS[s] for s in missing if s in self.COINGECKO_IDS)
+                resp = await self._client.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": cg_ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+                )
+                resp.raise_for_status()
+                cg_data = resp.json()
+                cg_id_to_token = {v: k for k, v in self.COINGECKO_IDS.items()}
+                for cg_id, vals in cg_data.items():
+                    sym = cg_id_to_token.get(cg_id)
+                    if sym:
+                        result[sym] = {
+                            "price": vals.get("usd", 0),
+                            "change_24h": vals.get("usd_24h_change", 0),
+                            "high_24h": None,
+                            "low_24h": None,
+                            "volume_24h": None,
+                        }
+            except Exception as e:
+                logger.warning(f"CoinGecko fallback failed: {e}")
+
+        return result
 
     async def get_market_data(self) -> dict:
         """Get SOL market data from CoinGecko."""

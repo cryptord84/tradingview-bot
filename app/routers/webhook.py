@@ -1,5 +1,6 @@
 """Webhook endpoint for TradingView alerts."""
 
+import asyncio
 import logging
 from datetime import datetime
 
@@ -36,7 +37,11 @@ def _check_rate_limit():
 
 @router.post("/webhook")
 async def receive_webhook(request: Request):
-    """Receive and process TradingView webhook alerts."""
+    """Receive and process TradingView webhook alerts.
+
+    Returns immediately with 200 to avoid TradingView timeout errors.
+    Signal processing happens in the background via the signal queue.
+    """
     _check_rate_limit()
 
     try:
@@ -67,14 +72,17 @@ async def receive_webhook(request: Request):
         f"confidence={signal.confidence_score}"
     )
 
-    # Process via trade engine (imported at runtime to avoid circular imports)
-    from app.services.trade_engine import TradeEngine
+    # Enqueue signal for background processing — return immediately so
+    # TradingView doesn't get a timeout error (~3s limit)
+    from app.services.trade_engine import get_signal_queue
 
-    engine = TradeEngine()
-    result = await engine.process_signal(signal, source_ip=request.client.host or "")
+    queue = get_signal_queue()
+    asyncio.create_task(queue.enqueue(signal, source_ip=request.client.host or ""))
 
     return {
-        "status": "ok",
+        "status": "queued",
         "timestamp": datetime.utcnow().isoformat(),
-        "result": result,
+        "signal": signal.signal_type.value,
+        "symbol": signal.symbol,
+        "confidence": signal.confidence_score,
     }
