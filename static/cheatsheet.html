@@ -66,6 +66,7 @@
             <a href="#paper">📝 Paper Trading</a>
             <a href="#pricefeed">📡 Price Feed</a>
             <a href="#rebalancer">⚖️ Rebalancer</a>
+            <a href="#stratlab">🧪 Strategy Lab</a>
             <a href="#kalshi">🎰 Kalshi Markets</a>
             <a href="#dashboard">📊 Dashboard</a>
             <a href="#test-plan">🧪 Test Plan</a>
@@ -532,6 +533,74 @@ curl https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>
         </div>
     </div>
 
+    <!-- Strategy Lab -->
+    <div class="card p-5" id="stratlab">
+        <h2>🧪 Strategy Lab</h2>
+        <p>Dashboard tooling to accelerate the backtest &rarr; deploy workflow. All tools live in the <strong>Strategy Lab</strong> card on the dashboard.</p>
+
+        <h3>1. Paste Import</h3>
+        <p>Instead of manually entering backtest results, paste the TradingView Strategy Tester summary text and the parser auto-extracts all fields:</p>
+        <pre><code>Net Profit: $71.00 (+7.10%)
+Profit Factor: 1.091
+Total Trades: 109
+Win Rate: 31.2%
+Max Drawdown: $152.00
+Sharpe Ratio: 0.342</code></pre>
+        <p>Fill in Strategy Name, Version, Timeframe, and Symbol, then click <strong>PARSE & SAVE</strong> to store directly to the backtest database.</p>
+
+        <h3>2. Generate Alert Indicator</h3>
+        <p>Converts a backtest strategy Pine script into a webhook alert indicator automatically:</p>
+        <ul>
+            <li>Strips <code>strategy()</code> and <code>strategy.entry/exit</code> calls</li>
+            <li>Adds <code>indicator()</code>, webhook JSON <code>alert()</code>, cooldown timer</li>
+            <li>Injects deep dip override (configurable ATR depth + relaxed confirms)</li>
+            <li>Adds visual markers (MR BUY / DIP BUY) and info table</li>
+        </ul>
+        <p><strong>Usage:</strong> Paste your backtest strategy code, fill in name/version/timeframe, click GENERATE. Copy output to TradingView Pine Editor.</p>
+
+        <h3>3. Parameter Grid</h3>
+        <p>Generates multiple Pine script variants by sweeping parameter ranges. Define parameter name + min/max/step, paste your strategy code, and get all combinations (max 100).</p>
+        <p><strong>Example:</strong> <code>min_confirm: 3-5 step 1</code> + <code>bb_mult: 1.5-2.5 step 0.5</code> = 9 variants. Each variant has the parameter baked into the strategy title for easy identification in TradingView.</p>
+
+        <h3>4. Token Sweep</h3>
+        <p>Duplicates a strategy across multiple tokens. Select checkboxes (SOL, JTO, WIF, BONK, PYTH, RAY) and click GENERATE. Each variant has the token name appended to the strategy title.</p>
+
+        <h3>5. Strategy Comparison</h3>
+        <p>Cross-strategy, cross-token analysis from all stored backtests. Shows:</p>
+        <ul>
+            <li><strong>Deployable Strategies</strong> &mdash; PF &ge; 1.0 with 20+ trades (ready for alert indicator conversion)</li>
+            <li><strong>Strategy Averages</strong> &mdash; aggregate PF, win rate, trade count per strategy</li>
+            <li><strong>By Token</strong> &mdash; which tokens perform best with which strategy</li>
+        </ul>
+
+        <h3>6. Strategy Templates</h3>
+        <p>Pre-built starting points for new strategies. Click USE to load into the generator or grid/sweep tools.</p>
+        <table>
+            <tr><th>Template</th><th>Type</th><th>Best For</th><th>Entry</th></tr>
+            <tr><td>Mean Reversion</td><td>Dip-buying</td><td>SOL, JTO, WIF</td><td>BB touch + 4/6 confirms</td></tr>
+            <tr><td>Momentum Breakout</td><td>Trend-following</td><td>SOL, RAY, JTO</td><td>BB upper break + EMA ribbon + ADX > 25</td></tr>
+            <tr><td>Confluence Multi</td><td>Multi-factor</td><td>BONK, PYTH, RAY, WIF</td><td>9-factor score &ge; 5 + HTF + ADX</td></tr>
+        </table>
+
+        <h3>API Endpoints</h3>
+        <table>
+            <tr><th>Method</th><th>Endpoint</th><th>Description</th></tr>
+            <tr><td>POST</td><td><code>/api/backtests/parse-summary</code></td><td>Parse pasted TV summary text into backtest fields</td></tr>
+            <tr><td>POST</td><td><code>/api/backtests/generate-indicator</code></td><td>Convert strategy Pine &rarr; webhook alert indicator</td></tr>
+            <tr><td>POST</td><td><code>/api/backtests/parameter-grid</code></td><td>Generate parameter sweep variants (max 100)</td></tr>
+            <tr><td>POST</td><td><code>/api/backtests/token-sweep</code></td><td>Duplicate strategy across tokens</td></tr>
+            <tr><td>GET</td><td><code>/api/backtests/compare</code></td><td>Cross-strategy comparison and rankings</td></tr>
+            <tr><td>GET</td><td><code>/api/backtests/templates</code></td><td>List available strategy templates</td></tr>
+            <tr><td>GET</td><td><code>/api/backtests/templates/{id}</code></td><td>Get full Pine code for a template</td></tr>
+        </table>
+
+        <h3>Service File</h3>
+        <table>
+            <tr><th>File</th><th>Purpose</th></tr>
+            <tr><td><code>app/services/strategy_builder.py</code></td><td>Paste parser, indicator generator, param grid, token sweep, comparison, templates</td></tr>
+        </table>
+    </div>
+
     <!-- Kalshi Prediction Markets -->
     <div class="card p-5" id="kalshi">
         <h2>🎰 Kalshi Prediction Markets</h2>
@@ -713,6 +782,7 @@ openssl rsa -in keys/kalshi_private.pem -pubout -out keys/kalshi_public.pem
             <tr><td>Portfolio Rebalancer</td><td>Current vs target allocations, drift %, preview/execute trades</td><td>60s</td></tr>
             <tr><td>Kalshi Markets</td><td>9 sections: Markets, Arb, Spread Bot, MM, Whales, Tech, AI, Sports, Esports</td><td>15-120s</td></tr>
             <tr><td>Backtest Tracker</td><td>Strategy comparison table &mdash; sortable, filterable, hideable</td><td>Manual</td></tr>
+            <tr><td>Strategy Lab</td><td>6 tools: Paste Import, Indicator Generator, Param Grid, Token Sweep, Compare, Templates</td><td>Manual</td></tr>
             <tr><td>Risk Settings</td><td>Live-editable risk parameters</td><td>Manual</td></tr>
         </table>
     </div>

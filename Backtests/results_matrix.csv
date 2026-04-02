@@ -1,0 +1,24 @@
+Strategy,Token,Timeframe,Net PnL %,Profit Factor,Total Trades,Win Rate %,Sharpe,Max Drawdown %,Avg PnL %
+EMA Momentum v1,SOL,4H,-12.47,0.931,429,45.22,-0.12,28.65,-0.17
+EMA Momentum v1,JTO,4H,-23.05,0.734,171,40.94,-0.583,28.14,-0.98
+EMA Momentum v1,WIF,4H,-20.36,0.753,151,43.71,-0.319,22.95,-0.96
+BB Squeeze Breakout v1,SOL,4H,9.15,1.23,114,52.63,-0.013,10.96,0.54
+BB Squeeze Breakout v1,JTO,4H,5.20,1.238,45,46.67,0.018,6.46,0.80
+BB Squeeze Breakout v1,WIF,4H,-1.31,0.953,45,37.78,-0.106,9.86,-0.13
+BB Squeeze Breakout v1,BONK,4H,28.42,2.14,54,55.56,0.405,5.98,3.17
+BB Squeeze Breakout v1,PYTH,4H,-3.98,0.81,37,32.43,-0.355,7.76,-0.69
+BB Squeeze Breakout v1,RAY,4H,9.20,1.249,76,47.37,-0.005,8.52,0.83
+BB Squeeze Breakout v1,ETH,4H,6.06,1.207,115,44.35,-0.084,4.52,0.35
+BB Squeeze Breakout v1,ORCA,4H,-2.14,0.815,21,28.57,-0.208,6.12,-0.63
+SuperTrend+MACD v1,SOL,4H,-9.05,0.881,134,24.63,-0.16,19.99,-0.41
+SuperTrend+MACD v1,BONK,4H,-0.16,0.995,52,28.85,-0.086,8.41,0.06
+RSI Divergence v1,SOL,4H,0.00,0,0,0,0,0,0
+RSI Divergence v1,BONK,4H,0.00,0,0,0,0,0,0
+BB Squeeze v2 Long-Only,SOL,4H,8.03,1.403,70,58.57,-0.046,5.33,0.76
+BB Squeeze v2 Long-Only,JTO,4H,8.97,1.844,31,51.61,0.145,4.28,1.89
+BB Squeeze v2 Long-Only,WIF,4H,-3.59,0.802,35,40.00,-0.227,8.32,-0.66
+BB Squeeze v2 Long-Only,BONK,4H,2.24,1.178,30,40.00,-0.069,5.03,0.53
+BB Squeeze v2 Long-Only,PYTH,4H,-1.51,0.834,17,35.29,-0.264,7.45,-0.55
+BB Squeeze v2 Long-Only,RAY,4H,12.17,1.489,54,51.85,0.038,6.63,1.48
+BB Squeeze v2 Long-Only,ETH,4H,3.68,1.246,68,47.06,-0.188,4.77,0.36
+BB Squeeze v2 Long-Only,ORCA,4H,-1.12,0.852,15,26.67,-0.179,4.88,-0.44

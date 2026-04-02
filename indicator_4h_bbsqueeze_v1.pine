@@ -1,0 +1,161 @@
+// =============================================================================
+// BB Squeeze Breakout v1.0 — 4H ALERT INDICATOR (Long + Short)
+//
+// Backtested: BONK +28.42% (PF 2.14), SOL +9.15% (PF 1.23)
+//
+// Entry:
+//   BB Squeeze detected (BB inside Keltner Channel)
+//   On squeeze release:
+//     LONG:  momentum up + price > EMA50 + volume spike
+//     SHORT: momentum down + price < EMA50 + volume spike
+//
+// Exit (handled by position monitor):
+//   TP 3.5x ATR / SL 1.5x ATR, trailing stop at 2.0/1.0x ATR
+//
+// SETUP:
+//   1. Open TradingView -> token/USDT -> 4H timeframe
+//   2. Pine Editor -> paste this -> Add to chart
+//   3. Set your webhook secret in indicator settings
+//   4. Create alert: Condition = this indicator -> "Any alert() function call"
+//   5. Webhook URL: https://your-bot-url/webhook
+//   6. Tokens: BONK, SOL
+// =============================================================================
+
+//@version=6
+indicator("BB Squeeze v1.0 — 4H Alerts", overlay=true, max_bars_back=500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+grp_wh = "Webhook"
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret", group=grp_wh)
+
+grp_bb = "Bollinger Bands"
+bb_len  = input.int(20,    "Length",     group=grp_bb)
+bb_mult = input.float(2.0, "Multiplier", group=grp_bb)
+
+grp_kc = "Keltner Channel"
+kc_len  = input.int(20,    "Length",     group=grp_kc)
+kc_mult = input.float(1.5, "Multiplier", group=grp_kc)
+
+grp_mom = "Momentum"
+mom_len = input.int(12, "Length", group=grp_mom)
+
+grp_vol = "Volume"
+vol_ma_len     = input.int(20,    "MA Length",        group=grp_vol)
+vol_spike_mult = input.float(1.3, "Spike Multiplier", group=grp_vol)
+
+grp_trend = "Trend Filter"
+ema_len = input.int(50, "EMA Length", group=grp_trend)
+
+grp_cool = "Cooldown"
+cooldown_bars = input.int(5, "Bars Between Signals", minval=0, maxval=20, group=grp_cool)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// Bollinger Bands
+bb_basis = ta.sma(close, bb_len)
+bb_dev   = bb_mult * ta.stdev(close, bb_len)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+
+// Keltner Channel
+kc_basis = ta.ema(close, kc_len)
+kc_atr   = ta.atr(kc_len)
+kc_upper = kc_basis + kc_mult * kc_atr
+kc_lower = kc_basis - kc_mult * kc_atr
+
+// Squeeze detection
+squeeze = bb_lower > kc_lower and bb_upper < kc_upper
+squeeze_release = not squeeze and squeeze[1]
+
+// Momentum direction
+mom    = close - ta.sma(close, mom_len)
+mom_up = mom > 0 and mom > mom[1]
+mom_dn = mom < 0 and mom < mom[1]
+
+// Volume
+vol_ma    = ta.sma(volume, vol_ma_len)
+vol_ratio = volume / vol_ma
+vol_spike = volume > vol_ma * vol_spike_mult
+
+// Trend
+ema_val   = ta.ema(close, ema_len)
+bull_trend = close > ema_val
+bear_trend = close < ema_val
+
+// ATR for position sizing info
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+
+// Cooldown
+var int bars_since_signal = 100
+bars_since_signal := bars_since_signal + 1
+cooldown_ok = bars_since_signal >= cooldown_bars
+
+// =============================================================================
+// SIGNALS
+// =============================================================================
+
+long_signal  = squeeze_release and mom_up and bull_trend and vol_spike and cooldown_ok and barstate.isconfirmed
+short_signal = squeeze_release and mom_dn and bear_trend and vol_spike and cooldown_ok and barstate.isconfirmed
+
+if long_signal or short_signal
+    bars_since_signal := 0
+
+// Confidence scoring
+long_conf = math.min(100, math.round(
+     (squeeze_release ? 25 : 0) +
+     (mom_up ? 20 : 0) +
+     (bull_trend ? 15 : 0) +
+     (vol_spike ? 15 : 0) +
+     (rsi_val < 60 ? 10 : 0) +
+     (vol_ratio > 2.0 ? 15 : 0)))
+
+short_conf = math.min(100, math.round(
+     (squeeze_release ? 25 : 0) +
+     (mom_dn ? 20 : 0) +
+     (bear_trend ? 15 : 0) +
+     (vol_spike ? 15 : 0) +
+     (rsi_val > 40 ? 10 : 0) +
+     (vol_ratio > 2.0 ? 15 : 0)))
+
+calc_lev(c) => c >= 85 ? 5 : c >= 70 ? 3 : c >= 55 ? 2 : 1
+
+// Position size — scale with confidence
+pos_size_pct = long_signal ? (long_conf >= 80 ? 50 : long_conf >= 60 ? 35 : 25) : short_signal ? (short_conf >= 80 ? 50 : short_conf >= 60 ? 35 : 25) : 25
+
+// =============================================================================
+// ALERT CONDITIONS
+// =============================================================================
+
+alertcondition(long_signal, "BUY Signal", "BUY")
+alertcondition(short_signal, "SELL Signal", "SELL")
+
+// =============================================================================
+// ALERT MESSAGES (webhook JSON)
+// =============================================================================
+
+if long_signal
+    alert('{"secret":"' + webhook_secret + '","signal_type":"BUY","symbol":"' + syminfo.ticker + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(long_conf) + ',"suggested_leverage":' + str.tostring(calc_lev(long_conf)) + ',"suggested_position_size_percent":' + str.tostring(pos_size_pct) + ',"bull_score":3,"bear_score":0' + ',"rsi":' + str.tostring(math.round(rsi_val, 2)) + ',"atr":' + str.tostring(atr_val) + ',"vol_ratio":' + str.tostring(math.round(vol_ratio, 2)) + ',"squeeze_release":1' + ',"momentum":' + str.tostring(math.round(mom, 6)) + ',"timeframe":"' + timeframe.period + '"}', alert.freq_once_per_bar_close)
+
+if short_signal
+    alert('{"secret":"' + webhook_secret + '","signal_type":"SELL","symbol":"' + syminfo.ticker + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(short_conf) + ',"suggested_leverage":' + str.tostring(calc_lev(short_conf)) + ',"suggested_position_size_percent":' + str.tostring(pos_size_pct) + ',"bull_score":0,"bear_score":3' + ',"rsi":' + str.tostring(math.round(rsi_val, 2)) + ',"atr":' + str.tostring(atr_val) + ',"vol_ratio":' + str.tostring(math.round(vol_ratio, 2)) + ',"squeeze_release":1' + ',"momentum":' + str.tostring(math.round(mom, 6)) + ',"timeframe":"' + timeframe.period + '"}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// VISUALS
+// =============================================================================
+
+p_bb_upper = plot(bb_upper, "BB Upper", color=color.new(color.blue, 60), linewidth=1)
+p_bb_lower = plot(bb_lower, "BB Lower", color=color.new(color.blue, 60), linewidth=1)
+plot(bb_basis, "BB Mid", color=color.new(color.orange, 40), linewidth=1)
+fill(p_bb_upper, p_bb_lower, color=color.new(color.blue, 92), title="BB Fill")
+plot(ema_val, "EMA50", color=color.new(color.yellow, 40), linewidth=2)
+
+bgcolor(squeeze ? color.new(color.yellow, 88) : na, title="Squeeze Active")
+
+plotshape(long_signal,  "BUY",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(short_signal, "SELL", shape.triangledown, location.abovebar, color.red,   size=size.normal)

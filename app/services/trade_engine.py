@@ -529,11 +529,13 @@ class TradeEngine:
         "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
         "PYTH": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
         "RAY": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+        "ETH": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+        "ORCA": "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
     }
 
     _TOKEN_DECIMALS = {
         "SOL": 9, "USDC": 6, "JTO": 9, "WIF": 6,
-        "BONK": 5, "PYTH": 6, "RAY": 6,
+        "BONK": 5, "PYTH": 6, "RAY": 6, "ETH": 8, "ORCA": 6,
     }
 
     def _resolve_token_mint(self, symbol: str) -> str:

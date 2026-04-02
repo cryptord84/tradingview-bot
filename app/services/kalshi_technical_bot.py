@@ -184,16 +184,16 @@ class KalshiTechnicalBot:
             return markets
 
         # Auto-select: high volume, mid-range price, enough history
-        all_markets = client.get_markets(status="open", limit=100)
+        all_markets = client.get_markets_full(status="open", limit=100)
         candidates = []
         for m in all_markets:
-            vol = m.get("volume", 0) or 0
-            yes_ask = m.get("yes_ask", 0) or 0
+            vol = int(float(m.get("volume_fp", "0") or "0"))
+            yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
             if vol < 100 or yes_ask < 15 or yes_ask > 85:
                 continue
             candidates.append(m)
 
-        candidates.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
+        candidates.sort(key=lambda m: int(float(m.get("volume_fp", "0") or "0")), reverse=True)
         return candidates[:self.max_markets_to_scan]
 
     # ── Analysis ──

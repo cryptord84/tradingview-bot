@@ -1,0 +1,80 @@
+//@version=5
+strategy("BB Squeeze v2 (Long-Only)", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=15, commission_value=0.1)
+
+// === BB Squeeze Breakout v2 — Long-Only Optimized ===
+// Improvements over v1:
+// - Long-only (shorts were dragging returns on most tokens)
+// - Added SMA200 trend filter
+// - Trailing stop for capturing bigger moves
+// - Relaxed volume threshold (1.2x vs 1.3x)
+
+// --- Bollinger Bands ---
+bbLen  = 20
+bbMult = 2.0
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+// --- Keltner Channel (squeeze detection) ---
+kcLen  = 20
+kcMult = 1.5
+kcBasis = ta.ema(close, kcLen)
+kcAtr   = ta.atr(kcLen)
+kcUpper = kcBasis + kcMult * kcAtr
+kcLower = kcBasis - kcMult * kcAtr
+
+squeeze = bbLower > kcLower and bbUpper < kcUpper
+squeezeRelease = not squeeze and squeeze[1]
+
+// --- Momentum direction ---
+momLen = 12
+mom    = close - ta.sma(close, momLen)
+momUp  = mom > 0 and mom > mom[1]
+
+// --- Volume ---
+volMA = ta.sma(volume, 20)
+volOk = volume > volMA * 1.2
+
+// --- Trend filters ---
+ema50  = ta.ema(close, 50)
+sma200 = ta.sma(close, 200)
+bullTrend = close > ema50
+aboveSma200 = close > sma200
+
+// --- ATR ---
+atrVal = ta.atr(14)
+
+// --- Cooldown ---
+var int lastBar = 0
+cooldownOk = bar_index - lastBar >= 4
+
+// --- Long Entry ---
+longCond = squeezeRelease and momUp and bullTrend and volOk and cooldownOk
+
+if longCond
+    strategy.entry("Long", strategy.long)
+    lastBar := bar_index
+
+// --- Exit with trailing stop ---
+slMult = 1.5
+tpMult = 4.0
+trailAct = 1.5
+trailOff = 1.0
+
+if strategy.position_size > 0
+    sl = strategy.position_avg_price - slMult * atrVal
+    tp = strategy.position_avg_price + tpMult * atrVal
+    trailPrice = strategy.position_avg_price + trailAct * atrVal
+    strategy.exit("XL", "Long", stop=sl, limit=tp, trail_price=trailPrice, trail_offset=math.round(trailOff * atrVal / syminfo.mintick))
+
+// EMA trend break exit
+if close < ema50 and strategy.position_size > 0
+    strategy.close("Long", comment="Trend Break")
+
+// --- Plots ---
+plot(bbUpper, "BB Upper", color.blue)
+plot(bbLower, "BB Lower", color.blue)
+plot(bbBasis, "BB Mid", color.gray)
+plot(ema50, "EMA50", color.orange)
+bgcolor(squeeze ? color.new(color.yellow, 85) : na)

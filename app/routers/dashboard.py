@@ -644,6 +644,130 @@ async def remove_backtest(backtest_id: int):
     return {"status": "ok"}
 
 
+# ── Strategy Builder Tools ────────────────────────────────────────
+
+@router.post("/backtests/parse-summary")
+async def parse_tv_summary(data: dict):
+    """Parse pasted TradingView Strategy Tester summary text into backtest fields."""
+    from app.services.strategy_builder import parse_tv_summary as parse_fn
+
+    text = data.get("text", "")
+    if not text or len(text) < 20:
+        raise HTTPException(status_code=400, detail="Paste the TradingView Strategy Tester summary text")
+
+    parsed = parse_fn(text)
+
+    # Merge with user-provided metadata
+    for field in ["strategy_name", "version", "timeframe", "symbol", "notes"]:
+        if data.get(field):
+            parsed[field] = data[field]
+
+    # Auto-save if requested and required fields present
+    saved_id = None
+    if data.get("auto_save") and all(parsed.get(f) for f in ["strategy_name", "version", "timeframe", "symbol"]):
+        parsed["created_at"] = parsed.get("created_at") or __import__("datetime").datetime.utcnow().isoformat()
+        parsed["status"] = "tested"
+        saved_id = insert_backtest(parsed)
+
+    return {"parsed": parsed, "saved_id": saved_id}
+
+
+@router.post("/backtests/generate-indicator")
+async def generate_indicator(data: dict):
+    """Generate a webhook alert indicator from a backtest strategy Pine script."""
+    from app.services.strategy_builder import generate_indicator as gen_fn
+
+    strategy_name = data.get("strategy_name", "Strategy")
+    version = data.get("version", "v1.0")
+    timeframe = data.get("timeframe", "4H")
+    pine_code = data.get("pine_code", "")
+    tokens = data.get("tokens", [])
+
+    if not pine_code or len(pine_code) < 50:
+        raise HTTPException(status_code=400, detail="Provide the backtest strategy Pine script code")
+
+    indicator_code = gen_fn(strategy_name, version, timeframe, pine_code, tokens)
+    return {"indicator_code": indicator_code, "strategy_name": strategy_name, "version": version}
+
+
+@router.post("/backtests/parameter-grid")
+async def parameter_grid(data: dict):
+    """Generate Pine script variants by sweeping parameter ranges."""
+    from app.services.strategy_builder import generate_parameter_grid
+
+    pine_code = data.get("pine_code", "")
+    param_ranges = data.get("param_ranges", {})
+    strategy_name = data.get("strategy_name", "Strategy")
+
+    if not pine_code or not param_ranges:
+        raise HTTPException(status_code=400, detail="Provide pine_code and param_ranges")
+
+    # Limit grid size to prevent abuse
+    import itertools
+    total_combos = 1
+    for spec in param_ranges.values():
+        if isinstance(spec, list):
+            total_combos *= len(spec)
+        elif isinstance(spec, dict):
+            count = int((spec["max"] - spec["min"]) / spec["step"]) + 1
+            total_combos *= count
+    if total_combos > 100:
+        raise HTTPException(status_code=400, detail=f"Grid too large ({total_combos} variants). Max 100.")
+
+    variants = generate_parameter_grid(pine_code, param_ranges, strategy_name)
+    return {"variants": [{"params": v["params"], "label": v["label"], "pine_code": v["pine_code"]} for v in variants], "total": len(variants)}
+
+
+@router.post("/backtests/token-sweep")
+async def token_sweep(data: dict):
+    """Generate a strategy variant for each specified token."""
+    from app.services.strategy_builder import generate_token_sweep
+
+    pine_code = data.get("pine_code", "")
+    tokens = data.get("tokens", [])
+    strategy_name = data.get("strategy_name", "Strategy")
+
+    if not pine_code or not tokens:
+        raise HTTPException(status_code=400, detail="Provide pine_code and tokens list")
+
+    variants = generate_token_sweep(pine_code, tokens, strategy_name)
+    return {"variants": variants, "total": len(variants)}
+
+
+@router.get("/backtests/compare")
+async def compare_strategies():
+    """Compare all backtests across strategies and tokens."""
+    from app.services.strategy_builder import compare_strategies
+
+    backtests = get_backtests(limit=500)
+    comparison = compare_strategies(backtests)
+    return comparison
+
+
+@router.get("/backtests/templates")
+async def list_templates():
+    """List available strategy templates."""
+    from app.services.strategy_builder import get_templates
+    return {"templates": get_templates()}
+
+
+@router.get("/backtests/templates/{template_id}")
+async def get_template(template_id: str):
+    """Get the full Pine code for a strategy template."""
+    from app.services.strategy_builder import get_template_code, TEMPLATES
+
+    if template_id not in TEMPLATES:
+        raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
+
+    meta = TEMPLATES[template_id]
+    return {
+        "id": template_id,
+        "name": meta["name"],
+        "description": meta["description"],
+        "pine_code": meta["pine_code"],
+    }
+
+
 def _parse_xlsx(filepath):
     """Parse a TradingView xlsx export into a backtest dict."""
     import re

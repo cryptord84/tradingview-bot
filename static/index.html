@@ -396,6 +396,10 @@ main {
 .card-positions { grid-column: 1 / -1; }
 .card-analytics { grid-column: 1 / -1; }
 .card-backtests { grid-column: 1 / -1; }
+.card-stratlab { grid-column: 1 / -1; }
+.stratlab-tab { background:transparent;border:none;color:var(--green-dark);font-family:var(--mono);font-size:.6rem;letter-spacing:1px;cursor:pointer;padding:2px 8px; }
+.stratlab-tab.active { color:var(--green);border-bottom:1px solid var(--green); }
+.stratlab-tab:hover { color:var(--green); }
 .card-kalshi { grid-column: 1 / -1; }
 .kalshi-stats-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px; }
 .kalshi-stat { background:rgba(0,20,0,0.5); border:1px solid var(--green-dark); border-radius:4px; padding:8px 10px; text-align:center; }
@@ -583,7 +587,7 @@ footer a:hover { color: var(--green); }
 .card-prices { grid-column: 1 / -1; }
 .price-ticker-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
 .price-tile {
@@ -622,7 +626,7 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-backtests,.card-kalshi,.card-settings,.card-costs,.card-prices { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-backtests,.card-stratlab,.card-kalshi,.card-settings,.card-costs,.card-prices { grid-column: 1; }
   .kalshi-stats-grid { grid-template-columns: repeat(3, 1fr); }
   .analytics-grid { grid-template-columns: repeat(2, 1fr); }
   .analytics-charts { grid-template-columns: 1fr; }
@@ -630,7 +634,7 @@ footer a:hover { color: var(--green); }
   .wallet-grid { grid-template-columns: 1fr 1px 1fr; }
   .status-grid { grid-template-columns: repeat(3,1fr); }
   .hero-title { font-size: 2.2rem; }
-  .price-ticker-grid { grid-template-columns: repeat(3, 1fr); }
+  .price-ticker-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
@@ -769,6 +773,8 @@ footer a:hover { color: var(--green); }
       <div class="price-tile" id="price-BONK"><div class="price-tile-symbol">BONK</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
       <div class="price-tile" id="price-PYTH"><div class="price-tile-symbol">PYTH</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
       <div class="price-tile" id="price-RAY"><div class="price-tile-symbol">RAY</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-ETH"><div class="price-tile-symbol">ETH</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
+      <div class="price-tile" id="price-ORCA"><div class="price-tile-symbol">ORCA</div><div class="price-tile-price">$--</div><div class="price-tile-change">--</div><div class="price-tile-range"></div></div>
     </div>
   </div>
 
@@ -837,7 +843,7 @@ footer a:hover { color: var(--green); }
       </table>
     </div>
     <div id="kalshi-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
-      Kalshi integration pending account approval. Configure API keys in config.yaml to connect.
+      Search markets above or browse active positions below. All bots auto-start on launch.
     </div>
     <div style="margin-top:12px;">
       <div class="section-title" style="font-size:.6rem;margin-bottom:6px;">Positions</div>
@@ -848,7 +854,7 @@ footer a:hover { color: var(--green); }
         <tbody id="kalshi-positions-tbody"></tbody>
       </table>
       <div id="kalshi-positions-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No positions yet.
+        No open positions. Bots will display trades here when contracts are held.
       </div>
     </div>
     <!-- Arbitrage Scanner -->
@@ -874,7 +880,7 @@ footer a:hover { color: var(--green); }
         <tbody id="arb-tbody"></tbody>
       </table>
       <div id="arb-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No arbitrage opportunities detected. Click SCAN NOW or START to begin scanning.
+        Scanning for YES+NO spread mispricing, bracket sum gaps, and crossed orderbooks.
       </div>
     </div>
     <!-- Spread Bot (Market Making) -->
@@ -902,7 +908,7 @@ footer a:hover { color: var(--green); }
         <tbody id="spread-markets-tbody"></tbody>
       </table>
       <div id="spread-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        Spread bot idle. Click START to begin market-making on auto-selected markets.
+        Auto-selects liquid markets and captures bid-ask spread. 1 contract/side, $3 max exposure.
       </div>
     </div>
     <!-- Whale Tracker -->
@@ -917,12 +923,12 @@ footer a:hover { color: var(--green); }
       </div>
       <table id="whale-table" style="display:none;">
         <thead><tr>
-          <th>Time</th><th>Market</th><th>Side</th><th>Qty</th><th>Price</th><th>Cost</th>
+          <th>Time</th><th>Category</th><th>Ticker</th><th>Side</th><th>Qty</th><th>Price</th><th>Cost</th>
         </tr></thead>
         <tbody id="whale-tbody"></tbody>
       </table>
       <div id="whale-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No whale trades detected yet.
+        Monitoring for trades 50+ contracts or $25+ cost across top markets.
       </div>
     </div>
     <!-- Technical Bot (MACD/CCI) -->
@@ -949,7 +955,7 @@ footer a:hover { color: var(--green); }
         <tbody id="tech-tbody"></tbody>
       </table>
       <div id="tech-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No technical signals yet. Click SCAN or START to analyze contract price charts.
+        Auto-trades on strong MACD cross + CCI extreme confluence. 1 contract, $1 max per trade.
       </div>
     </div>
     <!-- AI Agent Bot -->
@@ -976,7 +982,7 @@ footer a:hover { color: var(--green); }
         <tbody id="ai-tbody"></tbody>
       </table>
       <div id="ai-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No AI decisions yet. Click ANALYZE to run 3-agent analysis on top markets.
+        Analyst + Contrarian + Momentum agents must agree unanimously to auto-trade. Scans every 15m.
       </div>
     </div>
 
@@ -1015,7 +1021,7 @@ footer a:hover { color: var(--green); }
         <tbody id="sports-tbody"></tbody>
       </table>
       <div id="sports-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No sports markets found. Click SCAN to search across 7 leagues.
+        Tracks odds movement and value bets across MLB, NBA, NFL, NHL, Soccer, UFC, WNBA.
       </div>
     </div>
 
@@ -1052,7 +1058,7 @@ footer a:hover { color: var(--green); }
         <tbody id="esports-tbody"></tbody>
       </table>
       <div id="esports-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        No esports markets found. Click SCAN to search across 5 games.
+        Tracks CS2, DotA2, LoL, Valorant, Overwatch odds and flags value opportunities.
       </div>
     </div>
 
@@ -1081,7 +1087,7 @@ footer a:hover { color: var(--green); }
         <tbody id="mm-tbody"></tbody>
       </table>
       <div id="mm-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        Market maker idle. Click START to begin multi-strategy quoting.
+        Multi-strategy quoting (midpoint/VWAP/volatility). 1 contract/level, $3 max exposure, 3 markets.
       </div>
     </div>
   </div>
@@ -1141,8 +1147,9 @@ footer a:hover { color: var(--green); }
             <th>Type</th>
             <th>Symbol</th>
             <th>Action</th>
-            <th>Amount SOL</th>
-            <th>Price USD</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Total</th>
             <th>P&amp;L</th>
             <th>Confidence</th>
             <th>TX</th>
@@ -1166,7 +1173,7 @@ footer a:hover { color: var(--green); }
             <th>Timestamp</th>
             <th>Type</th>
             <th>Direction</th>
-            <th>Amount</th>
+            <th>Qty</th>
             <th>Token</th>
             <th>Fee (SOL)</th>
             <th>Status</th>
@@ -1369,6 +1376,115 @@ footer a:hover { color: var(--green); }
     </div>
     <div id="backtests-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
       No backtests recorded. Click IMPORT REPORTS to scan Exports/ directory.
+    </div>
+  </div>
+
+  <!-- STRATEGY LAB -->
+  <div class="card card-stratlab" data-label="// STRATEGY LAB">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Strategy Lab</span>
+      <div style="display:flex;gap:6px;" id="stratlab-tabs">
+        <button class="stratlab-tab active" onclick="switchStratTab('paste')">Paste Import</button>
+        <button class="stratlab-tab" onclick="switchStratTab('generate')">Generate Indicator</button>
+        <button class="stratlab-tab" onclick="switchStratTab('grid')">Param Grid</button>
+        <button class="stratlab-tab" onclick="switchStratTab('sweep')">Token Sweep</button>
+        <button class="stratlab-tab" onclick="switchStratTab('compare')">Compare</button>
+        <button class="stratlab-tab" onclick="switchStratTab('templates')">Templates</button>
+      </div>
+    </div>
+
+    <!-- TAB: Paste Import -->
+    <div id="stratlab-paste" class="stratlab-panel">
+      <div style="display:flex;gap:10px;margin-bottom:8px;">
+        <input type="text" id="paste-strategy" placeholder="Strategy Name" style="flex:1;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="paste-version" placeholder="Version (e.g. v1.3)" style="width:100px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="paste-tf" placeholder="TF (4H)" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="paste-symbol" placeholder="Symbol" style="width:100px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+      </div>
+      <textarea id="paste-text" placeholder="Paste TradingView Strategy Tester summary here...&#10;&#10;Example:&#10;Net Profit: $71.00 (+7.10%)&#10;Gross Profit: $650.00&#10;Gross Loss: -$579.00&#10;Profit Factor: 1.091&#10;Total Trades: 109&#10;Win Rate: 31.2%&#10;..." style="width:100%;height:120px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:8px;resize:vertical;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button onclick="parsePastedSummary(false)" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ PARSE ]</button>
+        <button onclick="parsePastedSummary(true)" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ PARSE & SAVE ]</button>
+      </div>
+      <div id="paste-result" style="margin-top:8px;font-family:var(--mono);font-size:.65rem;color:var(--green-dim);"></div>
+    </div>
+
+    <!-- TAB: Generate Indicator -->
+    <div id="stratlab-generate" class="stratlab-panel" style="display:none;">
+      <div style="display:flex;gap:10px;margin-bottom:8px;">
+        <input type="text" id="gen-strategy" placeholder="Strategy Name" style="flex:1;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="gen-version" placeholder="Version" style="width:100px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="gen-tf" placeholder="TF (4H)" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <input type="text" id="gen-tokens" placeholder="Tokens (SOL,JTO,WIF)" style="width:160px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+      </div>
+      <textarea id="gen-pine" placeholder="Paste your backtest strategy Pine script here..." style="width:100%;height:120px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:8px;resize:vertical;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button onclick="generateIndicator()" id="gen-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ GENERATE INDICATOR ]</button>
+        <button onclick="copyGenOutput()" id="gen-copy-btn" style="display:none;background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ COPY TO CLIPBOARD ]</button>
+      </div>
+      <div id="gen-result" style="margin-top:8px;">
+        <textarea id="gen-output" style="display:none;width:100%;height:200px;background:#0a0a0a;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.6rem;padding:8px;resize:vertical;box-sizing:border-box;" readonly></textarea>
+      </div>
+    </div>
+
+    <!-- TAB: Parameter Grid -->
+    <div id="stratlab-grid" class="stratlab-panel" style="display:none;">
+      <div style="margin-bottom:8px;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;">
+        Define parameter ranges to generate multiple Pine script variants for batch testing.
+      </div>
+      <div id="grid-params">
+        <div class="grid-param-row" style="display:flex;gap:8px;margin-bottom:6px;">
+          <input type="text" placeholder="Param name (e.g. min_confirm)" class="grid-pname" style="flex:1;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+          <input type="number" placeholder="Min" class="grid-pmin" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+          <input type="number" placeholder="Max" class="grid-pmax" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+          <input type="number" placeholder="Step" class="grid-pstep" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;" value="1">
+        </div>
+      </div>
+      <button onclick="addGridParam()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;cursor:pointer;margin-bottom:8px;">[ + ADD PARAMETER ]</button>
+      <textarea id="grid-pine" placeholder="Paste your backtest strategy Pine script here..." style="width:100%;height:100px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:8px;resize:vertical;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button onclick="generateGrid()" id="grid-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ GENERATE GRID ]</button>
+      </div>
+      <div id="grid-result" style="margin-top:8px;font-family:var(--mono);font-size:.65rem;color:var(--green-dim);"></div>
+    </div>
+
+    <!-- TAB: Token Sweep -->
+    <div id="stratlab-sweep" class="stratlab-panel" style="display:none;">
+      <div style="display:flex;gap:10px;margin-bottom:8px;">
+        <input type="text" id="sweep-strategy" placeholder="Strategy Name" style="flex:1;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+        <div style="display:flex;gap:4px;align-items:center;" id="sweep-tokens">
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="SOL" checked> SOL</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="JTO" checked> JTO</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="WIF" checked> WIF</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="BONK"> BONK</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="PYTH"> PYTH</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="RAY"> RAY</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="ETH"> ETH</label>
+          <label style="font-family:var(--mono);font-size:.6rem;color:var(--green-dim);"><input type="checkbox" value="ORCA"> ORCA</label>
+        </div>
+      </div>
+      <textarea id="sweep-pine" placeholder="Paste your strategy Pine script here..." style="width:100%;height:100px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:8px;resize:vertical;box-sizing:border-box;"></textarea>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button onclick="generateSweep()" id="sweep-btn" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ GENERATE VARIANTS ]</button>
+      </div>
+      <div id="sweep-result" style="margin-top:8px;font-family:var(--mono);font-size:.65rem;color:var(--green-dim);"></div>
+    </div>
+
+    <!-- TAB: Compare -->
+    <div id="stratlab-compare" class="stratlab-panel" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="font-family:var(--mono);font-size:.65rem;color:var(--green-dim);">Cross-strategy / cross-token performance comparison</span>
+        <button onclick="loadComparison()" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.65rem;padding:4px 12px;cursor:pointer;">[ REFRESH ]</button>
+      </div>
+      <div id="compare-result" style="font-family:var(--mono);font-size:.65rem;color:var(--green-dim);">Click REFRESH to load comparison data.</div>
+    </div>
+
+    <!-- TAB: Templates -->
+    <div id="stratlab-templates" class="stratlab-panel" style="display:none;">
+      <div style="margin-bottom:8px;font-family:var(--mono);font-size:.65rem;color:var(--green-dim);">
+        Pre-built strategy templates. Click USE to load Pine code into the generator.
+      </div>
+      <div id="templates-list" style="font-family:var(--mono);font-size:.65rem;color:var(--green-dim);">Loading...</div>
     </div>
   </div>
 
@@ -1961,8 +2077,15 @@ async function loadTrades() {
       actionCell.style.color = t.action === 'EXECUTE' ? 'var(--green)' : t.action === 'REJECT' ? 'var(--red)' : 'var(--yellow)';
       tr.appendChild(actionCell);
 
-      tr.appendChild(createCell((t.amount_sol || 0).toFixed(4)));
-      tr.appendChild(createCell(`$${(t.price_usd || 0).toFixed(2)}`));
+      const qty = t.amount_sol || 0;
+      const price = t.price_usd || 0;
+      const total = qty * price;
+      const sym = (t.symbol || '').replace('USDT','').replace('USD','');
+      tr.appendChild(createCell(`${qty.toFixed(qty < 1 ? 6 : 4)} ${sym}`));
+      tr.appendChild(createCell(`$${price < 0.01 ? price.toFixed(8) : price.toFixed(2)}`));
+      const totalCell = createCell(`$${total.toFixed(2)}`);
+      totalCell.style.fontWeight = '700';
+      tr.appendChild(totalCell);
 
       const pnl = t.pnl_usd || 0;
       const pnlCell = createCell(pnl !== null ? `${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}` : '--');
@@ -2011,7 +2134,9 @@ async function loadWalletTxLog() {
       dirCell.style.fontWeight = '700';
       tr.appendChild(dirCell);
 
-      tr.appendChild(createCell(tx.token === 'SOL' ? `${tx.amount.toFixed(4)}` : `$${tx.amount.toFixed(2)}`));
+      const amt = tx.amount || 0;
+      const amtStr = tx.token === 'USDC' ? `$${amt.toFixed(2)}` : amt < 1 ? amt.toFixed(6) : amt.toFixed(4);
+      tr.appendChild(createCell(`${amtStr} ${tx.token}`));
       tr.appendChild(createCell(tx.token));
 
       const fee = tx.fee_sol || 0;
@@ -2650,6 +2775,249 @@ async function importBacktests() {
   }
 }
 
+// ── STRATEGY LAB ──
+function switchStratTab(tab) {
+  document.querySelectorAll('.stratlab-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.stratlab-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('stratlab-' + tab).style.display = '';
+  event.target.classList.add('active');
+  if (tab === 'compare') loadComparison();
+  if (tab === 'templates') loadTemplates();
+}
+
+async function parsePastedSummary(autoSave) {
+  const text = document.getElementById('paste-text').value;
+  const body = {
+    text,
+    strategy_name: document.getElementById('paste-strategy').value,
+    version: document.getElementById('paste-version').value,
+    timeframe: document.getElementById('paste-tf').value,
+    symbol: document.getElementById('paste-symbol').value,
+    auto_save: autoSave,
+  };
+  const el = document.getElementById('paste-result');
+  try {
+    const r = await fetch(`${API}/api/backtests/parse-summary`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = `<span style="color:var(--red)">${d.detail}</span>`; return; }
+    const p = d.parsed;
+    let html = '<table style="width:100%">';
+    const fields = [
+      ['Profit Factor', p.profit_factor],['Net Profit', p.net_profit_usd ? '$'+p.net_profit_usd.toFixed(2) : '--'],
+      ['Net Profit %', p.net_profit_pct ? p.net_profit_pct.toFixed(1)+'%' : '--'],
+      ['Win Rate', p.win_rate ? p.win_rate.toFixed(1)+'%' : '--'],['Total Trades', p.total_trades],
+      ['Winners/Losers', (p.winning_trades||0)+'/'+(p.losing_trades||0)],
+      ['Avg Win/Loss', (p.avg_win ? '$'+p.avg_win.toFixed(2) : '--')+' / '+(p.avg_loss ? '$'+p.avg_loss.toFixed(2) : '--')],
+      ['R:R', p.win_loss_ratio ? p.win_loss_ratio.toFixed(3) : '--'],
+      ['Max Drawdown', p.max_drawdown ? '$'+p.max_drawdown.toFixed(2) : '--'],
+      ['Sharpe', p.sharpe_ratio ? p.sharpe_ratio.toFixed(3) : '--'],
+    ];
+    fields.forEach(([k,v]) => { html += `<tr><td style="color:var(--green-dark);padding:1px 8px 1px 0">${k}</td><td style="color:var(--green)">${v ?? '--'}</td></tr>`; });
+    html += '</table>';
+    if (d.saved_id) html += `<div style="color:var(--green);margin-top:6px;">Saved to database (ID: ${d.saved_id})</div>`;
+    el.innerHTML = html;
+    if (d.saved_id) loadBacktests();
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; }
+}
+
+async function generateIndicator() {
+  const btn = document.getElementById('gen-btn');
+  btn.textContent = '[ GENERATING... ]';
+  const body = {
+    strategy_name: document.getElementById('gen-strategy').value,
+    version: document.getElementById('gen-version').value,
+    timeframe: document.getElementById('gen-tf').value,
+    tokens: document.getElementById('gen-tokens').value.split(',').map(s=>s.trim()).filter(Boolean),
+    pine_code: document.getElementById('gen-pine').value,
+  };
+  try {
+    const r = await fetch(`${API}/api/backtests/generate-indicator`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { btn.textContent = '[ FAILED ]'; return; }
+    document.getElementById('gen-output').value = d.indicator_code;
+    document.getElementById('gen-output').style.display = '';
+    document.getElementById('gen-copy-btn').style.display = '';
+    btn.textContent = '[ GENERATE INDICATOR ]';
+  } catch(e) { btn.textContent = '[ ERROR ]'; setTimeout(()=>{ btn.textContent='[ GENERATE INDICATOR ]'; },2000); }
+}
+
+function copyGenOutput() {
+  const ta = document.getElementById('gen-output');
+  ta.select();
+  document.execCommand('copy');
+  const btn = document.getElementById('gen-copy-btn');
+  btn.textContent = '[ COPIED ]'; btn.style.color = 'var(--green)';
+  setTimeout(()=>{ btn.textContent = '[ COPY TO CLIPBOARD ]'; btn.style.color = 'var(--green-dim)'; }, 2000);
+}
+
+function addGridParam() {
+  const container = document.getElementById('grid-params');
+  const row = document.createElement('div');
+  row.className = 'grid-param-row';
+  row.style.cssText = 'display:flex;gap:8px;margin-bottom:6px;';
+  row.innerHTML = `<input type="text" placeholder="Param name" class="grid-pname" style="flex:1;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+    <input type="number" placeholder="Min" class="grid-pmin" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+    <input type="number" placeholder="Max" class="grid-pmax" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;">
+    <input type="number" placeholder="Step" class="grid-pstep" style="width:70px;background:#000;color:var(--green);border:1px solid var(--green-dark);font-family:var(--mono);font-size:.65rem;padding:4px 8px;" value="1">
+    <button onclick="this.parentElement.remove()" style="background:transparent;border:none;color:var(--red);font-family:var(--mono);font-size:.7rem;cursor:pointer;">\u2715</button>`;
+  container.appendChild(row);
+}
+
+async function generateGrid() {
+  const btn = document.getElementById('grid-btn');
+  btn.textContent = '[ GENERATING... ]';
+  const rows = document.querySelectorAll('.grid-param-row');
+  const param_ranges = {};
+  rows.forEach(row => {
+    const name = row.querySelector('.grid-pname').value.trim();
+    const min = parseFloat(row.querySelector('.grid-pmin').value);
+    const max = parseFloat(row.querySelector('.grid-pmax').value);
+    const step = parseFloat(row.querySelector('.grid-pstep').value) || 1;
+    if (name && !isNaN(min) && !isNaN(max)) param_ranges[name] = {min, max, step};
+  });
+  const body = { pine_code: document.getElementById('grid-pine').value, param_ranges, strategy_name: 'Grid Test' };
+  const el = document.getElementById('grid-result');
+  try {
+    const r = await fetch(`${API}/api/backtests/parameter-grid`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = `<span style="color:var(--red)">${d.detail}</span>`; btn.textContent = '[ GENERATE GRID ]'; return; }
+    _variantCodes = d.variants.map(v => v.pine_code);
+    let html = `<div style="color:var(--green);margin-bottom:8px;">${d.total} variants generated</div>`;
+    html += '<div style="max-height:300px;overflow-y:auto;">';
+    d.variants.forEach((v, i) => {
+      const params = Object.entries(v.params).map(([k,val])=>`${k}=${val}`).join(', ');
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #111;">
+        <span style="color:var(--green-dim)">#${i+1}: ${params}</span>
+        <button onclick="copyVariant(this, ${i})" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.55rem;padding:2px 8px;cursor:pointer;">COPY</button>
+      </div>`;
+    });
+    html += '</div>';
+    el.innerHTML = html;
+    btn.textContent = '[ GENERATE GRID ]';
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; btn.textContent = '[ GENERATE GRID ]'; }
+}
+
+let _variantCodes = [];
+function copyVariant(btn, idx) {
+  const code = _variantCodes[idx] || '';
+  navigator.clipboard.writeText(code).then(() => {
+    btn.textContent = 'COPIED'; btn.style.color = 'var(--green)';
+    setTimeout(()=>{ btn.textContent = 'COPY'; btn.style.color = 'var(--green-dim)'; }, 2000);
+  });
+}
+
+async function generateSweep() {
+  const btn = document.getElementById('sweep-btn');
+  btn.textContent = '[ GENERATING... ]';
+  const tokens = [...document.querySelectorAll('#sweep-tokens input:checked')].map(cb => cb.value);
+  const body = { pine_code: document.getElementById('sweep-pine').value, tokens, strategy_name: document.getElementById('sweep-strategy').value || 'Strategy' };
+  const el = document.getElementById('sweep-result');
+  try {
+    const r = await fetch(`${API}/api/backtests/token-sweep`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { el.innerHTML = `<span style="color:var(--red)">${d.detail}</span>`; btn.textContent = '[ GENERATE VARIANTS ]'; return; }
+    _variantCodes = d.variants.map(v => v.pine_code);
+    let html = `<div style="color:var(--green);margin-bottom:8px;">${d.total} token variants generated</div>`;
+    d.variants.forEach((v, i) => {
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #111;">
+        <span style="color:var(--green)">${v.token}</span>
+        <span style="color:var(--green-dim)">${v.pair} (${v.exchange})</span>
+        <button onclick="copyVariant(this, ${i})" style="background:transparent;border:1px solid var(--green-dark);color:var(--green-dim);font-family:var(--mono);font-size:.55rem;padding:2px 8px;cursor:pointer;">COPY</button>
+      </div>`;
+    });
+    el.innerHTML = html;
+    btn.textContent = '[ GENERATE VARIANTS ]';
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; btn.textContent = '[ GENERATE VARIANTS ]'; }
+}
+
+async function loadComparison() {
+  const el = document.getElementById('compare-result');
+  el.innerHTML = '<span style="color:var(--yellow)">Loading...</span>';
+  try {
+    const r = await fetch(`${API}/api/backtests/compare`);
+    const d = await r.json();
+    if (d.rankings.length === 0) { el.innerHTML = 'No backtests with enough trades to compare. Import or paste some results first.'; return; }
+
+    let html = '';
+
+    // Best combos
+    if (d.best_combos.length > 0) {
+      html += '<div style="color:var(--green);margin-bottom:6px;font-weight:700;">Deployable Strategies (PF >= 1.0, 20+ trades)</div>';
+      html += '<table style="width:100%;margin-bottom:16px;"><thead><tr><th style="text-align:left;color:var(--green-dark)">Strategy</th><th>Symbol</th><th>TF</th><th>PF</th><th>WR</th><th>Trades</th><th>P&L%</th></tr></thead><tbody>';
+      d.best_combos.forEach(r => {
+        const pfColor = r.pf >= 1.5 ? '#00ff41' : '#FFD700';
+        html += `<tr><td style="color:var(--green)">${r.strategy}</td><td>${r.symbol}</td><td>${r.timeframe}</td><td style="color:${pfColor};font-weight:700">${r.pf.toFixed(3)}</td><td>${(r.wr||0).toFixed(1)}%</td><td>${r.trades}</td><td style="color:${(r.pnl||0)>=0?'#00ff41':'#ff4444'}">${(r.pnl||0).toFixed(1)}%</td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+
+    // Strategy summaries
+    html += '<div style="color:var(--green);margin-bottom:6px;font-weight:700;">Strategy Averages</div>';
+    html += '<table style="width:100%;margin-bottom:16px;"><thead><tr><th style="text-align:left;color:var(--green-dark)">Strategy</th><th>Avg PF</th><th>Avg WR</th><th>Trades</th><th>Profitable</th></tr></thead><tbody>';
+    d.strategies.forEach(s => {
+      const pfColor = s.avg_pf >= 1.5 ? '#00ff41' : s.avg_pf >= 1.0 ? '#FFD700' : '#ff4444';
+      html += `<tr><td style="color:var(--green)">${s.strategy}</td><td style="color:${pfColor}">${s.avg_pf.toFixed(3)}</td><td>${s.avg_wr.toFixed(1)}%</td><td>${s.total_trades}</td><td>${s.profitable_tokens}/${s.total_tokens} tokens</td></tr>`;
+    });
+    html += '</tbody></table>';
+
+    // By token
+    if (Object.keys(d.by_token).length > 0) {
+      html += '<div style="color:var(--green);margin-bottom:6px;font-weight:700;">By Token</div>';
+      html += '<table style="width:100%;"><thead><tr><th style="text-align:left;color:var(--green-dark)">Token</th><th>Backtests</th><th>Avg PF</th><th>Best Strategy</th></tr></thead><tbody>';
+      Object.entries(d.by_token).forEach(([token, info]) => {
+        const pfColor = info.avg_pf >= 1.0 ? '#00ff41' : '#ff4444';
+        html += `<tr><td style="color:var(--green)">${token}</td><td>${info.count}</td><td style="color:${pfColor}">${info.avg_pf.toFixed(3)}</td><td style="color:var(--green-dim)">${info.best_strategy}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    }
+
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; }
+}
+
+async function loadTemplates() {
+  const el = document.getElementById('templates-list');
+  try {
+    const r = await fetch(`${API}/api/backtests/templates`);
+    const d = await r.json();
+    let html = '';
+    d.templates.forEach(t => {
+      html += `<div style="border:1px solid var(--green-dark);padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="color:var(--green);font-weight:700;">${t.name}</span>
+          <button onclick="useTemplate('${t.id}')" style="background:transparent;border:1px solid var(--green-dark);color:var(--green);font-family:var(--mono);font-size:.6rem;padding:2px 10px;cursor:pointer;">USE</button>
+        </div>
+        <div style="color:var(--green-dim);margin-top:4px;">${t.description}</div>
+        <div style="margin-top:6px;display:flex;gap:16px;">
+          <span>TF: ${t.timeframes.join(', ')}</span>
+          <span>Dir: ${t.direction}</span>
+          <span>Best: ${t.best_for.join(', ')}</span>
+        </div>
+        <div style="margin-top:4px;color:var(--green-dark);">Entry: ${t.entry}</div>
+        <div style="color:var(--green-dark);">Exit: ${t.exit}</div>
+      </div>`;
+    });
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = `<span style="color:var(--red)">Error: ${e.message}</span>`; }
+}
+
+async function useTemplate(templateId) {
+  try {
+    const r = await fetch(`${API}/api/backtests/templates/${templateId}`);
+    const d = await r.json();
+    // Switch to generate tab and fill in the code
+    switchStratTab('generate');
+    document.querySelectorAll('.stratlab-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.stratlab-tab')[1].classList.add('active');
+    document.getElementById('gen-strategy').value = d.name;
+    document.getElementById('gen-version').value = 'v1.0';
+    document.getElementById('gen-pine').value = d.pine_code;
+    // Also fill grid and sweep textareas
+    document.getElementById('grid-pine').value = d.pine_code;
+    document.getElementById('sweep-pine').value = d.pine_code;
+  } catch(e) { console.error('Template load error:', e); }
+}
+
 let scoutHiddenCount = 0;
 function hideScoutRow(btn) {
   const card = btn.closest('[data-scout-idx]');
@@ -2980,7 +3348,7 @@ async function searchKalshiMarkets() {
         <td style="color:var(--red)">${no !== '--' ? no + '¢' : '--'}</td>
         <td>${vol}</td>
         <td>${close}</td>
-        <td><span style="font-size:.55rem;color:var(--green-dim);cursor:pointer;" onclick="alert('Order placement coming soon. Configure API keys first.')">[ TRADE ]</span></td>
+        <td><a href="https://kalshi.com/markets/${m.ticker || ''}" target="_blank" style="font-size:.55rem;color:var(--green-dim);text-decoration:none;cursor:pointer;">[ VIEW ]</a></td>
       </tr>`;
     }).join('');
   } catch(e) {
@@ -3206,7 +3574,8 @@ async function loadWhales() {
     const s = d.status || {};
     const badge = document.getElementById('whale-status');
     const btn = document.getElementById('whale-toggle-btn');
-    badge.textContent = s.running ? 'TRACKING' : 'IDLE';
+    const scanInfo = s.total_whales_detected ? ` \u2022 ${s.total_whales_detected} detected \u2022 ${s.scan_count} scans` : '';
+    badge.textContent = s.running ? 'TRACKING' + scanInfo : 'IDLE';
     badge.style.color = s.running ? 'var(--green)' : 'var(--green-dim)';
     btn.textContent = s.running ? '[ STOP ]' : '[ START ]';
 
@@ -3216,18 +3585,65 @@ async function loadWhales() {
     const empty = document.getElementById('whale-empty');
     if (whales.length === 0) { table.style.display='none'; empty.style.display='block'; return; }
     table.style.display='table'; empty.style.display='none';
-    tbody.innerHTML = whales.slice(0,20).map(w => {
+    // Parse ticker into readable category name
+    function parseWhaleTicker(ticker) {
+      const p = (ticker || '').split('-')[0] || '';
+      if (p.startsWith('KXBTC')) return 'BTC Price';
+      if (p.startsWith('KXETH')) return 'ETH Price';
+      if (p.startsWith('KXMLB')) return 'MLB';
+      if (p.startsWith('KXNBA')) return 'NBA';
+      if (p.startsWith('KXNHL')) return 'NHL';
+      if (p.startsWith('KXNFL')) return 'NFL';
+      if (p.startsWith('KXWTA')) return 'WTA Tennis';
+      if (p.startsWith('KXATP')) return 'ATP Tennis';
+      if (p.startsWith('KXBBL')) return 'Basketball';
+      if (p.startsWith('KXCS2')) return 'CS2 Esports';
+      if (p.startsWith('KXLALIGA')) return 'La Liga';
+      if (p.startsWith('KXMVE')) return 'Multi-Event';
+      if (p.startsWith('KXPOLITICS')) return 'Politics';
+      if (p.startsWith('KXTRUMP')) return 'Trump Admin';
+      if (p.startsWith('KXCOPPER')) return 'Copper';
+      if (p.startsWith('KXBRENT')) return 'Brent Oil';
+      if (p.startsWith('KXHIGH')) return 'Daily High';
+      if (p.startsWith('KXPGA')) return 'PGA Golf';
+      return p.replace('KX','');
+    }
+    while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+    whales.slice(0,20).forEach(w => {
+      const tr = document.createElement('tr');
       const t = w.ts ? new Date(w.ts).toLocaleTimeString() : '--';
       const sideColor = w.side==='yes' ? 'var(--green)' : 'var(--red)';
-      return `<tr>
-        <td style="font-size:.6rem;">${t}</td>
-        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${w.title}">${(w.title||w.ticker).substring(0,35)}</td>
-        <td style="color:${sideColor}">${w.side.toUpperCase()}</td>
-        <td><b>${w.count}</b></td>
-        <td>${w.price_cents}¢</td>
-        <td style="color:var(--yellow)">$${w.cost_usd.toFixed(2)}</td>
-      </tr>`;
-    }).join('');
+      const category = parseWhaleTicker(w.ticker);
+      const costColor = w.cost_usd >= 100 ? 'var(--yellow)' : 'var(--green-dim)';
+      const cells = [
+        {text: t, style: 'font-size:.6rem;'},
+        {text: category, style: ''},
+        {text: w.ticker, style: 'max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.55rem;', link: 'https://kalshi.com/markets/'+encodeURIComponent(w.ticker)},
+        {text: w.side.toUpperCase(), style: 'color:'+sideColor+';font-weight:700;'},
+        {text: w.count.toLocaleString(), style: 'font-weight:700;'},
+        {text: w.price_cents+'\u00A2', style: ''},
+        {text: '$'+w.cost_usd.toFixed(2), style: 'color:'+costColor+';font-weight:700;'},
+      ];
+      cells.forEach(c => {
+        const td = document.createElement('td');
+        if (c.link) {
+          const a = document.createElement('a');
+          a.href = c.link;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.textContent = c.text;
+          a.style.cssText = 'color:var(--green-dim);text-decoration:none;';
+          a.addEventListener('mouseenter', function() { this.style.color='var(--green)'; });
+          a.addEventListener('mouseleave', function() { this.style.color='var(--green-dim)'; });
+          td.appendChild(a);
+        } else {
+          td.textContent = c.text;
+        }
+        td.setAttribute('style', c.style);
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
   } catch(e) { console.error('Whale load error:', e); }
 }
 
@@ -3748,17 +4164,17 @@ loadEsportsStatus();
 loadMMStatus();
 loadRebalancerStatus();
 
-setInterval(loadStats, 30000);
+setInterval(loadStats, 60000);
 setInterval(loadTrades, 60000);
-setInterval(loadWalletTxLog, 60000);
-setInterval(loadPositions, 30000);
-setInterval(loadAnalytics, 60000);
-setInterval(loadPrices, 5000);
-setInterval(loadPaperStatus, 30000);
-setInterval(loadSystemStatus, 20000);
+setInterval(loadWalletTxLog, 120000);
+setInterval(loadPositions, 60000);
+setInterval(loadAnalytics, 120000);
+setInterval(loadPrices, 10000);
+setInterval(loadPaperStatus, 60000);
+setInterval(loadSystemStatus, 60000);
 setInterval(loadKalshiStatus, 60000);
 setInterval(loadArbStatus, 60000);
-setInterval(loadSpreadStatus, 15000);
+setInterval(loadSpreadStatus, 60000);
 setInterval(loadWhales, 60000);
 setInterval(loadTechStatus, 60000);
 setInterval(loadAIStatus, 60000);

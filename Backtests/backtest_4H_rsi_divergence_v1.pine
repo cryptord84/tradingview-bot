@@ -1,0 +1,101 @@
+//@version=5
+strategy("RSI Divergence v1", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=15, commission_value=0.1)
+
+// === RSI Divergence + Trend Strategy ===
+// Detects bullish/bearish RSI divergence at key levels
+// Confirms with trend (EMA) and volume
+
+// --- RSI ---
+rsiLen = 14
+rsiVal = ta.rsi(close, rsiLen)
+
+// --- Pivot detection for divergence ---
+pivotLen = 5
+priceLow  = ta.pivotlow(low, pivotLen, pivotLen)
+priceHigh = ta.pivothigh(high, pivotLen, pivotLen)
+rsiLow    = ta.pivotlow(rsiVal, pivotLen, pivotLen)
+rsiHigh   = ta.pivothigh(rsiVal, pivotLen, pivotLen)
+
+// Track previous pivots
+var float prevPriceLow  = na
+var float prevRsiLow    = na
+var float prevPriceHigh = na
+var float prevRsiHigh   = na
+
+if not na(priceLow)
+    prevPriceLow  := priceLow[pivotLen]  // Store lookback-adjusted
+    prevRsiLow    := rsiLow[pivotLen]
+
+if not na(priceHigh)
+    prevPriceHigh := priceHigh[pivotLen]
+    prevRsiHigh   := rsiHigh[pivotLen]
+
+// Bullish divergence: price makes lower low, RSI makes higher low
+bullDiv = not na(priceLow) and not na(prevPriceLow) and
+          low[pivotLen] < prevPriceLow and
+          rsiVal[pivotLen] > prevRsiLow and
+          rsiVal[pivotLen] < 40
+
+// Bearish divergence: price makes higher high, RSI makes lower high
+bearDiv = not na(priceHigh) and not na(prevPriceHigh) and
+          high[pivotLen] > prevPriceHigh and
+          rsiVal[pivotLen] < prevRsiHigh and
+          rsiVal[pivotLen] > 60
+
+// --- Trend filter ---
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+sma200 = ta.sma(close, 200)
+aboveSma200 = close > sma200
+
+// --- Volume ---
+volMA = ta.sma(volume, 20)
+volOk = volume > volMA * 1.2
+
+// --- ATR ---
+atrVal = ta.atr(14)
+
+// --- Cooldown ---
+var int lastBar = 0
+cooldownOk = bar_index - lastBar >= 6
+
+// --- Entry ---
+// Bull div near support (below EMA21) with volume
+longCond = bullDiv and close < ema21 * 1.02 and volOk and cooldownOk
+
+// Bear div near resistance (above EMA21) with volume, only in downtrend
+shortCond = bearDiv and close > ema21 * 0.98 and not aboveSma200 and volOk and cooldownOk
+
+if longCond
+    strategy.entry("Long", strategy.long)
+    lastBar := bar_index
+
+if shortCond
+    strategy.entry("Short", strategy.short)
+    lastBar := bar_index
+
+// --- Exit ---
+slMult = 2.0
+tpMult = 4.0
+
+if strategy.position_size > 0
+    sl = strategy.position_avg_price - slMult * atrVal
+    tp = strategy.position_avg_price + tpMult * atrVal
+    strategy.exit("XL", "Long", stop=sl, limit=tp)
+
+if strategy.position_size < 0
+    sl = strategy.position_avg_price + slMult * atrVal
+    tp = strategy.position_avg_price - tpMult * atrVal
+    strategy.exit("XS", "Short", stop=sl, limit=tp)
+
+// EMA crossover exit
+if ta.crossunder(ema21, ema50) and strategy.position_size > 0
+    strategy.close("Long", comment="EMA Cross")
+if ta.crossover(ema21, ema50) and strategy.position_size < 0
+    strategy.close("Short", comment="EMA Cross")
+
+// --- Plots ---
+plot(ema21, "EMA21", color.orange)
+plot(ema50, "EMA50", color.red)
+plotshape(bullDiv, "Bull Div", shape.triangleup, location.belowbar, color.green, size=size.small)
+plotshape(bearDiv, "Bear Div", shape.triangledown, location.abovebar, color.red, size=size.small)

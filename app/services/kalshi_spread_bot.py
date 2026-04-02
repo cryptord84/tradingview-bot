@@ -234,13 +234,13 @@ class KalshiSpreadBot:
 
         Criteria: sufficient volume, reasonable spread, not closing soon.
         """
-        markets = client.get_markets(status="open", limit=100)
+        markets = client.get_markets_full(status="open", limit=100)
         candidates = []
 
         for m in markets:
-            yes_bid = m.get("yes_bid", 0) or 0
-            yes_ask = m.get("yes_ask", 0) or 0
-            volume = m.get("volume", 0) or 0
+            yes_bid = int(round(float(m.get("yes_bid_dollars", "0") or "0") * 100))
+            yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
+            volume = int(float(m.get("volume_fp", "0") or "0"))
 
             if yes_bid <= 0 or yes_ask <= 0:
                 continue
@@ -301,18 +301,24 @@ class KalshiSpreadBot:
             state.no_bid = no_levels[-1][0] if no_levels else 0
             state.no_ask = no_levels[0][0] if no_levels else 0
 
-        # Also get from market data for more reliable bid/ask
-        market = client.get_market(state.ticker)
-        state.yes_bid = market.get("yes_bid", state.yes_bid) or state.yes_bid
-        state.yes_ask = market.get("yes_ask", state.yes_ask) or state.yes_ask
-        state.no_bid = market.get("no_bid", state.no_bid) or state.no_bid
-        state.no_ask = market.get("no_ask", state.no_ask) or state.no_ask
+        # Also get from market data via direct API for reliable bid/ask
+        market = client.get_market_full(state.ticker)
+        yb = int(round(float(market.get("yes_bid_dollars", "0") or "0") * 100))
+        ya = int(round(float(market.get("yes_ask_dollars", "0") or "0") * 100))
+        nb = int(round(float(market.get("no_bid_dollars", "0") or "0") * 100))
+        na = int(round(float(market.get("no_ask_dollars", "0") or "0") * 100))
+        state.yes_bid = yb or state.yes_bid
+        state.yes_ask = ya or state.yes_ask
+        state.no_bid = nb or state.no_bid
+        state.no_ask = na or state.no_ask
 
         # Calculate fair value as midpoint
         if state.yes_bid > 0 and state.yes_ask > 0:
             state.mid_price = (state.yes_bid + state.yes_ask) / 2
-        elif market.get("last_price"):
-            state.mid_price = market["last_price"]
+        else:
+            lp = int(round(float(market.get("last_price_dollars", "0") or "0") * 100))
+            if lp:
+                state.mid_price = lp
 
         state.last_updated = datetime.utcnow().isoformat()
 

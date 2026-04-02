@@ -151,7 +151,7 @@ class KalshiEsportsScanner:
         new_value_bets = []
 
         try:
-            all_markets = client.get_markets(status="open", limit=200)
+            all_markets = client.get_markets_full(status="open", limit=200)
             game_counts = {game: 0 for game in ESPORTS_GAMES}
 
             for m in all_markets:
@@ -162,9 +162,9 @@ class KalshiEsportsScanner:
 
                 ticker = m.get("ticker", "")
                 event_ticker = m.get("event_ticker", "")
-                yes_price = m.get("yes_bid", 0) or m.get("last_price", 0) or 0
-                no_price = m.get("no_bid", 0) or (100 - yes_price if yes_price else 0)
-                volume = m.get("volume", 0) or 0
+                yes_price = int(round(float(m.get("yes_bid_dollars", "0") or m.get("last_price_dollars", "0") or "0") * 100))
+                no_price = int(round(float(m.get("no_bid_dollars", "0") or "0") * 100)) or (100 - yes_price if yes_price else 0)
+                volume = int(float(m.get("volume_fp", "0") or "0"))
                 close_time = m.get("close_time", "") or m.get("expiration_time", "")
 
                 game_counts[game] = game_counts.get(game, 0) + 1

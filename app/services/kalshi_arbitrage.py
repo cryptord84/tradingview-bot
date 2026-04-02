@@ -121,8 +121,8 @@ class KalshiArbitrageScanner:
         new_opps = []
 
         try:
-            # Fetch all open markets in one call
-            markets = client.get_markets(status="open", limit=200)
+            # Fetch all open markets with full pricing data (direct API)
+            markets = client.get_markets_full(status="open", limit=200)
             logger.info(f"Arbitrage scan #{self._scan_count}: checking {len(markets)} markets")
 
             # Strategy 1: Yes/No spread arbitrage
@@ -168,11 +168,12 @@ class KalshiArbitrageScanner:
         opportunities = []
 
         for m in markets:
-            yes_ask = m.get("yes_ask")
-            no_ask = m.get("no_ask")
+            # API returns dollar-denominated strings
+            yes_ask_str = m.get("yes_ask_dollars") or "0"
+            no_ask_str = m.get("no_ask_dollars") or "0"
+            yes_ask = int(round(float(yes_ask_str) * 100))
+            no_ask = int(round(float(no_ask_str) * 100))
 
-            if yes_ask is None or no_ask is None:
-                continue
             if yes_ask <= 0 or no_ask <= 0:
                 continue
 
@@ -182,9 +183,9 @@ class KalshiArbitrageScanner:
 
             if net_profit >= self.min_spread_cents:
                 # Check liquidity — how many contracts available at these prices
-                volume = m.get("volume", 0) or 0
+                volume = int(float(m.get("volume_fp", "0") or "0"))
                 # Conservative: assume we can get min(100, volume/10) contracts
-                max_contracts = min(100, max(1, volume // 10))
+                max_contracts = min(100, max(1, volume // 10)) if volume > 0 else 1
                 max_profit = net_profit * max_contracts
 
                 if max_profit >= self.min_profit_cents:
@@ -237,8 +238,9 @@ class KalshiArbitrageScanner:
             yes_asks = []
             valid = True
             for m in event_markets:
-                ask = m.get("yes_ask")
-                if ask is None or ask <= 0:
+                ask_str = m.get("yes_ask_dollars") or "0"
+                ask = int(round(float(ask_str) * 100))
+                if ask <= 0:
                     valid = False
                     break
                 yes_asks.append(ask)
@@ -253,20 +255,20 @@ class KalshiArbitrageScanner:
             net_profit = spread - self.fee_per_contract_cents
 
             if net_profit >= self.min_spread_cents:
-                min_volume = min(m.get("volume", 0) or 0 for m in event_markets)
-                max_contracts = min(50, max(1, min_volume // 10))
+                min_volume = min(int(float(m.get("volume_fp", "0") or "0")) for m in event_markets)
+                max_contracts = min(50, max(1, min_volume // 10)) if min_volume > 0 else 1
                 max_profit = net_profit * max_contracts
 
                 if max_profit >= self.min_profit_cents:
                     event_title = event_markets[0].get("event_ticker", event_ticker)
-                    # Try to get a nicer title
                     for m in event_markets:
                         if m.get("subtitle"):
                             event_title = m["subtitle"]
                             break
 
                     bracket_details = [
-                        {"ticker": m.get("ticker", ""), "title": m.get("title", ""), "yes_ask": m.get("yes_ask", 0)}
+                        {"ticker": m.get("ticker", ""), "title": m.get("title", ""),
+                         "yes_ask": int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))}
                         for m in event_markets
                     ]
 
@@ -302,31 +304,33 @@ class KalshiArbitrageScanner:
         opportunities = []
 
         # Only check high-volume markets (crossed books in illiquid markets are usually stale)
-        active_markets = [m for m in markets if (m.get("volume", 0) or 0) > 50]
+        active_markets = [m for m in markets if int(float(m.get("volume_fp", "0") or "0")) > 50]
 
         for m in active_markets:
-            yes_bid = m.get("yes_bid", 0) or 0
-            yes_ask = m.get("yes_ask", 0) or 0
-            no_bid = m.get("no_bid", 0) or 0
-            no_ask = m.get("no_ask", 0) or 0
+            yes_bid = int(round(float(m.get("yes_bid_dollars", "0") or "0") * 100))
+            yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
+            no_bid = int(round(float(m.get("no_bid_dollars", "0") or "0") * 100))
+            no_ask = int(round(float(m.get("no_ask_dollars", "0") or "0") * 100))
+            volume = int(float(m.get("volume_fp", "0") or "0"))
 
             # Crossed: yes_bid > yes_ask (can buy at ask, immediately sell at bid)
             if yes_bid > yes_ask > 0:
                 profit = yes_bid - yes_ask - self.fee_per_contract_cents
                 if profit >= self.min_spread_cents:
+                    max_c = min(50, max(1, volume // 20))
                     opp = ArbitrageOpportunity(
                         strategy="crossed_book",
                         market_ticker=m.get("ticker", ""),
                         title=m.get("title", ""),
                         spread_cents=yes_bid - yes_ask,
                         profit_per_contract_cents=profit,
-                        max_contracts=min(50, max(1, (m.get("volume", 0) or 0) // 20)),
-                        max_profit_cents=profit * min(50, max(1, (m.get("volume", 0) or 0) // 20)),
+                        max_contracts=max_c,
+                        max_profit_cents=profit * max_c,
                         details={
                             "type": "yes_crossed",
                             "yes_bid": yes_bid,
                             "yes_ask": yes_ask,
-                            "volume": m.get("volume", 0),
+                            "volume": volume,
                         },
                     )
                     opportunities.append(opp)
@@ -335,19 +339,20 @@ class KalshiArbitrageScanner:
             if no_bid > no_ask > 0:
                 profit = no_bid - no_ask - self.fee_per_contract_cents
                 if profit >= self.min_spread_cents:
+                    max_c = min(50, max(1, volume // 20))
                     opp = ArbitrageOpportunity(
                         strategy="crossed_book",
                         market_ticker=m.get("ticker", ""),
                         title=m.get("title", ""),
                         spread_cents=no_bid - no_ask,
                         profit_per_contract_cents=profit,
-                        max_contracts=min(50, max(1, (m.get("volume", 0) or 0) // 20)),
-                        max_profit_cents=profit * min(50, max(1, (m.get("volume", 0) or 0) // 20)),
+                        max_contracts=max_c,
+                        max_profit_cents=profit * max_c,
                         details={
                             "type": "no_crossed",
                             "no_bid": no_bid,
                             "no_ask": no_ask,
-                            "volume": m.get("volume", 0),
+                            "volume": volume,
                         },
                     )
                     opportunities.append(opp)

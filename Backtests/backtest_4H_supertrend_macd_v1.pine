@@ -1,0 +1,71 @@
+//@version=5
+strategy("SuperTrend+MACD v1", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=15, commission_value=0.1)
+
+// === SuperTrend + MACD Confluence Strategy ===
+// Trend direction via SuperTrend, timing via MACD crossover
+// Volume confirmation + RSI filter to avoid chasing
+
+// --- SuperTrend ---
+stFactor = 3.0
+stPeriod = 10
+[stLine, stDir] = ta.supertrend(stFactor, stPeriod)
+stBull = stDir < 0
+stBear = stDir > 0
+
+// --- MACD ---
+[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+macdBullX = ta.crossover(macdLine, signalLine)
+macdBearX = ta.crossunder(macdLine, signalLine)
+macdBullish = macdLine > signalLine
+macdBearish = macdLine < signalLine
+
+// --- RSI filter ---
+rsiVal = ta.rsi(close, 14)
+rsiOk_long  = rsiVal > 35 and rsiVal < 70
+rsiOk_short = rsiVal < 65 and rsiVal > 30
+
+// --- Volume ---
+volMA = ta.sma(volume, 20)
+volOk = volume > volMA * 1.2
+
+// --- ATR ---
+atrVal = ta.atr(14)
+
+// --- Cooldown ---
+var int lastBar = 0
+cooldownOk = bar_index - lastBar >= 4
+
+// --- Entry ---
+longCond  = stBull and macdBullX and rsiOk_long and volOk and cooldownOk
+shortCond = stBear and macdBearX and rsiOk_short and volOk and cooldownOk
+
+if longCond
+    strategy.entry("Long", strategy.long)
+    lastBar := bar_index
+
+if shortCond
+    strategy.entry("Short", strategy.short)
+    lastBar := bar_index
+
+// --- Exit ---
+slMult = 1.5
+tpMult = 4.0
+
+if strategy.position_size > 0
+    sl = strategy.position_avg_price - slMult * atrVal
+    tp = strategy.position_avg_price + tpMult * atrVal
+    strategy.exit("XL", "Long", stop=sl, limit=tp)
+
+if strategy.position_size < 0
+    sl = strategy.position_avg_price + slMult * atrVal
+    tp = strategy.position_avg_price - tpMult * atrVal
+    strategy.exit("XS", "Short", stop=sl, limit=tp)
+
+// SuperTrend flip exit
+if stBear and strategy.position_size > 0
+    strategy.close("Long", comment="ST Flip")
+if stBull and strategy.position_size < 0
+    strategy.close("Short", comment="ST Flip")
+
+// --- Plots ---
+plot(stLine, "SuperTrend", stBull ? color.green : color.red, linewidth=2)

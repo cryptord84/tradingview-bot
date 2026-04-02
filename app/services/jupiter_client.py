@@ -147,6 +147,8 @@ class JupiterClient:
         "JTO": "JTOUSDT",
         "WIF": "WIFUSDT",
         "BONK": "BONKUSDT",
+        "ETH": "ETHUSDT",
+        "ORCA": "ORCAUSDT",
     }
 
     # CoinGecko IDs as fallback
@@ -157,6 +159,8 @@ class JupiterClient:
         "BONK": "bonk",
         "PYTH": "pyth-network",
         "RAY": "raydium",
+        "ETH": "ethereum-wormhole",
+        "ORCA": "orca",
     }
 
     async def get_sol_price(self) -> float:

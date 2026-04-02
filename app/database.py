@@ -292,14 +292,17 @@ def get_stats() -> dict:
     ).fetchone()
 
     conn.close()
+    total = row["total_trades"] or 0
+    winning = row["winning_trades"] or 0
     return {
-        "total_trades": row["total_trades"] or 0,
-        "winning_trades": row["winning_trades"] or 0,
+        "total_trades": total,
+        "winning_trades": winning,
         "losing_trades": row["losing_trades"] or 0,
         "total_pnl_usd": row["total_pnl_usd"] or 0.0,
         "avg_trade_size_sol": row["avg_trade_size_sol"] or 0.0,
         "last_trade_time": row["last_trade_time"],
         "today_pnl_usd": today_row["today_pnl"] or 0.0,
+        "win_rate": round(winning / total * 100, 1) if total > 0 else 0.0,
     }
 
 

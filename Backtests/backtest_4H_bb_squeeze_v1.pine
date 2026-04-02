@@ -1,0 +1,84 @@
+//@version=5
+strategy("BB Squeeze Breakout v1", overlay=true, initial_capital=1000, default_qty_type=strategy.percent_of_equity, default_qty_value=15, commission_value=0.1)
+
+// === Bollinger Band Squeeze Breakout Strategy ===
+// Detects BB squeeze (low volatility), enters on breakout direction
+// Uses Keltner Channel inside BB as squeeze detection
+
+// --- Bollinger Bands ---
+bbLen  = 20
+bbMult = 2.0
+bbBasis = ta.sma(close, bbLen)
+bbDev   = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+bbWidth = (bbUpper - bbLower) / bbBasis
+
+// --- Keltner Channel (for squeeze detection) ---
+kcLen  = 20
+kcMult = 1.5
+kcBasis = ta.ema(close, kcLen)
+kcAtr   = ta.atr(kcLen)
+kcUpper = kcBasis + kcMult * kcAtr
+kcLower = kcBasis - kcMult * kcAtr
+
+// Squeeze = BB inside KC
+squeeze    = bbLower > kcLower and bbUpper < kcUpper
+wasSqueeze = ta.valuewhen(squeeze, 1, 0) == 1
+squeezeRelease = not squeeze and squeeze[1]
+
+// --- Momentum (for direction) ---
+momLen = 12
+mom    = close - ta.sma(close, momLen)
+momUp  = mom > 0 and mom > mom[1]
+momDn  = mom < 0 and mom < mom[1]
+
+// --- Volume ---
+volMA  = ta.sma(volume, 20)
+volOk  = volume > volMA * 1.3
+
+// --- ATR ---
+atrVal = ta.atr(14)
+
+// --- EMA trend filter ---
+ema50  = ta.ema(close, 50)
+bullTrend = close > ema50
+bearTrend = close < ema50
+
+// --- Cooldown ---
+var int lastBar = 0
+cooldownOk = bar_index - lastBar >= 5
+
+// --- Entry on squeeze release ---
+longCond  = squeezeRelease and momUp and bullTrend and volOk and cooldownOk
+shortCond = squeezeRelease and momDn and bearTrend and volOk and cooldownOk
+
+if longCond
+    strategy.entry("Long", strategy.long)
+    lastBar := bar_index
+
+if shortCond
+    strategy.entry("Short", strategy.short)
+    lastBar := bar_index
+
+// --- Exit ---
+slMult = 1.5
+tpMult = 3.5
+
+if strategy.position_size > 0
+    sl = strategy.position_avg_price - slMult * atrVal
+    tp = strategy.position_avg_price + tpMult * atrVal
+    trailPrice = strategy.position_avg_price + 2.0 * atrVal
+    strategy.exit("XL", "Long", stop=sl, limit=tp, trail_price=trailPrice, trail_offset=math.round(1.0 * atrVal / syminfo.mintick))
+
+if strategy.position_size < 0
+    sl = strategy.position_avg_price + slMult * atrVal
+    tp = strategy.position_avg_price - tpMult * atrVal
+    trailPrice = strategy.position_avg_price - 2.0 * atrVal
+    strategy.exit("XS", "Short", stop=sl, limit=tp, trail_price=trailPrice, trail_offset=math.round(1.0 * atrVal / syminfo.mintick))
+
+// --- Plots ---
+plot(bbUpper, "BB Upper", color.blue)
+plot(bbLower, "BB Lower", color.blue)
+plot(bbBasis, "BB Mid", color.gray)
+bgcolor(squeeze ? color.new(color.yellow, 85) : na)

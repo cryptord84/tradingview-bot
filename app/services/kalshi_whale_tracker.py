@@ -89,7 +89,7 @@ class KalshiWhaleTracker:
             await asyncio.sleep(self.scan_interval)
 
     async def scan(self) -> list[dict]:
-        """Scan active markets for whale trades."""
+        """Scan recent trades across all markets for whale activity."""
         from app.services.kalshi_client import get_kalshi_client
 
         client = get_kalshi_client()
@@ -101,54 +101,47 @@ class KalshiWhaleTracker:
         new_whales = []
 
         try:
-            # Get high-volume markets
-            markets = client.get_markets(status="open", limit=self.max_markets_to_scan)
-            markets.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
-            top_markets = markets[:self.max_markets_to_scan]
+            # Fetch recent trades across all markets (direct API for full data)
+            trades = client.get_recent_trades(limit=100)
 
-            for m in top_markets:
-                ticker = m.get("ticker", "")
-                title = m.get("title", ticker)
-
-                try:
-                    trades = client.get_market_trades(ticker, limit=20)
-                except Exception:
+            for t in trades:
+                trade_id = t.get("trade_id", "")
+                if not trade_id or trade_id in self._seen_trade_ids:
                     continue
 
-                for t in trades:
-                    trade_id = t.get("trade_id", "") or t.get("id", "")
-                    if not trade_id or trade_id in self._seen_trade_ids:
-                        continue
+                # API returns dollar-denominated strings
+                count = int(float(t.get("count_fp", "0") or "0"))
+                yes_price_dollars = float(t.get("yes_price_dollars", "0") or "0")
+                no_price_dollars = float(t.get("no_price_dollars", "0") or "0")
+                side = t.get("taker_side", "yes")
+                price_dollars = yes_price_dollars if side == "yes" else no_price_dollars
+                price_cents = int(round(price_dollars * 100))
+                cost_cents = count * price_cents
 
-                    count = t.get("count", 0) or 0
-                    price = t.get("yes_price", 0) or t.get("no_price", 0) or 0
-                    cost = count * price
-                    side = "yes" if t.get("yes_price") else "no"
+                is_whale = count >= self.min_count or cost_cents >= self.min_cost_cents
+                if is_whale:
+                    ticker = t.get("ticker", "")
+                    whale = WhaleTrade(
+                        ticker=ticker,
+                        title=ticker,
+                        side=side,
+                        count=count,
+                        price_cents=price_cents,
+                        cost_cents=cost_cents,
+                        trade_id=str(trade_id),
+                        ts=str(t.get("created_time", "")),
+                    )
+                    new_whales.append(whale)
+                    self._whales.insert(0, whale)
+                    logger.info(
+                        f"WHALE: {count}x {side.upper()} @{price_cents}c = ${cost_cents/100:.2f} on {ticker}"
+                    )
 
-                    is_whale = count >= self.min_count or cost >= self.min_cost_cents
-                    if is_whale:
-                        whale = WhaleTrade(
-                            ticker=ticker,
-                            title=title,
-                            side=side,
-                            count=count,
-                            price_cents=price,
-                            cost_cents=cost,
-                            trade_id=str(trade_id),
-                            ts=t.get("created_time", "") or t.get("ts", ""),
-                        )
-                        new_whales.append(whale)
-                        self._whales.insert(0, whale)
-                        logger.info(
-                            f"WHALE: {count}x {side.upper()} @{price}¢ = ${cost/100:.2f} on {ticker}"
-                        )
-
-                    self._seen_trade_ids.add(trade_id)
+                self._seen_trade_ids.add(trade_id)
 
             # Trim history
             if len(self._whales) > self.history_limit:
                 self._whales = self._whales[:self.history_limit]
-            # Trim seen IDs to prevent memory leak
             if len(self._seen_trade_ids) > 5000:
                 self._seen_trade_ids = set(list(self._seen_trade_ids)[-2000:])
 

@@ -4,8 +4,14 @@ Uses the official kalshi-python SDK (v2.1.4) with RSA key authentication.
 Supports both demo (sandbox) and production environments.
 """
 
+import base64
 import logging
+import time
 from typing import Optional
+
+import requests
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 from kalshi_python import (
     ApiClient,
@@ -23,7 +29,7 @@ logger = logging.getLogger("bot.kalshi")
 
 # API base URLs
 KALSHI_HOSTS = {
-    "demo": "https://api.demo.kalshi.co/trade-api/v2",
+    "demo": "https://demo-api.kalshi.co/trade-api/v2",
     "live": "https://api.elections.kalshi.com/trade-api/v2",
 }
 
@@ -37,9 +43,10 @@ class KalshiTradingClient:
         self.mode = cfg.get("mode", "demo")  # "demo" or "live"
         self.api_key_id = cfg.get("api_key_id", "")
         self.private_key_path = cfg.get("private_key_path", "")
-        self.max_cost_per_trade = cfg.get("max_cost_per_trade_cents", 500)  # $5 default
+        self.max_cost_per_trade = cfg.get("max_cost_per_trade_cents", 100)  # $1 default
+        self.max_total_exposure = cfg.get("max_total_exposure_cents", 500)  # $5 default
         self.max_open_positions = cfg.get("max_open_positions", 10)
-        self.default_count = cfg.get("default_contract_count", 10)
+        self.default_count = cfg.get("default_contract_count", 5)
 
         self._client: Optional[ApiClient] = None
         self._portfolio: Optional[PortfolioApi] = None
@@ -139,6 +146,58 @@ class KalshiTradingClient:
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("trades", [])
 
+    def _api_get(self, path: str) -> dict:
+        """Direct authenticated GET to the Kalshi API (bypasses SDK)."""
+        host = KALSHI_HOSTS.get(self.mode, KALSHI_HOSTS["demo"]).replace("/trade-api/v2", "")
+        full_path = "/trade-api/v2" + path
+
+        with open(self.private_key_path, "rb") as f:
+            private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+        ts = str(int(time.time() * 1000))
+        msg = (ts + "GET" + full_path).encode()
+        sig = private_key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
+
+        headers = {
+            "KALSHI-ACCESS-KEY": self.api_key_id,
+            "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
+            "KALSHI-ACCESS-TIMESTAMP": ts,
+        }
+        resp = requests.get(host + full_path, headers=headers, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_recent_trades(self, limit: int = 100, ticker: Optional[str] = None) -> list:
+        """Get recent trades with full data (count, price) via direct API.
+
+        The SDK strips count/price fields, so this bypasses it.
+        """
+        self._ensure_client()
+        path = f"/markets/trades?limit={limit}"
+        if ticker:
+            path += f"&ticker={ticker}"
+        data = self._api_get(path)
+        return data.get("trades", [])
+
+    def get_markets_full(self, status: str = "open", limit: int = 200,
+                         event_ticker: Optional[str] = None) -> list:
+        """Get markets with full pricing data via direct API.
+
+        The SDK strips yes_ask, no_ask, volume, and other pricing fields.
+        """
+        self._ensure_client()
+        path = f"/markets?status={status}&limit={limit}"
+        if event_ticker:
+            path += f"&event_ticker={event_ticker}"
+        data = self._api_get(path)
+        return data.get("markets", [])
+
+    def get_market_full(self, ticker: str) -> dict:
+        """Get a single market with full pricing data via direct API."""
+        self._ensure_client()
+        data = self._api_get(f"/markets/{ticker}")
+        return data.get("market", {})
+
     def get_candlesticks(
         self, ticker: str, period_interval: int = 60, limit: int = 100
     ) -> list:
@@ -210,13 +269,49 @@ class KalshiTradingClient:
         if expiration_ts:
             order_kwargs["expiration_ts"] = expiration_ts
 
-        # Safety check: max cost
+        # Safety checks
         price = yes_price if side == "yes" else no_price
-        if price and (price * count) > self.max_cost_per_trade:
+        order_cost = (price * count) if price else 0
+
+        # 1. Per-trade limit
+        if order_cost > self.max_cost_per_trade:
             raise ValueError(
-                f"Order cost ({price * count}c) exceeds max_cost_per_trade "
-                f"({self.max_cost_per_trade}c / ${self.max_cost_per_trade/100:.2f})"
+                f"Order cost ({order_cost}c / ${order_cost/100:.2f}) exceeds "
+                f"max_cost_per_trade ({self.max_cost_per_trade}c / ${self.max_cost_per_trade/100:.2f})"
             )
+
+        # 2. Balance check — ensure account has enough funds
+        if action == "buy" and order_cost > 0:
+            try:
+                balance = self.get_balance().get("balance", 0)
+                if order_cost > balance:
+                    raise ValueError(
+                        f"Insufficient balance: order costs {order_cost}c / ${order_cost/100:.2f} "
+                        f"but account only has {balance}c / ${balance/100:.2f}"
+                    )
+            except ValueError:
+                raise
+            except Exception as e:
+                logger.warning(f"Could not verify balance before order: {e}")
+
+        # 3. Total exposure check — cap total open risk
+        if action == "buy":
+            try:
+                positions = self.get_positions()
+                total_exposure = sum(
+                    abs(p.get("total_cost", 0) or 0) for p in positions
+                )
+                if (total_exposure + order_cost) > self.max_total_exposure:
+                    raise ValueError(
+                        f"Total exposure ({total_exposure + order_cost}c / "
+                        f"${(total_exposure + order_cost)/100:.2f}) would exceed "
+                        f"max_total_exposure ({self.max_total_exposure}c / "
+                        f"${self.max_total_exposure/100:.2f})"
+                    )
+            except ValueError:
+                raise
+            except Exception as e:
+                logger.warning(f"Could not verify exposure before order: {e}")
 
         order = CreateOrderRequest(**order_kwargs)
         logger.info(f"Placing Kalshi order: {action} {count}x {side} @ {price}c on {ticker}")
@@ -254,10 +349,13 @@ class KalshiTradingClient:
     # POSITIONS
     # =========================================================================
 
-    def get_positions(self, settlement_status: str = "unsettled") -> list:
-        """Get current positions. settlement_status: unsettled, settled, all."""
+    def get_positions(self, ticker: Optional[str] = None) -> list:
+        """Get current positions, optionally filtered by ticker."""
         self._ensure_client()
-        resp = self._portfolio.get_positions(settlement_status=settlement_status)
+        kwargs = {}
+        if ticker:
+            kwargs["ticker"] = ticker
+        resp = self._portfolio.get_positions(**kwargs)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("market_positions", [])
 

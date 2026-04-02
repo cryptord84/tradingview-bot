@@ -75,7 +75,7 @@ class PortfolioRebalancer:
             # SOL balance
             balances["SOL"] = await wallet.get_balance_sol()
 
-            # SPL token balances
+            # SPL token balances (stagger to avoid RPC 429s)
             for symbol in self.targets:
                 if symbol == "SOL":
                     continue
@@ -86,11 +86,20 @@ class PortfolioRebalancer:
                 except Exception as e:
                     logger.warning(f"Could not fetch {symbol} balance: {e}")
                     balances[symbol] = 0.0
+                await asyncio.sleep(0.3)
 
-            # Fetch prices for all tokens
+            # Fetch prices — use real-time feed first, fall back to Jupiter
+            from app.services.price_feed import get_price_feed
+            feed = get_price_feed()
             for symbol in self.targets:
                 try:
+                    if feed.is_running:
+                        pd = feed.get_price(symbol)
+                        if pd and pd.price > 0:
+                            prices[symbol] = pd.price
+                            continue
                     prices[symbol] = await jupiter.get_token_price(symbol)
+                    await asyncio.sleep(0.3)
                 except Exception as e:
                     logger.warning(f"Could not fetch {symbol} price: {e}")
                     prices[symbol] = 0.0

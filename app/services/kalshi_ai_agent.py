@@ -293,19 +293,28 @@ class KalshiAIAgentBot:
                     pass
             return markets
 
-        all_markets = client.get_markets(status="open", limit=50)
-        candidates = [
-            m for m in all_markets
-            if (m.get("volume", 0) or 0) >= 200
-            and 20 <= (m.get("yes_ask", 0) or 0) <= 80
-        ]
-        candidates.sort(key=lambda m: m.get("volume", 0) or 0, reverse=True)
+        all_markets = client.get_markets_full(status="open", limit=50)
+        candidates = []
+        for m in all_markets:
+            vol = int(float(m.get("volume_fp", "0") or "0"))
+            yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
+            if vol >= 200 and 20 <= yes_ask <= 80:
+                m["_volume"] = vol
+                m["_yes_ask"] = yes_ask
+                candidates.append(m)
+        candidates.sort(key=lambda m: m.get("_volume", 0), reverse=True)
         return candidates[:self.max_markets]
 
     async def _build_context(self, client, market: dict) -> str:
         """Build a rich context string for Claude to analyze."""
         ticker = market.get("ticker", "")
         title = market.get("title", "")
+
+        # Get full market data via direct API
+        try:
+            full_market = client.get_market_full(ticker)
+        except Exception:
+            full_market = market
 
         try:
             book = client.get_orderbook(ticker)
@@ -322,15 +331,21 @@ class KalshiAIAgentBot:
         except Exception:
             candles = []
 
+        yes_ask = int(round(float(full_market.get("yes_ask_dollars", "0") or "0") * 100))
+        no_ask = int(round(float(full_market.get("no_ask_dollars", "0") or "0") * 100))
+        yes_bid = int(round(float(full_market.get("yes_bid_dollars", "0") or "0") * 100))
+        no_bid = int(round(float(full_market.get("no_bid_dollars", "0") or "0") * 100))
+        volume = int(float(full_market.get("volume_fp", "0") or "0"))
+
         lines = [
             f"MARKET: {title}",
             f"Ticker: {ticker}",
-            f"Current YES price: {market.get('yes_ask', '?')}c",
-            f"Current NO price: {market.get('no_ask', '?')}c",
-            f"YES bid/ask: {market.get('yes_bid', '?')}/{market.get('yes_ask', '?')}",
-            f"NO bid/ask: {market.get('no_bid', '?')}/{market.get('no_ask', '?')}",
-            f"Volume: {market.get('volume', '?')}",
-            f"Close date: {market.get('close_time', 'unknown')}",
+            f"Current YES price: {yes_ask}c",
+            f"Current NO price: {no_ask}c",
+            f"YES bid/ask: {yes_bid}/{yes_ask}",
+            f"NO bid/ask: {no_bid}/{no_ask}",
+            f"Volume: {volume}",
+            f"Close date: {full_market.get('close_time', 'unknown')}",
         ]
 
         if book:
@@ -445,8 +460,8 @@ class KalshiAIAgentBot:
             side = "yes" if r["action"] == "BUY_YES" else "no"
 
             try:
-                market = client.get_market(ticker)
-                price = market.get(f"{side}_ask", 50)
+                market = client.get_market_full(ticker)
+                price = int(round(float(market.get(f"{side}_ask_dollars", "0") or "0") * 100)) or 50
                 cost = price * self.contracts_per_trade
 
                 if cost > self.max_cost_per_trade_cents:

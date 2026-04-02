@@ -39,17 +39,19 @@ class PriceData:
 BINANCE_TOKENS = {
     "SOL": "solusdt",
     "JTO": "jtousdt",
-    "WIF": "wifusdt",
     "BONK": "bonkusdt",
+    "ETH": "ethusdt",
+    "ORCA": "orcausdt",
 }
 
 # Reverse lookup: Binance uppercase symbol -> our token symbol
 _BINANCE_SYMBOL_MAP = {v.upper(): k for k, v in BINANCE_TOKENS.items()}
 
-# CoinGecko-only tokens (not on Binance.us)
+# CoinGecko-only tokens (not on Binance.us or delisted)
 COINGECKO_ONLY = {
     "PYTH": "pyth-network",
     "RAY": "raydium",
+    "WIF": "dogwifcoin",
 }
 
 
@@ -230,8 +232,13 @@ class PriceFeed:
         all_cg_ids = {
             "SOL": "solana", "JTO": "jito-governance-token",
             "WIF": "dogwifcoin", "BONK": "bonk",
+            "ETH": "ethereum", "ORCA": "orca",
         }
-        missing = [sym for sym, _ in all_cg_ids.items() if sym not in self._prices]
+        stale_threshold = time.time() - 120  # backfill if no update in 2 min
+        missing = [
+            sym for sym in all_cg_ids
+            if sym not in self._prices or self._prices[sym].updated_at < stale_threshold
+        ]
         if missing:
             ids_str = ",".join(all_cg_ids[s] for s in missing)
             try:

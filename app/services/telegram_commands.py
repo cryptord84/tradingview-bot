@@ -180,7 +180,7 @@ class TelegramCommandHandler:
             f"Active: <b>{'YES' if active else 'NO'}</b>\n"
             f"API Health: <b>{'OK' if api_ok else 'DOWN'}</b>\n"
             f"Uptime: <code>{uptime}</code>\n"
-            f"Strategy: 4H v1.3 + 1H v3.5 + Daily v2\n"
+            f"Strategy: 4H v1.3.2 + 1H v3.5.3 + Daily v2\n"
             f"Total Trades: {db_stats.get('total_trades', 0)}\n"
             f"Win Rate: {db_stats.get('win_rate', 0):.1f}%\n"
             f"Time: <code>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</code>"

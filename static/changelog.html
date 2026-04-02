@@ -202,10 +202,44 @@ footer a:hover { color: var(--green); }
 <div class="version-block">
   <div class="version-header">
     <div>
+      <span class="version-tag">v1.7 Strategy Lab</span>
+      <span class="version-date">&nbsp;&nbsp;2026-04-01</span>
+    </div>
+    <span class="version-status status-active">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Strategy Lab &mdash; 6-tool dashboard card for accelerating backtesting workflow</li>
+      <li><span class="change-type type-feature">feature</span> Paste Import &mdash; parse pasted TradingView Strategy Tester summary into structured backtest records</li>
+      <li><span class="change-type type-feature">feature</span> Generate Alert Indicator &mdash; auto-convert backtest Pine script to webhook alert indicator with deep dip override</li>
+      <li><span class="change-type type-feature">feature</span> Parameter Grid &mdash; generate Pine script variants by sweeping parameter ranges (max 100 combos)</li>
+      <li><span class="change-type type-feature">feature</span> Token Sweep &mdash; one-click duplication of strategy across SOL/JTO/WIF/BONK/PYTH/RAY</li>
+      <li><span class="change-type type-feature">feature</span> Strategy Comparison &mdash; cross-strategy/cross-token rankings with deployability scoring</li>
+      <li><span class="change-type type-feature">feature</span> Strategy Templates &mdash; pre-built Pine scripts (Mean Reversion, Momentum Breakout, Confluence Multi-Factor)</li>
+      <li><span class="change-type type-feature">feature</span> Deep Dip Override (4H v1.3.2) &mdash; captures extreme dips below BB with relaxed confirmations (2x ATR depth)</li>
+      <li><span class="change-type type-feature">feature</span> Deep Dip Override (1H v3.5.3) &mdash; same for 1H Confluence with conservative 2.5x ATR threshold</li>
+      <li><span class="change-type type-fix">fix</span> Trade engine &mdash; USDC as base currency, Kamino balance included in purchasing power</li>
+      <li><span class="change-type type-fix">fix</span> Position monitor &mdash; per-token price lookup instead of hardcoded SOL price</li>
+      <li><span class="change-type type-fix">fix</span> Kamino balance &mdash; module-level cache (2min TTL) + retry + last-known-value fallback</li>
+      <li><span class="change-type type-infra">infra</span> New service: <code>app/services/strategy_builder.py</code> &mdash; all strategy lab backend logic</li>
+      <li><span class="change-type type-infra">infra</span> 7 new API endpoints under <code>/api/backtests/</code></li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">New Tools: </span><span class="metric-value good">6</span></div>
+      <div class="metric"><span class="metric-label">New Endpoints: </span><span class="metric-value">7</span></div>
+      <div class="metric"><span class="metric-label">Templates: </span><span class="metric-value">3</span></div>
+      <div class="metric"><span class="metric-label">Bug Fixes: </span><span class="metric-value good">3</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
       <span class="version-tag">v1.6 Trading Infrastructure</span>
       <span class="version-date">&nbsp;&nbsp;2026-03-31</span>
     </div>
-    <span class="version-status status-active">LIVE</span>
+    <span class="version-status status-superseded">SUPERSEDED</span>
   </div>
   <div class="version-body">
     <ul>

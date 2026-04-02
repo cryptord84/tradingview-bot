@@ -350,13 +350,13 @@ class KalshiMarketMaker:
 
     async def _select_markets(self, client) -> list[str]:
         """Score and select the best markets for market-making."""
-        markets = client.get_markets(status="open", limit=200)
+        markets = client.get_markets_full(status="open", limit=200)
         scored = []
 
         for m in markets:
-            yes_bid = m.get("yes_bid", 0) or 0
-            yes_ask = m.get("yes_ask", 0) or 0
-            volume = m.get("volume", 0) or 0
+            yes_bid = int(round(float(m.get("yes_bid_dollars", "0") or "0") * 100))
+            yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
+            volume = int(float(m.get("volume_fp", "0") or "0"))
 
             if yes_bid <= 0 or yes_ask <= 0:
                 continue
@@ -418,13 +418,13 @@ class KalshiMarketMaker:
 
     async def _update_state(self, client, state: MMMarketState):
         """Fetch orderbook, recent trades, and compute derived metrics."""
-        # Market data
-        market = client.get_market(state.ticker)
-        state.yes_bid = market.get("yes_bid", 0) or 0
-        state.yes_ask = market.get("yes_ask", 0) or 0
-        state.no_bid = market.get("no_bid", 0) or 0
-        state.no_ask = market.get("no_ask", 0) or 0
-        state.volume_24h = market.get("volume", 0) or 0
+        # Market data — use direct API for full pricing
+        market = client.get_market_full(state.ticker)
+        state.yes_bid = int(round(float(market.get("yes_bid_dollars", "0") or "0") * 100))
+        state.yes_ask = int(round(float(market.get("yes_ask_dollars", "0") or "0") * 100))
+        state.no_bid = int(round(float(market.get("no_bid_dollars", "0") or "0") * 100))
+        state.no_ask = int(round(float(market.get("no_ask_dollars", "0") or "0") * 100))
+        state.volume_24h = int(float(market.get("volume_fp", "0") or "0"))
 
         if state.yes_bid > 0 and state.yes_ask > 0:
             state.spread = state.yes_ask - state.yes_bid
