@@ -109,6 +109,13 @@ async def lifespan(app: FastAPI):
     if pos_monitor.enabled:
         pos_monitor_task = pos_monitor.start()
 
+    # Start Kalshi WebSocket feed (real-time orderbook + trades)
+    from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+    kalshi_ws = get_kalshi_ws_feed()
+    if kalshi_ws.enabled:
+        kalshi_ws.start()
+        logger.info("Kalshi WebSocket feed started")
+
     # Start Kalshi arbitrage scanner
     from app.services.kalshi_arbitrage import get_arbitrage_scanner
     arb_scanner = get_arbitrage_scanner()
@@ -165,6 +172,16 @@ async def lifespan(app: FastAPI):
         ai_bot.start()
         logger.info("Kalshi AI agent bot started")
 
+    # Start Kalshi risk manager (global circuit breaker)
+    from app.services.kalshi_risk_manager import get_risk_manager
+    risk_manager = get_risk_manager()
+    if risk_manager.enabled:
+        risk_manager.start()
+        logger.info(
+            f"Kalshi risk manager started: max daily loss "
+            f"${risk_manager.max_daily_loss_cents/100:.2f}"
+        )
+
     # Start portfolio rebalancer (auto-rebalance mode)
     from app.services.portfolio_rebalancer import get_rebalancer
     rebalancer = get_rebalancer()
@@ -211,6 +228,8 @@ async def lifespan(app: FastAPI):
     await ngrok.stop()
     if pos_monitor.enabled:
         await pos_monitor.stop()
+    if kalshi_ws.enabled:
+        await kalshi_ws.stop()
     if arb_scanner.enabled:
         arb_scanner.stop()
     if spread_bot.enabled:
@@ -227,6 +246,8 @@ async def lifespan(app: FastAPI):
         esports_scanner.stop()
     if ai_bot.enabled:
         ai_bot.stop()
+    if risk_manager.enabled:
+        await risk_manager.stop()
     if rebalancer.enabled and rebalancer.auto_rebalance:
         await rebalancer.stop()
 
@@ -291,4 +312,64 @@ async def changelog():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    """Detailed health check with per-service status."""
+    services = {}
+
+    try:
+        from app.services.price_feed import get_price_feed
+        pf = get_price_feed()
+        services["price_feed"] = {"running": pf._running, "connected": pf._ws_connected if hasattr(pf, '_ws_connected') else pf._running}
+    except Exception:
+        services["price_feed"] = {"running": False}
+
+    try:
+        from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+        ws = get_kalshi_ws_feed()
+        services["kalshi_ws"] = {"running": ws._running, "connected": ws._connected, "subscriptions": len(ws._subscribed_tickers)}
+    except Exception:
+        services["kalshi_ws"] = {"running": False}
+
+    try:
+        from app.services.kalshi_risk_manager import get_risk_manager
+        rm = get_risk_manager()
+        services["circuit_breaker"] = {"running": rm._running, "tripped": rm._tripped}
+    except Exception:
+        services["circuit_breaker"] = {"running": False}
+
+    bot_checks = [
+        ("market_maker", "app.services.kalshi_market_maker", "get_market_maker"),
+        ("spread_bot", "app.services.kalshi_spread_bot", "get_spread_bot"),
+        ("technical_bot", "app.services.kalshi_technical_bot", "get_technical_bot"),
+        ("ai_agent", "app.services.kalshi_ai_agent", "get_ai_agent_bot"),
+        ("arb_scanner", "app.services.kalshi_arbitrage", "get_arbitrage_scanner"),
+        ("whale_tracker", "app.services.kalshi_whale_tracker", "get_whale_tracker"),
+        ("sports_scanner", "app.services.kalshi_sports_scanner", "get_sports_scanner"),
+        ("esports_scanner", "app.services.kalshi_esports_scanner", "get_esports_scanner"),
+    ]
+    for name, module_path, getter_name in bot_checks:
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            bot = getattr(mod, getter_name)()
+            services[name] = {"running": bot._running, "enabled": bot.enabled}
+        except Exception:
+            services[name] = {"running": False, "enabled": False}
+
+    try:
+        from app.services.ngrok_monitor import get_ngrok_monitor
+        ng = get_ngrok_monitor()
+        services["ngrok"] = {"online": ng.current_url is not None, "url": ng.current_url}
+    except Exception:
+        services["ngrok"] = {"online": False}
+
+    all_ok = all(
+        s.get("running", s.get("online", False))
+        for name, s in services.items()
+        if s.get("enabled", True)  # only check enabled services
+    )
+
+    return {
+        "status": "healthy" if all_ok else "degraded",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": services,
+    }

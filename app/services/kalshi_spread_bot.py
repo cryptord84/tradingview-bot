@@ -185,19 +185,29 @@ class KalshiSpreadBot:
 
     async def _cycle(self):
         """Single market-making cycle: update state, requote, manage inventory."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         # 1. Select target markets
         tickers = self.target_tickers
         if not tickers:
             tickers = await self._auto_select_markets(client)
 
+        # Auto-subscribe WS feed to selected markets
+        try:
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            if ws.enabled:
+                for t in tickers:
+                    await ws.subscribe(t)
+        except Exception:
+            pass
+
         # 2. Update state and requote each market
         for ticker in tickers:
             try:
                 if ticker not in self._markets:
-                    market = client.get_market(ticker)
+                    market = await client.get_market(ticker)
                     self._markets[ticker] = MarketState(
                         ticker=ticker,
                         title=market.get("title", ticker),
@@ -229,12 +239,25 @@ class KalshiSpreadBot:
     # MARKET SELECTION
     # =========================================================================
 
+    # Categories with low maker edge (research: jbecker.dev/prediction-market-microstructure)
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi", "inflation",
+                         "treasury", "earnings"]
+    # Categories with high maker edge (behavioral bias drives taker losses)
+    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy", "super bowl", "world series",
+                          "playoff", "championship", "election", "trump", "biden",
+                          "war", "conflict", "weather", "hurricane"]
+
     async def _auto_select_markets(self, client) -> list[str]:
         """Auto-select the best markets for spread-capturing.
 
-        Criteria: sufficient volume, reasonable spread, not closing soon.
+        Research-informed scoring:
+        - Avoid 40-60¢ mid range (near-zero maker edge)
+        - Prefer tail prices (5-20¢, 80-95¢) where longshot bias is strongest
+        - Prefer high-bias categories (sports, entertainment, politics)
+        - Avoid finance/economics (nearly efficient, 0.17pp gap)
         """
-        markets = client.get_markets_full(status="open", limit=100)
+        markets = await client.get_markets_full(status="open", limit=100)
         candidates = []
 
         for m in markets:
@@ -244,27 +267,47 @@ class KalshiSpreadBot:
 
             if yes_bid <= 0 or yes_ask <= 0:
                 continue
-            if volume < 50:  # Need minimum liquidity
+            if volume < 25:  # Raised — thin markets hurt makers
                 continue
 
             spread = yes_ask - yes_bid
             if spread < self.min_spread_cents:
                 continue  # Too tight, no room to make money
-            if spread > 30:
+            if spread > 40:
                 continue  # Too wide, likely illiquid/stale
 
-            # Prefer markets with mid-price between 20-80 (more two-sided action)
             mid = (yes_bid + yes_ask) / 2
-            if mid < 15 or mid > 85:
+            if mid < 5 or mid > 95:
+                continue  # Extreme illiquid tails
+
+            # Skip dead zone — near-zero edge at 40-60¢
+            if 40 <= mid <= 60:
                 continue
+
+            # Category filtering
+            title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
+            if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
+                continue  # Skip near-efficient finance markets
+
+            # Category bonus for high-bias markets
+            category_bonus = 0.0
+            if any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
+                category_bonus = 0.2
+
+            # Tail preference: best edge at 5-20¢ and 80-95¢
+            tail_distance = abs(mid - 50) / 50
+            volume_score = min(volume, 5000) / 5000
+            spread_score = min(spread, 15) / 15
+
+            score = (volume_score * 0.4 + spread_score * 0.2 +
+                     tail_distance * 0.3 + category_bonus + 0.1)
 
             candidates.append({
                 "ticker": m.get("ticker", ""),
                 "spread": spread,
                 "volume": volume,
                 "mid": mid,
-                # Score: prefer tight spreads with high volume
-                "score": volume / max(spread, 1),
+                "score": score,
             })
 
         # Sort by score descending, take top 3
@@ -284,8 +327,32 @@ class KalshiSpreadBot:
     # =========================================================================
 
     async def _update_market_state(self, client, state: MarketState):
-        """Fetch latest orderbook and update market state."""
-        book = client.get_orderbook(state.ticker)
+        """Fetch latest orderbook and update market state.
+
+        Tries WebSocket live orderbook first; falls back to REST API.
+        """
+        ws_used = False
+        try:
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            live_book = ws.get_orderbook(state.ticker)
+            if live_book and live_book.last_updated:
+                state.yes_bid = live_book.best_yes_bid()
+                state.yes_ask = live_book.best_yes_ask()
+                state.no_bid = 100 - state.yes_ask if state.yes_ask > 0 else 0
+                state.no_ask = 100 - state.yes_bid if state.yes_bid > 0 else 0
+                if state.yes_bid > 0 and state.yes_ask > 0:
+                    state.mid_price = (state.yes_bid + state.yes_ask) / 2
+                state.last_updated = datetime.utcnow().isoformat()
+                ws_used = True
+        except Exception:
+            pass
+
+        if ws_used:
+            return
+
+        # Fallback: REST API
+        book = await client.get_orderbook(state.ticker)
 
         # Kalshi orderbook format: {yes: [[price, quantity], ...], no: [[price, quantity], ...]}
         yes_levels = book.get("yes", [])
@@ -302,7 +369,7 @@ class KalshiSpreadBot:
             state.no_ask = no_levels[0][0] if no_levels else 0
 
         # Also get from market data via direct API for reliable bid/ask
-        market = client.get_market_full(state.ticker)
+        market = await client.get_market_full(state.ticker)
         yb = int(round(float(market.get("yes_bid_dollars", "0") or "0") * 100))
         ya = int(round(float(market.get("yes_ask_dollars", "0") or "0") * 100))
         nb = int(round(float(market.get("no_bid_dollars", "0") or "0") * 100))
@@ -327,7 +394,7 @@ class KalshiSpreadBot:
         if not state.yes_order_id and not state.no_order_id:
             return
 
-        open_orders = client.get_open_orders()
+        open_orders = await client.get_open_orders()
         open_ids = {o.get("order_id") for o in open_orders}
 
         # If YES order is gone, it was filled
@@ -432,14 +499,14 @@ class KalshiSpreadBot:
         if yes_stale and yes_ok:
             if state.yes_order_id:
                 try:
-                    client.cancel_order(state.yes_order_id)
+                    await client.cancel_order(state.yes_order_id)
                 except Exception:
                     pass
                 state.yes_order_id = None
 
             try:
                 client_id = f"sb-y-{state.ticker[:10]}-{uuid.uuid4().hex[:8]}"
-                result = client.place_order(
+                result = await client.place_order(
                     ticker=state.ticker,
                     side="yes",
                     action="buy",
@@ -457,14 +524,14 @@ class KalshiSpreadBot:
         if no_stale and no_ok:
             if state.no_order_id:
                 try:
-                    client.cancel_order(state.no_order_id)
+                    await client.cancel_order(state.no_order_id)
                 except Exception:
                     pass
                 state.no_order_id = None
 
             try:
                 client_id = f"sb-n-{state.ticker[:10]}-{uuid.uuid4().hex[:8]}"
-                result = client.place_order(
+                result = await client.place_order(
                     ticker=state.ticker,
                     side="no",
                     action="buy",
@@ -485,14 +552,14 @@ class KalshiSpreadBot:
 
     async def _cancel_all_orders(self):
         """Cancel all resting orders across all markets."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         for ticker, state in self._markets.items():
             for order_id in [state.yes_order_id, state.no_order_id]:
                 if order_id:
                     try:
-                        client.cancel_order(order_id)
+                        await client.cancel_order(order_id)
                     except Exception as e:
                         logger.error(f"Failed to cancel {order_id}: {e}")
 
@@ -503,8 +570,8 @@ class KalshiSpreadBot:
 
     async def flatten_market(self, ticker: str):
         """Close out all inventory in a specific market at market price."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         if ticker not in self._markets:
             return
@@ -515,14 +582,14 @@ class KalshiSpreadBot:
         for order_id in [state.yes_order_id, state.no_order_id]:
             if order_id:
                 try:
-                    client.cancel_order(order_id)
+                    await client.cancel_order(order_id)
                 except Exception:
                     pass
 
         # Sell any YES inventory
         if state.yes_position > 0:
             try:
-                client.place_order(
+                await client.place_order(
                     ticker=ticker,
                     side="yes",
                     action="sell",
@@ -537,7 +604,7 @@ class KalshiSpreadBot:
         # Sell any NO inventory
         if state.no_position > 0:
             try:
-                client.place_order(
+                await client.place_order(
                     ticker=ticker,
                     side="no",
                     action="sell",

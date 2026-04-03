@@ -884,9 +884,9 @@ def _extract_date_from_filename(filename: str):
 @router.get("/kalshi/status")
 async def kalshi_status():
     """Get Kalshi connection status, balance, and stats."""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     stats = get_kalshi_stats()
 
     result = {
@@ -898,7 +898,7 @@ async def kalshi_status():
 
     if client.enabled and client.api_key_id:
         try:
-            balance = client.get_balance()
+            balance = await client.get_balance()
             result["balance"] = balance
             result["connected"] = True
         except Exception as e:
@@ -913,17 +913,17 @@ async def kalshi_status():
 @router.get("/kalshi/markets")
 async def kalshi_markets(query: str = "", status: str = "open", limit: int = 20):
     """Search or list Kalshi markets."""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     if not client.enabled:
         raise HTTPException(400, "Kalshi is not enabled in config")
 
     try:
         if query:
-            markets = client.search_markets(query, limit=limit)
+            markets = await client.search_markets(query, limit=limit)
         else:
-            markets = client.get_markets(status=status, limit=limit)
+            markets = await client.get_markets(status=status, limit=limit)
         return {"markets": markets, "total": len(markets)}
     except Exception as e:
         raise HTTPException(500, f"Kalshi API error: {e}")
@@ -932,16 +932,16 @@ async def kalshi_markets(query: str = "", status: str = "open", limit: int = 20)
 @router.get("/kalshi/market/{ticker}")
 async def kalshi_market_detail(ticker: str):
     """Get detailed market info including orderbook."""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     if not client.enabled:
         raise HTTPException(400, "Kalshi is not enabled in config")
 
     try:
-        market = client.get_market(ticker)
-        orderbook = client.get_orderbook(ticker)
-        trades = client.get_market_trades(ticker, limit=10)
+        market = await client.get_market(ticker)
+        orderbook = await client.get_orderbook(ticker)
+        trades = await client.get_market_trades(ticker, limit=10)
         return {"market": market, "orderbook": orderbook, "recent_trades": trades}
     except Exception as e:
         raise HTTPException(500, f"Kalshi API error: {e}")
@@ -950,15 +950,15 @@ async def kalshi_market_detail(ticker: str):
 @router.get("/kalshi/positions")
 async def kalshi_positions(status: str = "all"):
     """Get Kalshi positions from local DB + live data."""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
 
     db_positions = get_kalshi_positions(status=status)
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     live_positions = []
     if client.enabled and client.api_key_id:
         try:
-            live_positions = client.get_positions()
+            live_positions = await client.get_positions()
         except Exception:
             pass
 
@@ -979,10 +979,10 @@ async def kalshi_trade_history(limit: int = 50):
 @router.post("/kalshi/order")
 async def kalshi_place_order(body: dict):
     """Place a Kalshi order. Body: {ticker, side, price, count?, action?}"""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
     from app.database import insert_kalshi_trade
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     if not client.enabled:
         raise HTTPException(400, "Kalshi is not enabled in config")
 
@@ -996,7 +996,7 @@ async def kalshi_place_order(body: dict):
     count = body.get("count")
 
     try:
-        result = client.place_order(
+        result = await client.place_order(
             ticker=ticker,
             side=side,
             action=action,
@@ -1026,18 +1026,97 @@ async def kalshi_place_order(body: dict):
 @router.get("/kalshi/portfolio")
 async def kalshi_portfolio():
     """Get full Kalshi portfolio summary with live P&L."""
-    from app.services.kalshi_client import get_kalshi_client
+    from app.services.kalshi_client import get_async_kalshi_client
 
-    client = get_kalshi_client()
+    client = get_async_kalshi_client()
     if not client.enabled:
         raise HTTPException(400, "Kalshi is not enabled in config")
 
     try:
-        summary = client.get_portfolio_summary()
+        summary = await client.get_portfolio_summary()
         summary["db_stats"] = get_kalshi_stats()
         return summary
     except Exception as e:
         raise HTTPException(500, f"Portfolio error: {e}")
+
+
+@router.get("/kalshi/unified-pnl")
+async def kalshi_unified_pnl():
+    """Aggregated P&L across all Kalshi bots."""
+    from app.services.kalshi_market_maker import get_market_maker
+    from app.services.kalshi_spread_bot import get_spread_bot
+    from app.services.kalshi_technical_bot import get_technical_bot
+    from app.services.kalshi_ai_agent import get_ai_agent_bot
+
+    bots = {}
+    total_pnl_cents = 0
+
+    # Market Maker
+    try:
+        mm = get_market_maker()
+        mm_status = mm.get_status()
+        mm_pnl = mm._total_pnl_cents
+        bots["market_maker"] = {
+            "running": mm_status.get("running", False),
+            "pnl_cents": mm_pnl,
+            "pnl_usd": round(mm_pnl / 100, 2),
+            "markets": mm_status.get("active_markets", 0),
+            "fills": mm_status.get("total_fills", 0),
+        }
+        total_pnl_cents += mm_pnl
+    except Exception:
+        bots["market_maker"] = {"running": False, "pnl_cents": 0, "pnl_usd": 0.0}
+
+    # Spread Bot
+    try:
+        sb = get_spread_bot()
+        sb_status = sb.get_status()
+        sb_pnl = sb._total_pnl_cents
+        bots["spread_bot"] = {
+            "running": sb_status.get("running", False),
+            "pnl_cents": sb_pnl,
+            "pnl_usd": round(sb_pnl / 100, 2),
+            "markets": sb_status.get("active_markets", 0),
+        }
+        total_pnl_cents += sb_pnl
+    except Exception:
+        bots["spread_bot"] = {"running": False, "pnl_cents": 0, "pnl_usd": 0.0}
+
+    # Technical Bot
+    try:
+        tb = get_technical_bot()
+        tb_status = tb.get_status()
+        tb_trades = tb_status.get("trades_executed", 0)
+        bots["technical"] = {
+            "running": tb_status.get("running", False),
+            "trades": tb_trades,
+            "signals": tb_status.get("signals_generated", 0),
+        }
+    except Exception:
+        bots["technical"] = {"running": False, "trades": 0}
+
+    # AI Agent
+    try:
+        ai = get_ai_agent_bot()
+        ai_status = ai.get_status()
+        ai_trades = ai_status.get("trades_executed", 0)
+        bots["ai_agent"] = {
+            "running": ai_status.get("running", False),
+            "trades": ai_trades,
+            "analyses": ai_status.get("analyses_completed", 0),
+        }
+    except Exception:
+        bots["ai_agent"] = {"running": False, "trades": 0}
+
+    # DB stats
+    db_stats = get_kalshi_stats()
+
+    return {
+        "total_pnl_cents": total_pnl_cents,
+        "total_pnl_usd": round(total_pnl_cents / 100, 2),
+        "bots": bots,
+        "db_stats": db_stats,
+    }
 
 
 # ── Kalshi Arbitrage ──────────────────────────────────────────────
@@ -1447,6 +1526,59 @@ async def kalshi_esports_toggle(body: dict):
             scanner.stop()
             scanner.enabled = False
     return scanner.get_status()
+
+
+# ── Kalshi WebSocket Feed ────────────────────────────────────────
+
+@router.get("/kalshi/ws/status")
+async def kalshi_ws_status():
+    """Get WebSocket feed status."""
+    from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+    return get_kalshi_ws_feed().get_status()
+
+
+@router.get("/kalshi/ws/trades")
+async def kalshi_ws_trades(limit: int = 50):
+    """Get live trade feed from WebSocket."""
+    from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+    return {"trades": get_kalshi_ws_feed().get_trade_log(limit=min(limit, 200))}
+
+
+@router.get("/kalshi/ws/orderbook/{ticker}")
+async def kalshi_ws_orderbook(ticker: str):
+    """Get live orderbook for a subscribed ticker."""
+    from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+    book = get_kalshi_ws_feed().get_orderbook(ticker)
+    if not book:
+        raise HTTPException(404, f"No live orderbook for {ticker}")
+    return book.to_dict()
+
+
+@router.post("/kalshi/ws/subscribe")
+async def kalshi_ws_subscribe(body: dict):
+    """Subscribe to a market ticker. Body: {ticker: "..."}"""
+    from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+    ticker = body.get("ticker", "")
+    if not ticker:
+        raise HTTPException(400, "ticker required")
+    await get_kalshi_ws_feed().subscribe(ticker)
+    return {"subscribed": ticker}
+
+
+# ── Kalshi Risk Manager (Circuit Breaker) ────────────────────────
+
+@router.get("/kalshi/risk/status")
+async def kalshi_risk_status():
+    """Get circuit breaker status."""
+    from app.services.kalshi_risk_manager import get_risk_manager
+    return get_risk_manager().get_status()
+
+
+@router.post("/kalshi/risk/reset")
+async def kalshi_risk_reset():
+    """Manually reset the circuit breaker to resume trading."""
+    from app.services.kalshi_risk_manager import get_risk_manager
+    return get_risk_manager().reset()
 
 
 def _parse_report_txt(text: str, filename: str) -> dict:

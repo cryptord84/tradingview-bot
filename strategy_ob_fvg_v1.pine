@@ -1,0 +1,381 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TradingBot - Order Block + FVG Strategy v1.0
+// Backtesting strategy for Smart Money Concepts: Order Blocks + Fair Value Gaps
+// Deploy on multiple timeframes (1H, 4H, Daily) to compare performance
+
+//@version=6
+strategy("OB+FVG Strategy v1.0", overlay=true, default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100, initial_capital=1000, commission_type=strategy.commission.percent,
+     commission_value=0.1, slippage=2, calc_on_every_tick=false)
+
+// ─── INPUTS ────────────────────────────────────────────────────────────────────
+
+// Order Block Settings
+ob_lookback      = input.int(20, "OB Lookback Bars", minval=5, maxval=50, group="Order Blocks")
+ob_strength      = input.float(1.5, "OB Min Move (ATR mult)", minval=0.5, maxval=5.0, step=0.1, group="Order Blocks")
+ob_max_age       = input.int(50, "OB Max Age (bars)", minval=10, maxval=200, group="Order Blocks")
+ob_mitigation    = input.string("Wick", "OB Touch Type", options=["Wick", "Close"], group="Order Blocks")
+
+// FVG Settings
+fvg_min_size     = input.float(0.3, "FVG Min Size (ATR mult)", minval=0.1, maxval=2.0, step=0.1, group="Fair Value Gaps")
+fvg_max_age      = input.int(30, "FVG Max Age (bars)", minval=5, maxval=100, group="Fair Value Gaps")
+fvg_fill_pct     = input.float(50.0, "FVG Fill % to Enter", minval=0, maxval=100, step=10, group="Fair Value Gaps", tooltip="Enter when price fills this % into the FVG zone")
+
+// Entry Mode
+entry_mode       = input.string("OB+FVG", "Entry Mode", options=["OB Only", "FVG Only", "OB+FVG", "OB or FVG"], group="Entry")
+require_trend    = input.bool(true, "Require Trend Alignment", group="Entry")
+trend_ema_len    = input.int(50, "Trend EMA Length", minval=10, maxval=200, group="Entry")
+macro_sma_len    = input.int(200, "Macro SMA Length", minval=50, maxval=500, group="Entry")
+use_macro_filter = input.bool(true, "Use SMA 200 Macro Filter", group="Entry")
+
+// Risk Management
+atr_len          = input.int(14, "ATR Length", group="Risk")
+tp_atr_mult      = input.float(3.0, "TP (ATR multiplier)", minval=1.0, maxval=8.0, step=0.5, group="Risk")
+sl_atr_mult      = input.float(1.5, "SL (ATR multiplier)", minval=0.5, maxval=4.0, step=0.25, group="Risk")
+use_trail        = input.bool(true, "Use Trailing Stop", group="Risk")
+trail_act_atr    = input.float(1.5, "Trail Activation (ATR)", minval=0.5, maxval=4.0, step=0.25, group="Risk")
+trail_off_atr    = input.float(1.0, "Trail Offset (ATR)", minval=0.25, maxval=3.0, step=0.25, group="Risk")
+max_trades_day   = input.int(3, "Max Trades Per Day", minval=1, maxval=10, group="Risk")
+
+// Direction
+longs_only       = input.bool(false, "Longs Only", group="Direction")
+shorts_only      = input.bool(false, "Shorts Only", group="Direction")
+
+// Visual
+show_ob          = input.bool(true, "Show Order Blocks", group="Visual")
+show_fvg         = input.bool(true, "Show FVG Zones", group="Visual")
+show_signals     = input.bool(true, "Show Entry Signals", group="Visual")
+
+// ─── CORE CALCULATIONS ─────────────────────────────────────────────────────────
+
+atr_val   = ta.atr(atr_len)
+ema_trend = ta.ema(close, trend_ema_len)
+sma_macro = ta.sma(close, macro_sma_len)
+
+is_uptrend   = close > ema_trend
+is_downtrend = close < ema_trend
+above_macro  = close > sma_macro
+below_macro  = close < sma_macro
+
+// ─── ORDER BLOCK DETECTION ─────────────────────────────────────────────────────
+// Bullish OB: Last bearish candle before a strong bullish impulse
+// Bearish OB: Last bullish candle before a strong bearish impulse
+
+// Track up to 10 active order blocks per side
+var float[] bull_ob_top    = array.new_float(0)
+var float[] bull_ob_bot    = array.new_float(0)
+var int[]   bull_ob_bar    = array.new_int(0)
+var float[] bear_ob_top    = array.new_float(0)
+var float[] bear_ob_bot    = array.new_float(0)
+var int[]   bear_ob_bar    = array.new_int(0)
+
+// Impulse detection: strong move away from a candle
+is_bearish_candle = close[1] < open[1]
+is_bullish_candle = close[1] > open[1]
+body_size_1       = math.abs(close[1] - open[1])
+
+// Bullish impulse: current candle closes strongly above prior bearish candle
+bull_impulse = is_bearish_candle and close > high[1] and (close - open) > ob_strength * atr_val
+
+// Bearish impulse: current candle closes strongly below prior bullish candle
+bear_impulse = is_bullish_candle and close < low[1] and (open - close) > ob_strength * atr_val
+
+// Register new bullish OB (the prior bearish candle is the OB)
+if bull_impulse
+    array.push(bull_ob_top, math.max(open[1], close[1]))  // OB top = open of bearish candle
+    array.push(bull_ob_bot, math.min(open[1], close[1]))   // OB bot = close of bearish candle
+    array.push(bull_ob_bar, bar_index - 1)
+
+// Register new bearish OB (the prior bullish candle is the OB)
+if bear_impulse
+    array.push(bear_ob_top, math.max(open[1], close[1]))
+    array.push(bear_ob_bot, math.min(open[1], close[1]))
+    array.push(bear_ob_bar, bar_index - 1)
+
+// Clean up old/mitigated OBs
+// Bullish OBs: remove if price closed below bottom (broken) or too old
+if array.size(bull_ob_top) > 0
+    for i = array.size(bull_ob_top) - 1 to 0
+        age = bar_index - array.get(bull_ob_bar, i)
+        bot = array.get(bull_ob_bot, i)
+        // Remove if too old or if price broke below the OB (invalidated)
+        if age > ob_max_age or close < bot - atr_val
+            array.remove(bull_ob_top, i)
+            array.remove(bull_ob_bot, i)
+            array.remove(bull_ob_bar, i)
+
+// Bearish OBs: remove if price closed above top (broken) or too old
+if array.size(bear_ob_top) > 0
+    for i = array.size(bear_ob_top) - 1 to 0
+        age = bar_index - array.get(bear_ob_bar, i)
+        top = array.get(bear_ob_top, i)
+        if age > ob_max_age or close > top + atr_val
+            array.remove(bear_ob_top, i)
+            array.remove(bear_ob_bot, i)
+            array.remove(bear_ob_bar, i)
+
+// Cap arrays at 10 entries (remove oldest)
+while array.size(bull_ob_top) > 10
+    array.shift(bull_ob_top)
+    array.shift(bull_ob_bot)
+    array.shift(bull_ob_bar)
+
+while array.size(bear_ob_top) > 10
+    array.shift(bear_ob_top)
+    array.shift(bear_ob_bot)
+    array.shift(bear_ob_bar)
+
+// Check if price is touching a bullish OB (potential long entry)
+f_touching_bull_ob() =>
+    result = false
+    if array.size(bull_ob_top) > 0
+        for i = 0 to array.size(bull_ob_top) - 1
+            top = array.get(bull_ob_top, i)
+            bot = array.get(bull_ob_bot, i)
+            if ob_mitigation == "Wick"
+                if low <= top and low >= bot
+                    result := true
+            else
+                if close <= top and close >= bot
+                    result := true
+    result
+
+// Check if price is touching a bearish OB (potential short entry)
+f_touching_bear_ob() =>
+    result = false
+    if array.size(bear_ob_top) > 0
+        for i = 0 to array.size(bear_ob_top) - 1
+            top = array.get(bear_ob_top, i)
+            bot = array.get(bear_ob_bot, i)
+            if ob_mitigation == "Wick"
+                if high >= bot and high <= top
+                    result := true
+            else
+                if close >= bot and close <= top
+                    result := true
+    result
+
+touch_bull_ob = f_touching_bull_ob()
+touch_bear_ob = f_touching_bear_ob()
+
+// ─── FAIR VALUE GAP DETECTION ──────────────────────────────────────────────────
+// Bullish FVG: gap between high[2] and low[0] when candle[1] is strong bullish
+// Bearish FVG: gap between low[2] and high[0] when candle[1] is strong bearish
+
+var float[] bull_fvg_top   = array.new_float(0)
+var float[] bull_fvg_bot   = array.new_float(0)
+var int[]   bull_fvg_bar   = array.new_int(0)
+var float[] bear_fvg_top   = array.new_float(0)
+var float[] bear_fvg_bot   = array.new_float(0)
+var int[]   bear_fvg_bar   = array.new_int(0)
+
+// Bullish FVG: low of current candle > high of 2 bars ago (gap up)
+bull_fvg_exists = low > high[2] and (low - high[2]) > fvg_min_size * atr_val
+// Bearish FVG: high of current candle < low of 2 bars ago (gap down)
+bear_fvg_exists = high < low[2] and (low[2] - high) > fvg_min_size * atr_val
+
+if bull_fvg_exists
+    array.push(bull_fvg_top, low)       // Top of gap = low of current candle
+    array.push(bull_fvg_bot, high[2])   // Bot of gap = high of 2 bars ago
+    array.push(bull_fvg_bar, bar_index)
+
+if bear_fvg_exists
+    array.push(bear_fvg_top, low[2])    // Top of gap = low of 2 bars ago
+    array.push(bear_fvg_bot, high)      // Bot of gap = high of current candle
+    array.push(bear_fvg_bar, bar_index)
+
+// Clean up: remove filled or old FVGs
+if array.size(bull_fvg_top) > 0
+    for i = array.size(bull_fvg_top) - 1 to 0
+        age = bar_index - array.get(bull_fvg_bar, i)
+        bot = array.get(bull_fvg_bot, i)
+        // Fully filled (price closed below bottom of FVG) or too old
+        if age > fvg_max_age or close < bot - atr_val * 0.5
+            array.remove(bull_fvg_top, i)
+            array.remove(bull_fvg_bot, i)
+            array.remove(bull_fvg_bar, i)
+
+if array.size(bear_fvg_top) > 0
+    for i = array.size(bear_fvg_top) - 1 to 0
+        age = bar_index - array.get(bear_fvg_bar, i)
+        top = array.get(bear_fvg_top, i)
+        if age > fvg_max_age or close > top + atr_val * 0.5
+            array.remove(bear_fvg_top, i)
+            array.remove(bear_fvg_bot, i)
+            array.remove(bear_fvg_bar, i)
+
+// Cap arrays
+while array.size(bull_fvg_top) > 10
+    array.shift(bull_fvg_top)
+    array.shift(bull_fvg_bot)
+    array.shift(bull_fvg_bar)
+
+while array.size(bear_fvg_top) > 10
+    array.shift(bear_fvg_top)
+    array.shift(bear_fvg_bot)
+    array.shift(bear_fvg_bar)
+
+// Check if price is filling into a bullish FVG (retracing into the gap = long entry)
+f_filling_bull_fvg() =>
+    result = false
+    if array.size(bull_fvg_top) > 0
+        for i = 0 to array.size(bull_fvg_top) - 1
+            top = array.get(bull_fvg_top, i)
+            bot = array.get(bull_fvg_bot, i)
+            gap_size = top - bot
+            fill_level = top - gap_size * (fvg_fill_pct / 100.0)
+            // Price has dropped into the FVG zone
+            if low <= top and low >= fill_level
+                result := true
+    result
+
+// Check if price is filling into a bearish FVG (retracing into the gap = short entry)
+f_filling_bear_fvg() =>
+    result = false
+    if array.size(bear_fvg_top) > 0
+        for i = 0 to array.size(bear_fvg_top) - 1
+            top = array.get(bear_fvg_top, i)
+            bot = array.get(bear_fvg_bot, i)
+            gap_size = top - bot
+            fill_level = bot + gap_size * (fvg_fill_pct / 100.0)
+            if high >= bot and high <= fill_level
+                result := true
+    result
+
+fill_bull_fvg = f_filling_bull_fvg()
+fill_bear_fvg = f_filling_bear_fvg()
+
+// ─── ENTRY SIGNALS ─────────────────────────────────────────────────────────────
+
+// Combine OB + FVG based on entry mode
+ob_long  = touch_bull_ob
+ob_short = touch_bear_ob
+fvg_long  = fill_bull_fvg
+fvg_short = fill_bear_fvg
+
+raw_long = switch entry_mode
+    "OB Only"  => ob_long
+    "FVG Only" => fvg_long
+    "OB+FVG"   => ob_long and fvg_long
+    "OB or FVG" => ob_long or fvg_long
+    => false
+
+raw_short = switch entry_mode
+    "OB Only"  => ob_short
+    "FVG Only" => fvg_short
+    "OB+FVG"   => ob_short and fvg_short
+    "OB or FVG" => ob_short or fvg_short
+    => false
+
+// Trend filters
+trend_long  = not require_trend or is_uptrend
+trend_short = not require_trend or is_downtrend
+macro_long  = not use_macro_filter or above_macro
+macro_short = not use_macro_filter or below_macro
+
+// Direction filters
+dir_long  = not shorts_only
+dir_short = not longs_only
+
+// Daily trade count limiter
+var int trades_today = 0
+var int last_trade_day = 0
+current_day = dayofmonth
+if current_day != last_trade_day
+    trades_today := 0
+    last_trade_day := current_day
+
+can_trade = trades_today < max_trades_day
+
+// Final signals
+long_signal  = raw_long and trend_long and macro_long and dir_long and can_trade
+short_signal = raw_short and trend_short and macro_short and dir_short and can_trade
+
+// Avoid entering if already in a position on the same side
+long_signal  := long_signal and strategy.position_size <= 0
+short_signal := short_signal and strategy.position_size >= 0
+
+// ─── EXECUTION ─────────────────────────────────────────────────────────────────
+
+if long_signal
+    sl = close - sl_atr_mult * atr_val
+    tp = close + tp_atr_mult * atr_val
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long TP/SL", "Long", stop=sl, limit=tp,
+                 trail_price=use_trail ? close + trail_act_atr * atr_val : na,
+                 trail_offset=use_trail ? math.round(trail_off_atr * atr_val / syminfo.mintick) : na)
+    trades_today += 1
+
+if short_signal
+    sl = close + sl_atr_mult * atr_val
+    tp = close - tp_atr_mult * atr_val
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short TP/SL", "Short", stop=sl, limit=tp,
+                 trail_price=use_trail ? close - trail_act_atr * atr_val : na,
+                 trail_offset=use_trail ? math.round(trail_off_atr * atr_val / syminfo.mintick) : na)
+    trades_today += 1
+
+// ─── VISUAL ────────────────────────────────────────────────────────────────────
+
+// Plot trend EMAs
+plot(ema_trend, "Trend EMA", color=color.new(color.yellow, 60), linewidth=1)
+plot(sma_macro, "SMA 200", color=color.new(color.white, 70), linewidth=1)
+
+// Plot entry signals
+plotshape(show_signals and long_signal, "Long", shape.triangleup, location.belowbar,
+         color.new(color.lime, 0), size=size.small)
+plotshape(show_signals and short_signal, "Short", shape.triangledown, location.abovebar,
+         color.new(color.red, 0), size=size.small)
+
+// Draw Order Block boxes (most recent)
+if show_ob and array.size(bull_ob_top) > 0
+    for i = 0 to math.min(array.size(bull_ob_top) - 1, 2)
+        ob_bar_idx = array.get(bull_ob_bar, i)
+        box.new(ob_bar_idx, array.get(bull_ob_top, i), bar_index, array.get(bull_ob_bot, i),
+               border_color=color.new(color.lime, 70), bgcolor=color.new(color.lime, 90),
+               xloc=xloc.bar_index)
+
+if show_ob and array.size(bear_ob_top) > 0
+    for i = 0 to math.min(array.size(bear_ob_top) - 1, 2)
+        ob_bar_idx = array.get(bear_ob_bar, i)
+        box.new(ob_bar_idx, array.get(bear_ob_top, i), bar_index, array.get(bear_ob_bot, i),
+               border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 90),
+               xloc=xloc.bar_index)
+
+// Draw FVG zones (most recent)
+if show_fvg and array.size(bull_fvg_top) > 0
+    for i = 0 to math.min(array.size(bull_fvg_top) - 1, 2)
+        fvg_bar_idx = array.get(bull_fvg_bar, i)
+        box.new(fvg_bar_idx, array.get(bull_fvg_top, i), bar_index, array.get(bull_fvg_bot, i),
+               border_color=color.new(color.teal, 60), bgcolor=color.new(color.teal, 85),
+               border_style=line.style_dashed, xloc=xloc.bar_index)
+
+if show_fvg and array.size(bear_fvg_top) > 0
+    for i = 0 to math.min(array.size(bear_fvg_top) - 1, 2)
+        fvg_bar_idx = array.get(bear_fvg_bar, i)
+        box.new(fvg_bar_idx, array.get(bear_fvg_top, i), bar_index, array.get(bear_fvg_bot, i),
+               border_color=color.new(color.orange, 60), bgcolor=color.new(color.orange, 85),
+               border_style=line.style_dashed, xloc=xloc.bar_index)
+
+// ─── INFO TABLE ────────────────────────────────────────────────────────────────
+
+var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80),
+                          border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast
+    table.cell(info, 0, 0, "OB+FVG v1.0", text_color=color.lime, text_size=size.small)
+    table.cell(info, 1, 0, entry_mode, text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 1, "Bull OBs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, str.tostring(array.size(bull_ob_top)), text_color=color.lime, text_size=size.tiny)
+    table.cell(info, 0, 2, "Bear OBs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, str.tostring(array.size(bear_ob_top)), text_color=color.red, text_size=size.tiny)
+    table.cell(info, 0, 3, "Bull FVGs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, str.tostring(array.size(bull_fvg_top)), text_color=color.teal, text_size=size.tiny)
+    table.cell(info, 0, 4, "Bear FVGs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, str.tostring(array.size(bear_fvg_top)), text_color=color.orange, text_size=size.tiny)
+    table.cell(info, 0, 5, "Trend", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, is_uptrend ? "BULL" : "BEAR", text_color=is_uptrend ? color.lime : color.red, text_size=size.tiny)
+    table.cell(info, 0, 6, "ATR", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6, str.tostring(atr_val, "#.####"), text_color=color.white, text_size=size.tiny)
+    table.cell(info, 0, 7, "Trades Today", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 7, str.tostring(trades_today) + "/" + str.tostring(max_trades_day), text_color=color.white, text_size=size.tiny)

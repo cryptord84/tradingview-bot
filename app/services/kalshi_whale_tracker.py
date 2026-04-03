@@ -90,9 +90,9 @@ class KalshiWhaleTracker:
 
     async def scan(self) -> list[dict]:
         """Scan recent trades across all markets for whale activity."""
-        from app.services.kalshi_client import get_kalshi_client
+        from app.services.kalshi_client import get_async_kalshi_client
 
-        client = get_kalshi_client()
+        client = get_async_kalshi_client()
         if not client.enabled:
             return []
 
@@ -102,7 +102,7 @@ class KalshiWhaleTracker:
 
         try:
             # Fetch recent trades across all markets (direct API for full data)
-            trades = client.get_recent_trades(limit=100)
+            trades = await client.get_recent_trades(limit=100)
 
             for t in trades:
                 trade_id = t.get("trade_id", "")

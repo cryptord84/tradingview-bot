@@ -171,25 +171,43 @@ class KalshiTechnicalBot:
 
     # ── Market Selection ──
 
+    # Finance/economics markets are nearly efficient (0.17pp maker-taker gap)
+    # Focus on high-bias categories where technical signals have edge
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi",
+                         "inflation", "treasury", "earnings"]
+
     async def _get_target_markets(self, client) -> list[dict]:
-        """Get markets to analyze — either configured tickers or auto-selected."""
+        """Get markets to analyze — either configured tickers or auto-selected.
+
+        Research-informed filtering:
+        - Skip finance/economics (near-efficient, no technical edge)
+        - Skip 40-60¢ range (no directional edge near fair value)
+        - Prefer tail prices where behavioral bias creates alpha
+        """
         if self.target_tickers:
             markets = []
             for ticker in self.target_tickers:
                 try:
-                    m = client.get_market(ticker)
+                    m = await client.get_market(ticker)
                     markets.append(m)
                 except Exception:
                     pass
             return markets
 
-        # Auto-select: high volume, mid-range price, enough history
-        all_markets = client.get_markets_full(status="open", limit=100)
+        # Auto-select: high volume, tail prices, high-bias categories
+        all_markets = await client.get_markets_full(status="open", limit=100)
         candidates = []
         for m in all_markets:
             vol = int(float(m.get("volume_fp", "0") or "0"))
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
-            if vol < 100 or yes_ask < 15 or yes_ask > 85:
+            if vol < 25 or yes_ask < 5 or yes_ask > 95:
+                continue
+            # Skip dead zone — near-zero edge at 40-60¢
+            if 40 <= yes_ask <= 60:
+                continue
+            # Skip low-edge finance/economics markets
+            title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
+            if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
                 continue
             candidates.append(m)
 
@@ -200,8 +218,8 @@ class KalshiTechnicalBot:
 
     async def scan_all(self) -> list[dict]:
         """Scan all target markets and generate signals."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
         if not client.enabled:
             return []
 
@@ -217,7 +235,7 @@ class KalshiTechnicalBot:
             title = m.get("title", ticker)
 
             try:
-                candles = client.get_candlesticks(
+                candles = await client.get_candlesticks(
                     ticker, period_interval=self.candle_interval, limit=self.candle_count
                 )
                 if len(candles) < self.macd_slow + self.macd_signal:
@@ -340,9 +358,9 @@ class KalshiTechnicalBot:
 
             try:
                 if sig.side == "yes":
-                    result = client.buy_yes(sig.ticker, price, self.contracts_per_trade)
+                    result = await client.buy_yes(sig.ticker, price, self.contracts_per_trade)
                 else:
-                    result = client.buy_no(sig.ticker, price, self.contracts_per_trade)
+                    result = await client.buy_no(sig.ticker, price, self.contracts_per_trade)
 
                 order = result.get("order", {})
                 self._total_trades += 1

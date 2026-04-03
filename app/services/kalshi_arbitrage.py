@@ -110,9 +110,9 @@ class KalshiArbitrageScanner:
 
     async def scan_all(self) -> list[dict]:
         """Run all arbitrage scans and return opportunities."""
-        from app.services.kalshi_client import get_kalshi_client
+        from app.services.kalshi_client import get_async_kalshi_client
 
-        client = get_kalshi_client()
+        client = get_async_kalshi_client()
         if not client.enabled:
             return []
 
@@ -122,7 +122,7 @@ class KalshiArbitrageScanner:
 
         try:
             # Fetch all open markets with full pricing data (direct API)
-            markets = client.get_markets_full(status="open", limit=200)
+            markets = await client.get_markets_full(status="open", limit=200)
             logger.info(f"Arbitrage scan #{self._scan_count}: checking {len(markets)} markets")
 
             # Strategy 1: Yes/No spread arbitrage
@@ -405,7 +405,7 @@ class KalshiArbitrageScanner:
                 count = min(best.max_contracts, 10)  # Conservative: max 10 contracts auto
 
                 # Buy YES side
-                yes_result = client.place_order(
+                yes_result = await client.place_order(
                     ticker=best.market_ticker,
                     side="yes",
                     action="buy",
@@ -414,7 +414,7 @@ class KalshiArbitrageScanner:
                 )
 
                 # Buy NO side
-                no_result = client.place_order(
+                no_result = await client.place_order(
                     ticker=best.market_ticker,
                     side="no",
                     action="buy",

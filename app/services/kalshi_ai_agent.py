@@ -224,8 +224,8 @@ class KalshiAIAgentBot:
 
     async def analyze_markets(self) -> list[dict]:
         """Analyze target markets with all agents and generate consensus."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
         if not client.enabled:
             return []
 
@@ -282,27 +282,56 @@ class KalshiAIAgentBot:
 
         return results
 
+    # Finance/economics markets are nearly efficient — AI edge is minimal there
+    # Focus on politics, sports, entertainment, world events where behavioral bias is high
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi",
+                         "inflation", "treasury", "earnings"]
+    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy", "super bowl", "world series",
+                          "playoff", "championship", "election", "trump", "biden",
+                          "war", "conflict", "weather", "hurricane"]
+
     async def _select_markets(self, client) -> list[dict]:
-        """Select markets for AI analysis."""
+        """Select markets for AI analysis.
+
+        Research-informed filtering:
+        - Skip finance/economics (0.17pp gap — nearly efficient)
+        - Prefer high-bias categories (sports 2.23pp, entertainment 7.32pp)
+        - Skip 40-60¢ range (no edge near fair value)
+        - Boost scoring for tail prices and high-bias categories
+        """
         if self.target_tickers:
             markets = []
             for ticker in self.target_tickers:
                 try:
-                    markets.append(client.get_market(ticker))
+                    markets.append(await client.get_market(ticker))
                 except Exception:
                     pass
             return markets
 
-        all_markets = client.get_markets_full(status="open", limit=50)
+        all_markets = await client.get_markets_full(status="open", limit=50)
         candidates = []
         for m in all_markets:
             vol = int(float(m.get("volume_fp", "0") or "0"))
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
-            if vol >= 200 and 20 <= yes_ask <= 80:
-                m["_volume"] = vol
-                m["_yes_ask"] = yes_ask
-                candidates.append(m)
-        candidates.sort(key=lambda m: m.get("_volume", 0), reverse=True)
+            if vol < 25 or yes_ask < 5 or yes_ask > 95:
+                continue
+            # Skip dead zone — near-zero edge at 40-60¢
+            if 40 <= yes_ask <= 60:
+                continue
+            # Skip low-edge finance/economics markets
+            title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
+            if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
+                continue
+            # Score: volume + category edge bonus
+            score = vol
+            if any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
+                score *= 1.5  # Boost high-bias categories
+            m["_volume"] = vol
+            m["_yes_ask"] = yes_ask
+            m["_score"] = score
+            candidates.append(m)
+        candidates.sort(key=lambda m: m.get("_score", 0), reverse=True)
         return candidates[:self.max_markets]
 
     async def _build_context(self, client, market: dict) -> str:
@@ -312,22 +341,22 @@ class KalshiAIAgentBot:
 
         # Get full market data via direct API
         try:
-            full_market = client.get_market_full(ticker)
+            full_market = await client.get_market_full(ticker)
         except Exception:
             full_market = market
 
         try:
-            book = client.get_orderbook(ticker)
+            book = await client.get_orderbook(ticker)
         except Exception:
             book = {}
 
         try:
-            trades = client.get_market_trades(ticker, limit=10)
+            trades = await client.get_market_trades(ticker, limit=10)
         except Exception:
             trades = []
 
         try:
-            candles = client.get_candlesticks(ticker, period_interval=60, limit=24)
+            candles = await client.get_candlesticks(ticker, period_interval=60, limit=24)
         except Exception:
             candles = []
 
@@ -460,7 +489,7 @@ class KalshiAIAgentBot:
             side = "yes" if r["action"] == "BUY_YES" else "no"
 
             try:
-                market = client.get_market_full(ticker)
+                market = await client.get_market_full(ticker)
                 price = int(round(float(market.get(f"{side}_ask_dollars", "0") or "0") * 100)) or 50
                 cost = price * self.contracts_per_trade
 
@@ -468,9 +497,9 @@ class KalshiAIAgentBot:
                     continue
 
                 if side == "yes":
-                    result = client.buy_yes(ticker, price, self.contracts_per_trade)
+                    result = await client.buy_yes(ticker, price, self.contracts_per_trade)
                 else:
-                    result = client.buy_no(ticker, price, self.contracts_per_trade)
+                    result = await client.buy_no(ticker, price, self.contracts_per_trade)
 
                 order = result.get("order", {})
                 self._total_trades += 1

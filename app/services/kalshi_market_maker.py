@@ -291,17 +291,26 @@ class KalshiMarketMaker:
             await asyncio.sleep(self.poll_interval)
 
     async def _cycle(self):
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         # Rotate markets periodically
         tickers = self.target_tickers
         if not tickers or (self._cycle_count % self.rotation_interval_cycles == 1):
             tickers = await self._select_markets(client)
             if not self.target_tickers:
-                # Only log auto-selected markets
                 if self._cycle_count % 20 == 1:
                     logger.info(f"MM auto-selected: {tickers}")
+
+        # Auto-subscribe WS feed to selected markets
+        try:
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            if ws.enabled:
+                for t in tickers:
+                    await ws.subscribe(t)
+        except Exception:
+            pass
 
         # Process each market
         for ticker in tickers:
@@ -310,7 +319,7 @@ class KalshiMarketMaker:
 
             try:
                 if ticker not in self._markets:
-                    market_data = client.get_market(ticker)
+                    market_data = await client.get_market(ticker)
                     self._markets[ticker] = MMMarketState(
                         ticker=ticker,
                         title=market_data.get("title", ticker),
@@ -348,9 +357,26 @@ class KalshiMarketMaker:
     # MARKET SELECTION & SCORING
     # =========================================================================
 
+    # Categories with low maker edge (research: jbecker.dev/prediction-market-microstructure)
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi", "inflation",
+                         "treasury", "earnings"]
+    # Categories with high maker edge (behavioral bias drives taker losses)
+    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy", "super bowl", "world series",
+                          "playoff", "championship", "election", "trump", "biden",
+                          "war", "conflict", "weather", "hurricane"]
+
     async def _select_markets(self, client) -> list[str]:
-        """Score and select the best markets for market-making."""
-        markets = client.get_markets_full(status="open", limit=200)
+        """Score and select the best markets for market-making.
+
+        Research-informed scoring:
+        - Avoid 40-60¢ mid range (near-zero maker edge)
+        - Prefer tail prices (1-20¢, 80-99¢) where longshot bias is strongest
+        - Prefer high-bias categories (sports, entertainment, politics)
+        - Avoid finance/economics (nearly efficient, 0.17pp gap)
+        - Require higher volume minimums (thin markets hurt makers)
+        """
+        markets = await client.get_markets_full(status="open", limit=200)
         scored = []
 
         for m in markets:
@@ -360,26 +386,43 @@ class KalshiMarketMaker:
 
             if yes_bid <= 0 or yes_ask <= 0:
                 continue
-            if volume < self.min_market_volume:
+            if volume < 50:  # Raised from 10 — thin markets hurt makers
                 continue
 
             spread = yes_ask - yes_bid
-            if spread < self.min_spread_cents or spread > 40:
+            if spread < self.min_spread_cents or spread > 50:
                 continue
 
             mid = (yes_bid + yes_ask) / 2
-            if mid < 10 or mid > 90:
-                continue  # Extreme prices have one-sided flow
 
-            # Scoring: volume * spread_opportunity / risk_factor
-            # Higher volume = more fill opportunities
-            # Moderate spread = room to capture
-            # Mid-range price = balanced flow
-            price_balance = 1.0 - abs(mid - 50) / 50  # 1.0 at mid=50, 0.0 at extremes
-            spread_score = min(spread, 15) / 15  # Normalize spread value
+            # Skip the dead zone: 40-60¢ has near-zero maker edge
+            if 40 <= mid <= 60:
+                continue
+
+            # Skip extreme illiquid tails
+            if mid < 5 or mid > 95:
+                continue
+
+            # Category scoring based on title keywords
+            title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
+            category_bonus = 0.0
+            is_low_edge = any(kw in title for kw in self.LOW_EDGE_KEYWORDS)
+            is_high_edge = any(kw in title for kw in self.HIGH_EDGE_KEYWORDS)
+            if is_low_edge:
+                category_bonus = -0.3  # Penalize efficient markets
+            elif is_high_edge:
+                category_bonus = 0.2   # Reward high-bias categories
+
+            # Tail preference: best edge at 5-20¢ and 80-95¢ (longshot bias)
+            # Worst edge at 40-60¢ (already filtered out above)
+            tail_distance = abs(mid - 50) / 50  # 0.0 at mid=50, 1.0 at extremes
+            tail_score = tail_distance  # Higher = further from 50 = more edge
+
+            spread_score = min(spread, 15) / 15
             volume_score = min(volume, 5000) / 5000
 
-            score = (volume_score * 0.5 + spread_score * 0.3 + price_balance * 0.2)
+            score = (volume_score * 0.4 + spread_score * 0.2 +
+                     tail_score * 0.3 + category_bonus + 0.1)
 
             scored.append({
                 "ticker": m.get("ticker", ""),
@@ -417,32 +460,55 @@ class KalshiMarketMaker:
     # =========================================================================
 
     async def _update_state(self, client, state: MMMarketState):
-        """Fetch orderbook, recent trades, and compute derived metrics."""
-        # Market data — use direct API for full pricing
-        market = client.get_market_full(state.ticker)
-        state.yes_bid = int(round(float(market.get("yes_bid_dollars", "0") or "0") * 100))
-        state.yes_ask = int(round(float(market.get("yes_ask_dollars", "0") or "0") * 100))
-        state.no_bid = int(round(float(market.get("no_bid_dollars", "0") or "0") * 100))
-        state.no_ask = int(round(float(market.get("no_ask_dollars", "0") or "0") * 100))
-        state.volume_24h = int(float(market.get("volume_fp", "0") or "0"))
+        """Fetch orderbook, recent trades, and compute derived metrics.
 
-        if state.yes_bid > 0 and state.yes_ask > 0:
-            state.spread = state.yes_ask - state.yes_bid
-            state.mid_price = (state.yes_bid + state.yes_ask) / 2
-
-        # Orderbook depth
+        Tries the WebSocket live orderbook first for speed; falls back to
+        REST API if the WS feed doesn't have data for this ticker.
+        """
+        ws_used = False
         try:
-            book = client.get_orderbook(state.ticker)
-            yes_levels = book.get("yes", [])
-            if yes_levels:
-                state.yes_bid_size = sum(lvl[1] for lvl in yes_levels if len(lvl) > 1)
-                state.yes_ask_size = state.yes_bid_size  # Approximate
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            book = ws.get_orderbook(state.ticker)
+            if book and book.last_updated:
+                state.yes_bid = book.best_yes_bid()
+                state.yes_ask = book.best_yes_ask()
+                state.no_bid = 100 - state.yes_ask if state.yes_ask > 0 else 0
+                state.no_ask = 100 - state.yes_bid if state.yes_bid > 0 else 0
+                if state.yes_bid > 0 and state.yes_ask > 0:
+                    state.spread = state.yes_ask - state.yes_bid
+                    state.mid_price = (state.yes_bid + state.yes_ask) / 2
+                state.yes_bid_size = sum(book.yes_levels.values())
+                state.yes_ask_size = sum(book.no_levels.values())
+                ws_used = True
         except Exception:
             pass
 
+        if not ws_used:
+            # Fallback: REST API
+            market = await client.get_market_full(state.ticker)
+            state.yes_bid = int(round(float(market.get("yes_bid_dollars", "0") or "0") * 100))
+            state.yes_ask = int(round(float(market.get("yes_ask_dollars", "0") or "0") * 100))
+            state.no_bid = int(round(float(market.get("no_bid_dollars", "0") or "0") * 100))
+            state.no_ask = int(round(float(market.get("no_ask_dollars", "0") or "0") * 100))
+            state.volume_24h = int(float(market.get("volume_fp", "0") or "0"))
+
+            if state.yes_bid > 0 and state.yes_ask > 0:
+                state.spread = state.yes_ask - state.yes_bid
+                state.mid_price = (state.yes_bid + state.yes_ask) / 2
+
+            try:
+                rest_book = await client.get_orderbook(state.ticker)
+                yes_levels = rest_book.get("yes", [])
+                if yes_levels:
+                    state.yes_bid_size = sum(lvl[1] for lvl in yes_levels if len(lvl) > 1)
+                    state.yes_ask_size = state.yes_bid_size
+            except Exception:
+                pass
+
         # Recent trades for VWAP and volatility
         try:
-            trades = client.get_market_trades(state.ticker, limit=30)
+            trades = await client.get_market_trades(state.ticker, limit=30)
             state._recent_trades = trades
 
             # VWAP
@@ -490,7 +556,7 @@ class KalshiMarketMaker:
             return
 
         try:
-            open_orders = client.get_open_orders()
+            open_orders = await client.get_open_orders()
             open_ids = {o.get("order_id") for o in open_orders}
         except Exception:
             return
@@ -610,9 +676,24 @@ class KalshiMarketMaker:
             if net > 0:
                 skew = -skew
 
+        # NO-side bias at price extremes (research: longshot bias)
+        # At low prices (YES cheap), takers overpay for YES → favor NO quotes
+        # At high prices (YES expensive), takers overpay for NO → favor YES quotes
+        no_bias = 0
+        if state.mid_price <= 20:
+            # Low-price regime: NO contracts outperform — tighten NO, widen YES
+            no_bias = -1  # Make NO quote more aggressive (cheaper for us)
+        elif state.mid_price >= 80:
+            # High-price regime: YES contracts outperform — tighten YES, widen NO
+            no_bias = 1
+
         # Get quote prices from strategy
         strat_fn = STRATEGIES.get(strategy, STRATEGIES["midpoint"])
         yes_bid_price, no_bid_price = strat_fn(state, half_spread, skew)
+
+        # Apply NO-side bias
+        yes_bid_price += no_bias  # Positive = more aggressive YES
+        no_bid_price -= no_bias   # Negative = more aggressive NO
 
         # Clamp and prevent crossing
         if state.yes_ask > 0:
@@ -646,14 +727,14 @@ class KalshiMarketMaker:
             for q in active_yes:
                 if q.order_id:
                     try:
-                        client.cancel_order(q.order_id)
+                        await client.cancel_order(q.order_id)
                     except Exception:
                         pass
             state.quotes = [q for q in state.quotes if q.side != "yes" or q.filled]
 
             try:
                 client_id = f"mm-y-{state.ticker[:8]}-{uuid.uuid4().hex[:6]}"
-                result = client.place_order(
+                result = await client.place_order(
                     ticker=state.ticker,
                     side="yes",
                     action="buy",
@@ -680,14 +761,14 @@ class KalshiMarketMaker:
             for q in active_no:
                 if q.order_id:
                     try:
-                        client.cancel_order(q.order_id)
+                        await client.cancel_order(q.order_id)
                     except Exception:
                         pass
             state.quotes = [q for q in state.quotes if q.side != "no" or q.filled]
 
             try:
                 client_id = f"mm-n-{state.ticker[:8]}-{uuid.uuid4().hex[:6]}"
-                result = client.place_order(
+                result = await client.place_order(
                     ticker=state.ticker,
                     side="no",
                     action="buy",
@@ -714,22 +795,22 @@ class KalshiMarketMaker:
     # =========================================================================
 
     async def _cancel_all_orders(self):
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         for state in self._markets.values():
             for q in state.quotes:
                 if q.order_id and not q.filled:
                     try:
-                        client.cancel_order(q.order_id)
+                        await client.cancel_order(q.order_id)
                     except Exception as e:
                         logger.error(f"Failed to cancel {q.order_id}: {e}")
             state.quotes = []
 
     async def flatten_market(self, ticker: str):
         """Close all inventory in a market."""
-        from app.services.kalshi_client import get_kalshi_client
-        client = get_kalshi_client()
+        from app.services.kalshi_client import get_async_kalshi_client
+        client = get_async_kalshi_client()
 
         if ticker not in self._markets:
             return {"error": "Market not tracked"}
@@ -740,7 +821,7 @@ class KalshiMarketMaker:
         for q in state.quotes:
             if q.order_id and not q.filled:
                 try:
-                    client.cancel_order(q.order_id)
+                    await client.cancel_order(q.order_id)
                 except Exception:
                     pass
         state.quotes = []
@@ -748,7 +829,7 @@ class KalshiMarketMaker:
         # Sell inventory
         if state.yes_position > 0:
             try:
-                client.place_order(
+                await client.place_order(
                     ticker=ticker, side="yes", action="sell",
                     yes_price=max(1, state.yes_bid - 1),
                     count=state.yes_position,
@@ -759,7 +840,7 @@ class KalshiMarketMaker:
 
         if state.no_position > 0:
             try:
-                client.place_order(
+                await client.place_order(
                     ticker=ticker, side="no", action="sell",
                     no_price=max(1, state.no_bid - 1),
                     count=state.no_position,

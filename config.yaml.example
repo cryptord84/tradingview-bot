@@ -292,6 +292,16 @@ kalshi:
     telegram_alerts: true
     target_tickers: []                         # Empty = auto-select by volume
     max_markets_to_analyze: 5                  # Limit Claude API calls
+  # WebSocket Feed (real-time orderbook + trade streaming)
+  websocket:
+    enabled: true                              # Enable WS feed for live orderbook data
+    max_reconnect_delay: 60                    # Max seconds between reconnect attempts
+  # Global Risk Circuit Breaker
+  risk_manager:
+    enabled: true                              # Monitor aggregate loss across all bots
+    max_daily_loss_cents: 1000                 # Trip at $10 daily loss — kills all bots
+    check_interval_seconds: 30                 # How often to check aggregate P&L
+    telegram_alerts: true                      # Alert on trip via Telegram
 
 # --- Portfolio Rebalancer ---
 rebalancer:

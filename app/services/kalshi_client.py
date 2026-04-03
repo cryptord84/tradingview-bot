@@ -2,10 +2,19 @@
 
 Uses the official kalshi-python SDK (v2.1.4) with RSA key authentication.
 Supports both demo (sandbox) and production environments.
+
+Rate limiting: built-in token-bucket limiter prevents API throttling when
+multiple bots share the same client.  Default 10 req/s (configurable).
+
+Async wrapper: ``AsyncKalshiClient`` offloads every sync SDK call to a
+thread via ``asyncio.to_thread`` so async bots never block the event loop.
 """
 
+import asyncio
 import base64
+import functools
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -26,6 +35,37 @@ from kalshi_python import (
 from app.config import get
 
 logger = logging.getLogger("bot.kalshi")
+
+
+# ─── Rate Limiter ────────────────────────────────────────────────────────────
+
+class TokenBucketRateLimiter:
+    """Thread-safe token-bucket rate limiter.
+
+    Allows `rate` requests per second with a burst capacity of `burst`.
+    Callers block (sleep) until a token is available.
+    """
+
+    def __init__(self, rate: float = 10.0, burst: int = 15):
+        self._rate = rate          # tokens added per second
+        self._burst = burst        # max tokens in bucket
+        self._tokens = float(burst)
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self):
+        """Block until a token is available, then consume it."""
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                elapsed = now - self._last
+                self._last = now
+                self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                wait = (1.0 - self._tokens) / self._rate
+            time.sleep(wait)
 
 # API base URLs
 KALSHI_HOSTS = {
@@ -52,6 +92,11 @@ class KalshiTradingClient:
         self._portfolio: Optional[PortfolioApi] = None
         self._markets: Optional[MarketsApi] = None
         self._events: Optional[EventsApi] = None
+
+        # Rate limiter — shared across all bots using this singleton
+        rate_limit = cfg.get("rate_limit_per_second", 10)
+        burst = cfg.get("rate_limit_burst", 15)
+        self._limiter = TokenBucketRateLimiter(rate=rate_limit, burst=burst)
 
     def _ensure_client(self):
         """Lazily initialize the API client with RSA auth."""
@@ -85,9 +130,14 @@ class KalshiTradingClient:
     # ACCOUNT
     # =========================================================================
 
+    def _rate_limit(self):
+        """Acquire a rate-limit token before making an API call."""
+        self._limiter.acquire()
+
     def get_balance(self) -> dict:
         """Get account balance in cents."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._portfolio.get_balance()
         balance_data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         logger.info(f"Kalshi balance: {balance_data}")
@@ -100,6 +150,7 @@ class KalshiTradingClient:
     def get_events(self, status: str = "open", limit: int = 20) -> list:
         """Get available events. Status: open, closed, settled."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._events.get_events(status=status, limit=limit)
         events = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return events.get("events", [])
@@ -107,6 +158,7 @@ class KalshiTradingClient:
     def get_event(self, event_ticker: str) -> dict:
         """Get details for a specific event."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._events.get_event(event_ticker=event_ticker)
         return resp.to_dict() if hasattr(resp, "to_dict") else resp
 
@@ -118,6 +170,7 @@ class KalshiTradingClient:
     ) -> list:
         """Get markets, optionally filtered by event."""
         self._ensure_client()
+        self._rate_limit()
         kwargs = {"status": status, "limit": limit}
         if event_ticker:
             kwargs["event_ticker"] = event_ticker
@@ -128,6 +181,7 @@ class KalshiTradingClient:
     def get_market(self, ticker: str) -> dict:
         """Get details for a specific market."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._markets.get_market(ticker=ticker)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("market", data)
@@ -135,6 +189,7 @@ class KalshiTradingClient:
     def get_orderbook(self, ticker: str) -> dict:
         """Get order book for a market."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._markets.get_market_orderbook(ticker=ticker)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("orderbook", data)
@@ -142,12 +197,14 @@ class KalshiTradingClient:
     def get_market_trades(self, ticker: str, limit: int = 20) -> list:
         """Get recent trades for a market."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._markets.get_trades(ticker=ticker, limit=limit)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("trades", [])
 
     def _api_get(self, path: str) -> dict:
         """Direct authenticated GET to the Kalshi API (bypasses SDK)."""
+        self._rate_limit()
         host = KALSHI_HOSTS.get(self.mode, KALSHI_HOSTS["demo"]).replace("/trade-api/v2", "")
         full_path = "/trade-api/v2" + path
 
@@ -203,6 +260,7 @@ class KalshiTradingClient:
     ) -> list:
         """Get candlestick data. period_interval: 1 (1min), 60 (1hr), 1440 (1day)."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._markets.get_market_candlesticks(
             ticker=ticker, period_interval=period_interval
         )
@@ -273,6 +331,20 @@ class KalshiTradingClient:
         price = yes_price if side == "yes" else no_price
         order_cost = (price * count) if price else 0
 
+        # 0. Global risk gate — circuit breaker pre-trade check
+        if action == "buy" and order_cost > 0:
+            try:
+                from app.services.kalshi_risk_manager import get_risk_manager
+                rm = get_risk_manager()
+                if rm.enabled:
+                    gate = rm.check_order(order_cost, bot_name=client_order_id or "unknown")
+                    if not gate["allowed"]:
+                        raise ValueError(f"Risk gate blocked: {gate['reason']}")
+            except ValueError:
+                raise
+            except Exception as e:
+                logger.warning(f"Risk gate check failed (allowing order): {e}")
+
         # 1. Per-trade limit
         if order_cost > self.max_cost_per_trade:
             raise ValueError(
@@ -316,6 +388,7 @@ class KalshiTradingClient:
         order = CreateOrderRequest(**order_kwargs)
         logger.info(f"Placing Kalshi order: {action} {count}x {side} @ {price}c on {ticker}")
 
+        self._rate_limit()
         resp = self._portfolio.create_order(create_order_request=order)
         result = resp.to_dict() if hasattr(resp, "to_dict") else resp
         logger.info(f"Kalshi order placed: {result}")
@@ -340,6 +413,7 @@ class KalshiTradingClient:
     def cancel_order(self, order_id: str) -> dict:
         """Cancel an open order."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._portfolio.cancel_order(order_id=order_id)
         result = resp.to_dict() if hasattr(resp, "to_dict") else resp
         logger.info(f"Kalshi order cancelled: {order_id}")
@@ -352,6 +426,7 @@ class KalshiTradingClient:
     def get_positions(self, ticker: Optional[str] = None) -> list:
         """Get current positions, optionally filtered by ticker."""
         self._ensure_client()
+        self._rate_limit()
         kwargs = {}
         if ticker:
             kwargs["ticker"] = ticker
@@ -362,6 +437,7 @@ class KalshiTradingClient:
     def get_open_orders(self) -> list:
         """Get all open/resting orders."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._portfolio.get_orders(status="resting")
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("orders", [])
@@ -369,6 +445,7 @@ class KalshiTradingClient:
     def get_fills(self, limit: int = 50) -> list:
         """Get recent fills (executed trades)."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._portfolio.get_fills(limit=limit)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("fills", [])
@@ -376,6 +453,7 @@ class KalshiTradingClient:
     def get_settlements(self, limit: int = 50) -> list:
         """Get settled positions and payouts."""
         self._ensure_client()
+        self._rate_limit()
         resp = self._portfolio.get_settlements(limit=limit)
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("settlements", [])
@@ -472,3 +550,135 @@ def get_kalshi_client() -> KalshiTradingClient:
     if _kalshi_client is None:
         _kalshi_client = KalshiTradingClient()
     return _kalshi_client
+
+
+# ─── Async Wrapper ────────────────────────────────────────────────────────────
+
+class AsyncKalshiClient:
+    """Async facade over KalshiTradingClient.
+
+    Every method delegates to the underlying sync client via
+    ``asyncio.to_thread`` so callers never block the event loop.
+    Shares the same singleton (and therefore the same rate limiter).
+    """
+
+    def __init__(self, sync_client: KalshiTradingClient):
+        self._sync = sync_client
+
+    # Expose config attributes directly
+    @property
+    def enabled(self):
+        return self._sync.enabled
+
+    @property
+    def mode(self):
+        return self._sync.mode
+
+    @property
+    def max_cost_per_trade(self):
+        return self._sync.max_cost_per_trade
+
+    @property
+    def max_total_exposure(self):
+        return self._sync.max_total_exposure
+
+    @property
+    def default_count(self):
+        return self._sync.default_count
+
+    # --- Account ---
+    async def get_balance(self) -> dict:
+        return await asyncio.to_thread(self._sync.get_balance)
+
+    # --- Markets / Events ---
+    async def get_events(self, status: str = "open", limit: int = 20) -> list:
+        return await asyncio.to_thread(self._sync.get_events, status, limit)
+
+    async def get_event(self, event_ticker: str) -> dict:
+        return await asyncio.to_thread(self._sync.get_event, event_ticker)
+
+    async def get_markets(self, event_ticker: Optional[str] = None,
+                          status: str = "open", limit: int = 50) -> list:
+        return await asyncio.to_thread(self._sync.get_markets, event_ticker, status, limit)
+
+    async def get_market(self, ticker: str) -> dict:
+        return await asyncio.to_thread(self._sync.get_market, ticker)
+
+    async def get_orderbook(self, ticker: str) -> dict:
+        return await asyncio.to_thread(self._sync.get_orderbook, ticker)
+
+    async def get_market_trades(self, ticker: str, limit: int = 20) -> list:
+        return await asyncio.to_thread(self._sync.get_market_trades, ticker, limit)
+
+    async def get_recent_trades(self, limit: int = 100, ticker: Optional[str] = None) -> list:
+        return await asyncio.to_thread(self._sync.get_recent_trades, limit, ticker)
+
+    async def get_markets_full(self, status: str = "open", limit: int = 200,
+                               event_ticker: Optional[str] = None) -> list:
+        return await asyncio.to_thread(self._sync.get_markets_full, status, limit, event_ticker)
+
+    async def get_market_full(self, ticker: str) -> dict:
+        return await asyncio.to_thread(self._sync.get_market_full, ticker)
+
+    async def get_candlesticks(self, ticker: str, period_interval: int = 60,
+                               limit: int = 100) -> list:
+        return await asyncio.to_thread(self._sync.get_candlesticks, ticker, period_interval, limit)
+
+    async def search_markets(self, query: str, limit: int = 20) -> list:
+        return await asyncio.to_thread(self._sync.search_markets, query, limit)
+
+    # --- Orders ---
+    async def place_order(self, ticker: str, side: str, action: str = "buy",
+                          count: Optional[int] = None, yes_price: Optional[int] = None,
+                          no_price: Optional[int] = None, order_type: str = "limit",
+                          client_order_id: Optional[str] = None,
+                          expiration_ts: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(
+            self._sync.place_order, ticker, side, action, count,
+            yes_price, no_price, order_type, client_order_id, expiration_ts,
+        )
+
+    async def buy_yes(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(self._sync.buy_yes, ticker, price, count)
+
+    async def buy_no(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(self._sync.buy_no, ticker, price, count)
+
+    async def sell_yes(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(self._sync.sell_yes, ticker, price, count)
+
+    async def sell_no(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
+        return await asyncio.to_thread(self._sync.sell_no, ticker, price, count)
+
+    async def cancel_order(self, order_id: str) -> dict:
+        return await asyncio.to_thread(self._sync.cancel_order, order_id)
+
+    # --- Positions ---
+    async def get_positions(self, ticker: Optional[str] = None) -> list:
+        return await asyncio.to_thread(self._sync.get_positions, ticker)
+
+    async def get_open_orders(self) -> list:
+        return await asyncio.to_thread(self._sync.get_open_orders)
+
+    async def get_fills(self, limit: int = 50) -> list:
+        return await asyncio.to_thread(self._sync.get_fills, limit)
+
+    async def get_settlements(self, limit: int = 50) -> list:
+        return await asyncio.to_thread(self._sync.get_settlements, limit)
+
+    async def get_portfolio_summary(self) -> dict:
+        return await asyncio.to_thread(self._sync.get_portfolio_summary)
+
+    def close(self):
+        self._sync.close()
+
+
+# Async singleton
+_async_kalshi_client: Optional[AsyncKalshiClient] = None
+
+
+def get_async_kalshi_client() -> AsyncKalshiClient:
+    global _async_kalshi_client
+    if _async_kalshi_client is None:
+        _async_kalshi_client = AsyncKalshiClient(get_kalshi_client())
+    return _async_kalshi_client

@@ -34,6 +34,12 @@ class TelegramCommandHandler:
         "/review": "Review an indicator script (/review filename)",
         "/positions": "Show open positions with live P&L",
         "/scout": "Run multi-source intelligence scan (X, blogs, on-chain, news)",
+        "/kalshi": "Kalshi portfolio: P&L, positions, bot status",
+        "/kalshi_reset": "Reset circuit breaker to resume Kalshi trading",
+        "/prices": "Live multi-token price snapshot",
+        "/arb": "Arbitrage scanner status + opportunities",
+        "/spread": "Spread bot status + inventory",
+        "/risk": "Circuit breaker status",
         "/start": "Start the bot",
         "/stop": "Stop the bot",
     }
@@ -48,6 +54,12 @@ class TelegramCommandHandler:
         self.chat_id = str(cfg.get("chat_id", ""))
         self.api_base = f"https://api.telegram.org/bot{self.bot_token}"
         self._client = httpx.AsyncClient(timeout=15)
+
+        # Local API base URL (read from config, fallback to localhost:8000)
+        server_cfg = get("server") or {}
+        host = server_cfg.get("host", "localhost")
+        port = server_cfg.get("port", 8000)
+        self._api_base_url = f"http://{host}:{port}"
         self._offset = 0
         self._running = False
 
@@ -132,6 +144,12 @@ class TelegramCommandHandler:
                 "/scan": self.cmd_scan,
                 "/positions": self.cmd_positions,
                 "/scout": self.cmd_scout,
+                "/kalshi": self.cmd_kalshi,
+                "/kalshi_reset": self.cmd_kalshi_reset,
+                "/prices": self.cmd_prices,
+                "/arb": self.cmd_arb,
+                "/spread": self.cmd_spread,
+                "/risk": self.cmd_risk,
                 "/start": self.cmd_start,
                 "/stop": self.cmd_stop,
             }
@@ -168,23 +186,64 @@ class TelegramCommandHandler:
         # Quick health check
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                resp = await c.get("http://localhost:8000/health")
+                resp = await c.get(f"{self._api_base_url}/health")
                 api_ok = resp.status_code == 200
         except Exception:
             api_ok = False
 
         db_stats = get_stats()
 
+        # Kalshi bot status — parallel fetch
+        kalshi_lines = []
+        bots = [
+            ("Technical", "/api/kalshi/tech/status"),
+            ("AI Agent", "/api/kalshi/ai/status"),
+            ("Market Maker", "/api/kalshi/mm/status"),
+            ("Arb Scanner", "/api/kalshi/arbitrage/status"),
+            ("Spread Bot", "/api/kalshi/spread/status"),
+            ("Whale Tracker", "/api/kalshi/whales"),
+            ("Sports", "/api/kalshi/sports/status"),
+            ("Esports", "/api/kalshi/esports/status"),
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                responses = await asyncio.gather(
+                    *[c.get(f"{self._api_base_url}{ep}") for _, ep in bots],
+                    return_exceptions=True,
+                )
+                for (name, _), resp in zip(bots, responses):
+                    if isinstance(resp, Exception) or resp.status_code != 200:
+                        kalshi_lines.append(f"  ⚫ {name}")
+                        continue
+                    data = resp.json()
+                    running = data.get("running", data.get("enabled", False))
+                    icon = "🟢" if running else "⚫"
+                    positions = data.get("open_positions", data.get("positions", data.get("markets", [])))
+                    pos_count = len(positions) if isinstance(positions, list) else 0
+                    extra = f" ({pos_count})" if pos_count > 0 else ""
+                    kalshi_lines.append(f"  {icon} {name}{extra}")
+        except Exception:
+            kalshi_lines.append("  ⚠️ Cannot reach Kalshi endpoints")
+
         msg = (
             f"<b>{status_icon} BOT STATUS</b>\n\n"
             f"Active: <b>{'YES' if active else 'NO'}</b>\n"
             f"API Health: <b>{'OK' if api_ok else 'DOWN'}</b>\n"
-            f"Uptime: <code>{uptime}</code>\n"
-            f"Strategy: 4H v1.3.2 + 1H v3.5.3 + Daily v2\n"
-            f"Total Trades: {db_stats.get('total_trades', 0)}\n"
-            f"Win Rate: {db_stats.get('win_rate', 0):.1f}%\n"
-            f"Time: <code>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</code>"
+            f"Uptime: <code>{uptime}</code>\n\n"
+            f"<b>📊 CRYPTO INDICATORS</b>\n"
+            f"  Confluence Pro v3.5.3 — 1H\n"
+            f"  Mean Reversion v1.3.2 — 4H\n"
+            f"  BB Squeeze v1.0/v2.0 — 4H\n"
+            f"  OB+FVG Alert v1.0 — 1H\n\n"
+            f"<b>🎰 KALSHI PREDICTION MARKETS</b>\n"
+            + "\n".join(kalshi_lines) + "\n\n"
+            f"<b>📈 TRADING STATS</b>\n"
+            f"  Total Trades: {db_stats.get('total_trades', 0)}\n"
+            f"  Win Rate: {db_stats.get('win_rate', 0):.1f}%\n"
         )
+
+        msg += f"\n<code>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</code>"
+
         await self.send(msg)
 
     async def cmd_wallet(self):
@@ -316,7 +375,7 @@ class TelegramCommandHandler:
         # 1. Bot API
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                resp = await c.get("http://localhost:8000/health")
+                resp = await c.get(f"{self._api_base_url}/health")
                 results.append(("Bot API", resp.status_code == 200, "localhost:8000"))
         except Exception as e:
             results.append(("Bot API", False, str(e)[:40]))
@@ -458,6 +517,212 @@ class TelegramCommandHandler:
             f"Break-even: ~$134/mo profit needed"
         )
         await self.send(msg)
+
+    async def cmd_kalshi(self):
+        """Kalshi portfolio summary — positions, P&L, per-bot breakdown."""
+        lines = ["<b>🎰 KALSHI PORTFOLIO</b>\n"]
+
+        # Circuit breaker status
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/risk/status")
+                if resp.status_code == 200:
+                    risk = resp.json()
+                    if risk.get("tripped"):
+                        lines.append("🚨 <b>CIRCUIT BREAKER TRIPPED</b>")
+                        lines.append(f"  Reason: {risk.get('trip_reason', '?')}")
+                        lines.append(f"  Use /kalshi_reset to resume\n")
+                    else:
+                        pnl = risk.get("current_pnl_cents", 0)
+                        limit = risk.get("max_daily_loss_cents", 0)
+                        lines.append(f"🛡️ Circuit Breaker: OK (${pnl/100:+.2f} / -${limit/100:.2f} limit)\n")
+        except Exception:
+            pass
+
+        # Fetch unified P&L from our own API
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/unified-pnl")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    bots = data.get("bots", {})
+                    bot_names = {
+                        "market_maker": "Market Maker",
+                        "spread_bot": "Spread Bot",
+                        "technical": "Technical",
+                        "ai_agent": "AI Agent",
+                    }
+                    lines.append("<b>Bot P&L</b>")
+                    for key, info in bots.items():
+                        name = bot_names.get(key, key)
+                        icon = "🟢" if info.get("running") else "⚫"
+                        pnl = info.get("pnl_cents", 0)
+                        trades = info.get("fills") or info.get("trades", 0)
+                        pnl_str = f"${pnl/100:+.2f}" if pnl != 0 else "--"
+                        lines.append(f"  {icon} {name}: {pnl_str} ({trades} trades)")
+
+                    total = data.get("total_pnl_cents", 0)
+                    lines.append(f"\n  <b>Total P&L: ${total/100:+.2f}</b>")
+
+                    db = data.get("db_stats", {})
+                    if db:
+                        lines.append(f"\n<b>DB Stats</b>")
+                        lines.append(f"  Trades: {db.get('total_positions', 0)}")
+                        lines.append(f"  Open: {db.get('open_positions', 0)}")
+                        lines.append(f"  Win Rate: {db.get('win_rate', 0):.0f}%")
+                else:
+                    lines.append("  ⚠️ API returned error")
+        except Exception as e:
+            lines.append(f"  ⚠️ Cannot reach API: {str(e)[:50]}")
+
+        # Fetch positions
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/positions")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    positions = data.get("live_positions") or data.get("db_positions", [])
+                    if positions:
+                        lines.append(f"\n<b>Open Positions ({len(positions)})</b>")
+                        for p in positions[:10]:
+                            ticker = p.get("ticker", "?")
+                            side = p.get("side", "?").upper()
+                            count = abs(p.get("count") or p.get("position", 0))
+                            pnl = p.get("pnl_cents") or p.get("unrealized_pnl_cents", 0)
+                            lines.append(f"  {ticker}: {count} {side} (${pnl/100:+.2f})")
+        except Exception:
+            pass
+
+        lines.append(f"\n<code>{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC</code>")
+        await self.send("\n".join(lines))
+
+    async def cmd_kalshi_reset(self):
+        """Reset the circuit breaker to resume Kalshi trading."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.post(f"{self._api_base_url}/api/kalshi/risk/reset")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("reset"):
+                        await self.send(f"✅ Circuit breaker reset.\n{data.get('message', '')}")
+                    else:
+                        await self.send(f"ℹ️ {data.get('message', 'Not tripped')}")
+                else:
+                    await self.send("⚠️ Reset failed — API error")
+        except Exception as e:
+            await self.send(f"⚠️ Cannot reach API: {str(e)[:50]}")
+
+    async def cmd_prices(self):
+        """Live multi-token price snapshot."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/price")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    prices = data.get("prices", {})
+                    lines = ["<b>💰 LIVE PRICES</b>\n"]
+                    for token, info in prices.items():
+                        if isinstance(info, dict):
+                            price = info.get("price", info.get("usd", 0))
+                            change = info.get("change_24h", 0)
+                            arrow = "▲" if change >= 0 else "▼"
+                            lines.append(f"  {token.upper()}: ${price:.4f} {arrow} {change:+.1f}%")
+                        else:
+                            lines.append(f"  {token.upper()}: ${info:.4f}")
+                    await self.send("\n".join(lines))
+                else:
+                    await self.send("⚠️ Price API error")
+        except Exception as e:
+            await self.send(f"⚠️ {str(e)[:50]}")
+
+    async def cmd_arb(self):
+        """Arbitrage scanner status and latest opportunities."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                status_resp, opps_resp = await asyncio.gather(
+                    c.get(f"{self._api_base_url}/api/kalshi/arbitrage/status"),
+                    c.get(f"{self._api_base_url}/api/kalshi/arbitrage/opportunities"),
+                    return_exceptions=True,
+                )
+                lines = ["<b>🔍 ARB SCANNER</b>\n"]
+                if not isinstance(status_resp, Exception) and status_resp.status_code == 200:
+                    s = status_resp.json()
+                    icon = "🟢" if s.get("running") else "⚫"
+                    lines.append(f"  {icon} {'Running' if s.get('running') else 'Stopped'}")
+                    lines.append(f"  Scans: {s.get('scan_count', 0)}")
+                    lines.append(f"  Found: {s.get('total_found', 0)} opportunities")
+                    if s.get("last_scan"):
+                        lines.append(f"  Last scan: {s['last_scan'][:19]}")
+                if not isinstance(opps_resp, Exception) and opps_resp.status_code == 200:
+                    opps = opps_resp.json().get("opportunities", [])
+                    if opps:
+                        lines.append(f"\n<b>Latest ({len(opps)})</b>")
+                        for o in opps[:5]:
+                            ticker = o.get("ticker", "?")[:30]
+                            profit = o.get("profit_cents", 0)
+                            lines.append(f"  {ticker}: +{profit}¢")
+                await self.send("\n".join(lines))
+        except Exception as e:
+            await self.send(f"⚠️ {str(e)[:50]}")
+
+    async def cmd_spread(self):
+        """Spread bot status with inventory details."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/spread/status")
+                if resp.status_code == 200:
+                    s = resp.json()
+                    icon = "🟢" if s.get("running") else "⚫"
+                    lines = [f"<b>📊 SPREAD BOT</b>\n"]
+                    lines.append(f"  {icon} {'Running' if s.get('running') else 'Stopped'}")
+                    lines.append(f"  Cycles: {s.get('cycle_count', 0)}")
+                    lines.append(f"  P&L: ${s.get('total_pnl_usd', 0):+.2f}")
+                    lines.append(f"  Active markets: {s.get('active_markets', 0)}")
+                    markets = s.get("markets", {})
+                    if markets:
+                        lines.append(f"\n<b>Markets</b>")
+                        for ticker, m in markets.items():
+                            net = m.get("net_inventory", 0)
+                            spread = m.get("yes_ask", 0) - m.get("yes_bid", 0)
+                            captured = m.get("spread_captured_cents", 0)
+                            lines.append(f"  {ticker[:25]}: inv={net} spread={spread}¢ +{captured}¢")
+                    await self.send("\n".join(lines))
+                else:
+                    await self.send("⚠️ Spread bot API error")
+        except Exception as e:
+            await self.send(f"⚠️ {str(e)[:50]}")
+
+    async def cmd_risk(self):
+        """Circuit breaker status."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/risk/status")
+                if resp.status_code == 200:
+                    d = resp.json()
+                    if d.get("tripped"):
+                        lines = [
+                            "🚨 <b>CIRCUIT BREAKER: TRIPPED</b>\n",
+                            f"  Reason: {d.get('trip_reason', '?')}",
+                            f"  P&L at trip: ${d.get('trip_pnl_cents', 0)/100:+.2f}",
+                            f"  Tripped at: {(d.get('tripped_at') or '')[:19]}",
+                            f"\n  Use /kalshi_reset to resume",
+                        ]
+                    else:
+                        pnl = d.get("current_pnl_cents", 0)
+                        limit = d.get("max_daily_loss_cents", 0)
+                        pct = abs(pnl) / max(limit, 1) * 100
+                        lines = [
+                            "🛡️ <b>CIRCUIT BREAKER: OK</b>\n",
+                            f"  Current P&L: ${pnl/100:+.2f}",
+                            f"  Daily limit: -${limit/100:.2f}",
+                            f"  Used: {pct:.0f}%",
+                            f"  Checks: {d.get('check_count', 0)}",
+                        ]
+                    await self.send("\n".join(lines))
+                else:
+                    await self.send("⚠️ Risk API error")
+        except Exception as e:
+            await self.send(f"⚠️ {str(e)[:50]}")
 
     async def cmd_start(self):
         if state.is_active():

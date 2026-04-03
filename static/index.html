@@ -833,6 +833,7 @@ footer a:hover { color: var(--green); }
       <div class="kalshi-stat"><div class="stat-value" id="kalshi-total">0</div><div class="stat-label">TOTAL TRADES</div></div>
       <div class="kalshi-stat"><div class="stat-value" id="kalshi-pnl">$0.00</div><div class="stat-label">TOTAL P&L</div></div>
       <div class="kalshi-stat"><div class="stat-value" id="kalshi-winrate">0%</div><div class="stat-label">WIN RATE</div></div>
+      <div class="kalshi-stat"><div class="stat-value" id="kalshi-breaker" style="font-size:.7rem;">OK</div><div class="stat-label">CIRCUIT BREAKER</div></div>
     </div>
     <div style="overflow-x:auto;">
       <table id="kalshi-markets-table">
@@ -855,6 +856,29 @@ footer a:hover { color: var(--green); }
       </table>
       <div id="kalshi-positions-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
         No open positions. Bots will display trades here when contracts are held.
+      </div>
+    </div>
+    <!-- Unified Bot P&L -->
+    <div style="margin-top:12px;">
+      <div class="section-title" style="font-size:.6rem;margin-bottom:6px;">Bot P&L Breakdown</div>
+      <table id="kalshi-bot-pnl-table">
+        <thead><tr>
+          <th>Bot</th><th>Status</th><th>Trades/Fills</th><th>P&L</th>
+        </tr></thead>
+        <tbody id="kalshi-bot-pnl-tbody"></tbody>
+      </table>
+      <div id="kalshi-bot-pnl-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
+        Loading bot P&L...
+      </div>
+    </div>
+    <!-- Live Trade Feed -->
+    <div style="margin-top:12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span class="section-title" style="font-size:.6rem;margin:0;">Live Trade Feed</span>
+        <span id="ws-status-badge" style="font-size:.5rem;color:var(--green-dim);">OFFLINE</span>
+      </div>
+      <div id="kalshi-trade-feed" style="max-height:160px;overflow-y:auto;font-family:var(--mono);font-size:.6rem;color:var(--green-dim);padding:4px;">
+        Waiting for WebSocket trades...
       </div>
     </div>
     <!-- Arbitrage Scanner -->
@@ -955,7 +979,7 @@ footer a:hover { color: var(--green); }
         <tbody id="tech-tbody"></tbody>
       </table>
       <div id="tech-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        Auto-trades on strong MACD cross + CCI extreme confluence. 1 contract, $1 max per trade.
+        Auto-trades on MACD/CCI confluence. Skips finance markets and 40-60¢ dead zone. Targets tail prices where behavioral bias is strongest.
       </div>
     </div>
     <!-- AI Agent Bot -->
@@ -982,7 +1006,7 @@ footer a:hover { color: var(--green); }
         <tbody id="ai-tbody"></tbody>
       </table>
       <div id="ai-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        Analyst + Contrarian + Momentum agents must agree unanimously to auto-trade. Scans every 15m.
+        Analyst + Contrarian + Momentum agents vote unanimously. Prioritizes sports/entertainment/politics over finance. Scans every 15m.
       </div>
     </div>
 
@@ -1087,7 +1111,7 @@ footer a:hover { color: var(--green); }
         <tbody id="mm-tbody"></tbody>
       </table>
       <div id="mm-empty" style="color:var(--green-dim);padding:10px;text-align:center;font-family:var(--mono);font-size:.65rem;">
-        Multi-strategy quoting (midpoint/VWAP/volatility). 1 contract/level, $3 max exposure, 3 markets.
+        Midpoint/VWAP/volatility quoting with NO-side bias at price tails. Avoids 40-60¢ dead zone and finance markets. $3 max exposure.
       </div>
     </div>
   </div>
@@ -3394,6 +3418,127 @@ async function loadKalshiPositions() {
   } catch(e) { console.error('Kalshi positions error:', e); }
 }
 
+async function loadBotPnl() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/unified-pnl`);
+    const d = await r.json();
+    const tbody = document.getElementById('kalshi-bot-pnl-tbody');
+    const table = document.getElementById('kalshi-bot-pnl-table');
+    const empty = document.getElementById('kalshi-bot-pnl-empty');
+    const bots = d.bots || {};
+    const botNames = {market_maker:'Market Maker', spread_bot:'Spread Bot', technical:'Technical', ai_agent:'AI Agent'};
+    tbody.replaceChildren();
+    for (const [key, info] of Object.entries(bots)) {
+      const tr = document.createElement('tr');
+      const tdName = document.createElement('td'); tdName.textContent = botNames[key] || key;
+      const tdStatus = document.createElement('td');
+      const statusSpan = document.createElement('span');
+      statusSpan.textContent = info.running ? 'ON' : 'OFF';
+      statusSpan.style.color = info.running ? 'var(--green)' : 'var(--green-dim)';
+      tdStatus.appendChild(statusSpan);
+      const tdTrades = document.createElement('td'); tdTrades.textContent = info.fills || info.trades || 0;
+      const tdPnl = document.createElement('td');
+      const pnl = info.pnl_cents || 0;
+      if (pnl !== 0) { tdPnl.textContent = (pnl>=0?'+':'') + '$' + (pnl/100).toFixed(2); tdPnl.style.color = pnl>=0 ? 'var(--green)' : 'var(--red)'; }
+      else { tdPnl.textContent = '--'; }
+      tr.append(tdName, tdStatus, tdTrades, tdPnl);
+      tbody.appendChild(tr);
+    }
+    const totalTr = document.createElement('tr');
+    totalTr.style.borderTop = '1px solid var(--green-dark)';
+    totalTr.style.fontWeight = 'bold';
+    const tdTotal = document.createElement('td'); tdTotal.textContent = 'TOTAL';
+    const tdE1 = document.createElement('td');
+    const tdE2 = document.createElement('td');
+    const tdTotalPnl = document.createElement('td');
+    const tp = d.total_pnl_cents || 0;
+    tdTotalPnl.textContent = (tp>=0?'+':'') + '$' + (tp/100).toFixed(2);
+    tdTotalPnl.style.color = tp>=0 ? 'var(--green)' : 'var(--red)';
+    totalTr.append(tdTotal, tdE1, tdE2, tdTotalPnl);
+    tbody.appendChild(totalTr);
+    table.style.display = 'table';
+    empty.style.display = 'none';
+  } catch(e) {
+    const empty = document.getElementById('kalshi-bot-pnl-empty');
+    if (empty) { empty.textContent = 'Cannot reach P&L endpoint'; empty.style.display = 'block'; }
+  }
+}
+
+async function loadTradeFeed() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/ws/status`);
+    const d = await r.json();
+    const badge = document.getElementById('ws-status-badge');
+    if (badge) {
+      badge.textContent = d.connected ? 'LIVE' : 'OFFLINE';
+      badge.style.color = d.connected ? 'var(--green)' : 'var(--green-dim)';
+    }
+  } catch(e) {}
+  try {
+    const r = await fetch(`${API}/api/kalshi/ws/trades?limit=30`);
+    const d = await r.json();
+    const feed = document.getElementById('kalshi-trade-feed');
+    if (!feed) return;
+    const trades = d.trades || [];
+    if (trades.length === 0) {
+      feed.textContent = 'No trades yet — waiting for WebSocket data...';
+      return;
+    }
+    feed.replaceChildren();
+    for (const t of trades) {
+      const row = document.createElement('div');
+      row.style.padding = '2px 0';
+      row.style.borderBottom = '1px solid rgba(0,255,65,0.05)';
+      const ts = t.ts ? new Date(t.ts).toLocaleTimeString() : '';
+      const side = (t.side || '?').toUpperCase();
+      const sideColor = side === 'YES' ? 'var(--green)' : 'var(--red)';
+      const ticker = (t.ticker || '').substring(0, 35);
+      const priceSpan = document.createElement('span');
+      priceSpan.textContent = `${t.price_cents || 0}¢`;
+      const sideSpan = document.createElement('span');
+      sideSpan.textContent = side;
+      sideSpan.style.color = sideColor;
+      row.append(
+        Object.assign(document.createElement('span'), {textContent: ts + ' ', style: 'color:var(--green-dim)'}),
+        sideSpan,
+        Object.assign(document.createElement('span'), {textContent: ` x${t.count || 0} @ `}),
+        priceSpan,
+        Object.assign(document.createElement('span'), {textContent: ` ${ticker}`, style: 'color:var(--green-dim)'}),
+      );
+      feed.appendChild(row);
+    }
+  } catch(e) { console.error('Trade feed error:', e); }
+}
+
+async function loadRiskStatus() {
+  try {
+    const r = await fetch(`${API}/api/kalshi/risk/status`);
+    const d = await r.json();
+    const el = document.getElementById('kalshi-breaker');
+    if (!el) return;
+    if (d.tripped) {
+      el.textContent = 'TRIPPED';
+      el.style.color = 'var(--red)';
+      el.style.cursor = 'pointer';
+      el.title = 'Click to reset circuit breaker';
+      el.onclick = async () => {
+        if (confirm('Reset circuit breaker and resume trading?')) {
+          await fetch(`${API}/api/kalshi/risk/reset`, {method:'POST'});
+          loadRiskStatus();
+        }
+      };
+    } else {
+      const pnl = d.current_pnl_cents || 0;
+      const limit = d.max_daily_loss_cents || 0;
+      el.textContent = 'OK';
+      el.style.color = 'var(--green)';
+      el.title = `P&L: $${(pnl/100).toFixed(2)} / -$${(limit/100).toFixed(2)} limit`;
+      el.style.cursor = 'default';
+      el.onclick = null;
+    }
+  } catch(e) { console.error('Risk status error:', e); }
+}
+
 // ── KALSHI ARBITRAGE ──
 async function loadArbStatus() {
   try {
@@ -4154,6 +4299,10 @@ loadSettings();
 loadPaperStatus();
 loadSystemStatus();
 loadKalshiStatus();
+loadKalshiPositions();
+loadBotPnl();
+loadRiskStatus();
+loadTradeFeed();
 loadArbStatus();
 loadSpreadStatus();
 loadWhales();
@@ -4173,6 +4322,10 @@ setInterval(loadPrices, 10000);
 setInterval(loadPaperStatus, 60000);
 setInterval(loadSystemStatus, 60000);
 setInterval(loadKalshiStatus, 60000);
+setInterval(loadKalshiPositions, 60000);
+setInterval(loadBotPnl, 30000);
+setInterval(loadRiskStatus, 15000);
+setInterval(loadTradeFeed, 10000);
 setInterval(loadArbStatus, 60000);
 setInterval(loadSpreadStatus, 60000);
 setInterval(loadWhales, 60000);

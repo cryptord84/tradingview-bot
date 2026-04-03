@@ -140,9 +140,9 @@ class KalshiEsportsScanner:
 
     async def scan(self) -> dict:
         """Scan all active esports markets."""
-        from app.services.kalshi_client import get_kalshi_client
+        from app.services.kalshi_client import get_async_kalshi_client
 
-        client = get_kalshi_client()
+        client = get_async_kalshi_client()
         if not client.enabled:
             return {"error": "Kalshi client not enabled"}
 
@@ -151,7 +151,7 @@ class KalshiEsportsScanner:
         new_value_bets = []
 
         try:
-            all_markets = client.get_markets_full(status="open", limit=200)
+            all_markets = await client.get_markets_full(status="open", limit=200)
             game_counts = {game: 0 for game in ESPORTS_GAMES}
 
             for m in all_markets:
@@ -247,9 +247,9 @@ class KalshiEsportsScanner:
 
     async def _auto_execute(self, value_bets: list[EsportsValueBet]):
         """Auto-trade on the best value bet."""
-        from app.services.kalshi_client import get_kalshi_client
+        from app.services.kalshi_client import get_async_kalshi_client
 
-        client = get_kalshi_client()
+        client = get_async_kalshi_client()
         if not client.enabled:
             return
 
@@ -258,7 +258,7 @@ class KalshiEsportsScanner:
             return
 
         try:
-            positions = client.get_positions()
+            positions = await client.get_positions()
             open_count = len([p for p in positions if p.get("count", 0) > 0])
             if open_count >= self.max_positions:
                 logger.info(f"Esports auto-trade skipped: {open_count}/{self.max_positions} positions")
@@ -274,7 +274,7 @@ class KalshiEsportsScanner:
             return
 
         try:
-            client.place_order(
+            await client.place_order(
                 ticker=best.market.ticker,
                 side=side,
                 action="buy",
