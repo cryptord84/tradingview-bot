@@ -12,10 +12,12 @@ thread via ``asyncio.to_thread`` so async bots never block the event loop.
 
 import asyncio
 import base64
+import collections
 import functools
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -25,7 +27,6 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from kalshi_python import (
     ApiClient,
     Configuration,
-    CreateOrderRequest,
     EventsApi,
     KalshiClient,
     MarketsApi,
@@ -97,6 +98,11 @@ class KalshiTradingClient:
         rate_limit = cfg.get("rate_limit_per_second", 10)
         burst = cfg.get("rate_limit_burst", 15)
         self._limiter = TokenBucketRateLimiter(rate=rate_limit, burst=burst)
+
+        # Order failure tracker — ring buffer of last 200 failures
+        self._order_failures: collections.deque = collections.deque(maxlen=200)
+        self._order_success_count = 0
+        self._order_failure_count = 0
 
     def _ensure_client(self):
         """Lazily initialize the API client with RSA auth."""
@@ -213,7 +219,14 @@ class KalshiTradingClient:
 
         ts = str(int(time.time() * 1000))
         msg = (ts + "GET" + full_path).encode()
-        sig = private_key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
+        sig = private_key.sign(
+            msg,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH,
+            ),
+            hashes.SHA256(),
+        )
 
         headers = {
             "KALSHI-ACCESS-KEY": self.api_key_id,
@@ -237,17 +250,84 @@ class KalshiTradingClient:
         return data.get("trades", [])
 
     def get_markets_full(self, status: str = "open", limit: int = 200,
-                         event_ticker: Optional[str] = None) -> list:
+                         event_ticker: Optional[str] = None,
+                         series_ticker: Optional[str] = None) -> list:
         """Get markets with full pricing data via direct API.
 
         The SDK strips yes_ask, no_ask, volume, and other pricing fields.
+        Use series_ticker (e.g. "KXNBA") to target specific market series.
         """
         self._ensure_client()
         path = f"/markets?status={status}&limit={limit}"
         if event_ticker:
             path += f"&event_ticker={event_ticker}"
+        if series_ticker:
+            path += f"&series_ticker={series_ticker}"
         data = self._api_get(path)
         return data.get("markets", [])
+
+    # Known active series with real liquidity (updated Apr 2026)
+    ACTIVE_SERIES = [
+        "KXNBA", "KXNHL", "KXMLB",  # Sports — highest volume
+        "KXFED", "KXCPI", "KXGDP",  # Economics
+        "KXBTC", "KXBTCD", "KXETH", "KXETHD",  # Crypto daily
+        "KXINX", "KXINXD",  # S&P 500
+    ]
+
+    def discover_active_markets(self, min_volume: int = 10,
+                                 limit_per_series: int = 50,
+                                 max_days_to_close: int = 0) -> list:
+        """Discover markets with real liquidity across known active series.
+
+        The generic /markets endpoint is flooded with zero-volume MVE parlays.
+        This queries each active series individually to find tradeable markets.
+
+        Args:
+            min_volume: Minimum volume to include a market.
+            limit_per_series: Max markets to fetch per series.
+            max_days_to_close: If > 0, exclude markets closing more than this many
+                               days from now (e.g., 7 = only markets closing within a week).
+        """
+        self._ensure_client()
+        from datetime import datetime, timezone, timedelta
+        cutoff = None
+        if max_days_to_close > 0:
+            cutoff = datetime.now(timezone.utc) + timedelta(days=max_days_to_close)
+
+        all_markets = []
+        for series in self.ACTIVE_SERIES:
+            try:
+                markets = self.get_markets_full(
+                    status="open", limit=limit_per_series,
+                    series_ticker=series,
+                )
+                for m in markets:
+                    vol = float(m.get("volume_fp", "0") or "0")
+                    if vol < min_volume:
+                        continue
+                    # Filter by close date if configured
+                    if cutoff:
+                        close_time = m.get("close_time") or m.get("expected_expiration_time") or ""
+                        if close_time:
+                            try:
+                                close_dt = datetime.fromisoformat(close_time.replace("Z", "+00:00"))
+                                if close_dt > cutoff:
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+                    m["_series"] = series
+                    all_markets.append(m)
+            except Exception as e:
+                logger.warning(f"Failed to fetch series {series}: {e}")
+        all_markets.sort(
+            key=lambda m: float(m.get("volume_fp", "0") or "0"), reverse=True
+        )
+        logger.info(
+            f"Market discovery: {len(all_markets)} active markets across "
+            f"{len(self.ACTIVE_SERIES)} series"
+            + (f" (max {max_days_to_close}d to close)" if max_days_to_close else "")
+        )
+        return all_markets
 
     def get_market_full(self, ticker: str) -> dict:
         """Get a single market with full pricing data via direct API."""
@@ -255,17 +335,49 @@ class KalshiTradingClient:
         data = self._api_get(f"/markets/{ticker}")
         return data.get("market", {})
 
+    @staticmethod
+    def _extract_series(ticker: str) -> str:
+        """Extract series ticker from a market ticker (e.g. KXNBA-26-SAS -> KXNBA)."""
+        # Series is typically the first segment before the first dash+digit
+        parts = ticker.split("-")
+        return parts[0] if parts else ticker
+
     def get_candlesticks(
         self, ticker: str, period_interval: int = 60, limit: int = 100
     ) -> list:
-        """Get candlestick data. period_interval: 1 (1min), 60 (1hr), 1440 (1day)."""
+        """Get candlestick data. period_interval: 1 (1min), 60 (1hr), 1440 (1day).
+
+        Returns normalized candles with flat {open, high, low, close, volume} in cents.
+        """
         self._ensure_client()
-        self._rate_limit()
-        resp = self._markets.get_market_candlesticks(
-            ticker=ticker, period_interval=period_interval
+        series = self._extract_series(ticker)
+        end_ts = int(time.time())
+        # Estimate start_ts from limit and period
+        start_ts = end_ts - (limit * period_interval * 60)
+        path = (
+            f"/series/{series}/markets/{ticker}/candlesticks"
+            f"?start_ts={start_ts}&end_ts={end_ts}&period_interval={period_interval}"
         )
-        data = resp.to_dict() if hasattr(resp, "to_dict") else resp
-        return data.get("candlesticks", [])
+        data = self._api_get(path)
+        raw = data.get("candlesticks", [])
+        # Normalize from new API format (nested dicts with _dollars strings)
+        # to flat format expected by bots ({open, high, low, close, volume} in cents)
+        normalized = []
+        for c in raw:
+            price = c.get("price", {})
+            if isinstance(price, dict):
+                normalized.append({
+                    "open": int(round(float(price.get("open_dollars", "0") or "0") * 100)),
+                    "high": int(round(float(price.get("high_dollars", "0") or "0") * 100)),
+                    "low": int(round(float(price.get("low_dollars", "0") or "0") * 100)),
+                    "close": int(round(float(price.get("close_dollars", "0") or "0") * 100)),
+                    "volume": int(float(c.get("volume_fp", "0") or "0")),
+                    "ts": c.get("end_period_ts", 0),
+                })
+            else:
+                # Already flat format (legacy)
+                normalized.append(c)
+        return normalized
 
     def search_markets(self, query: str, limit: int = 20) -> list:
         """Search for markets by keyword in title/description."""
@@ -331,15 +443,29 @@ class KalshiTradingClient:
         price = yes_price if side == "yes" else no_price
         order_cost = (price * count) if price else 0
 
-        # 0. Global risk gate — circuit breaker pre-trade check
+        # 0. Global risk gate — circuit breaker + category limit check
         if action == "buy" and order_cost > 0:
             try:
                 from app.services.kalshi_risk_manager import get_risk_manager
                 rm = get_risk_manager()
                 if rm.enabled:
-                    gate = rm.check_order(order_cost, bot_name=client_order_id or "unknown")
+                    gate = rm.check_order(
+                        order_cost,
+                        bot_name=client_order_id or "unknown",
+                        ticker=ticker,
+                    )
                     if not gate["allowed"]:
                         raise ValueError(f"Risk gate blocked: {gate['reason']}")
+
+                    # Liquidity-based size cap
+                    max_liq_size = rm.get_max_size(ticker)
+                    if max_liq_size is not None and count > max_liq_size:
+                        logger.info(
+                            f"Liquidity cap: reducing {ticker} order from {count} to {max_liq_size} contracts"
+                        )
+                        count = max_liq_size
+                        order_kwargs["count"] = count
+                        order_cost = (price * count) if price else 0
             except ValueError:
                 raise
             except Exception as e:
@@ -385,14 +511,46 @@ class KalshiTradingClient:
             except Exception as e:
                 logger.warning(f"Could not verify exposure before order: {e}")
 
-        order = CreateOrderRequest(**order_kwargs)
         logger.info(f"Placing Kalshi order: {action} {count}x {side} @ {price}c on {ticker}")
 
         self._rate_limit()
-        resp = self._portfolio.create_order(create_order_request=order)
+        try:
+            resp = self._portfolio.create_order(**order_kwargs)
+        except Exception as e:
+            self._order_failure_count += 1
+            self._order_failures.append({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "ticker": ticker,
+                "side": side,
+                "action": action,
+                "count": count,
+                "price": price,
+                "bot": client_order_id.split("-")[0] if client_order_id else "unknown",
+                "error": str(e)[:300],
+            })
+            raise
+
         result = resp.to_dict() if hasattr(resp, "to_dict") else resp
+        self._order_success_count += 1
         logger.info(f"Kalshi order placed: {result}")
+
+        # Record against category budget
+        if action == "buy" and order_cost > 0:
+            try:
+                from app.services.kalshi_risk_manager import get_risk_manager
+                get_risk_manager().record_order(ticker, order_cost)
+            except Exception:
+                pass
+
         return result
+
+    def get_order_health(self, limit: int = 50) -> dict:
+        """Return order success/failure stats and recent failures."""
+        return {
+            "success_count": self._order_success_count,
+            "failure_count": self._order_failure_count,
+            "recent_failures": list(self._order_failures)[-limit:],
+        }
 
     def buy_yes(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
         """Buy YES contracts at a given price (cents)."""
@@ -575,6 +733,14 @@ class AsyncKalshiClient:
         return self._sync.mode
 
     @property
+    def api_key_id(self):
+        return self._sync.api_key_id
+
+    @property
+    def private_key_path(self):
+        return self._sync.private_key_path
+
+    @property
     def max_cost_per_trade(self):
         return self._sync.max_cost_per_trade
 
@@ -614,11 +780,22 @@ class AsyncKalshiClient:
         return await asyncio.to_thread(self._sync.get_recent_trades, limit, ticker)
 
     async def get_markets_full(self, status: str = "open", limit: int = 200,
-                               event_ticker: Optional[str] = None) -> list:
-        return await asyncio.to_thread(self._sync.get_markets_full, status, limit, event_ticker)
+                               event_ticker: Optional[str] = None,
+                               series_ticker: Optional[str] = None) -> list:
+        return await asyncio.to_thread(
+            self._sync.get_markets_full, status, limit, event_ticker, series_ticker
+        )
 
     async def get_market_full(self, ticker: str) -> dict:
         return await asyncio.to_thread(self._sync.get_market_full, ticker)
+
+    async def discover_active_markets(self, min_volume: int = 10,
+                                       limit_per_series: int = 50,
+                                       max_days_to_close: int = 0) -> list:
+        return await asyncio.to_thread(
+            self._sync.discover_active_markets, min_volume, limit_per_series,
+            max_days_to_close
+        )
 
     async def get_candlesticks(self, ticker: str, period_interval: int = 60,
                                limit: int = 100) -> list:
@@ -637,6 +814,9 @@ class AsyncKalshiClient:
             self._sync.place_order, ticker, side, action, count,
             yes_price, no_price, order_type, client_order_id, expiration_ts,
         )
+
+    def get_order_health(self, limit: int = 50) -> dict:
+        return self._sync.get_order_health(limit)
 
     async def buy_yes(self, ticker: str, price: int, count: Optional[int] = None) -> dict:
         return await asyncio.to_thread(self._sync.buy_yes, ticker, price, count)

@@ -68,7 +68,7 @@ class WalletService:
         self.rpc_url = get("wallet", "rpc_url", "https://api.mainnet-beta.solana.com")
         self._client = httpx.AsyncClient(timeout=15)
         self._keypair: Optional[Keypair] = None
-        self._cache: dict[str, tuple[float, float]] = {}  # key -> (timestamp, value)
+        self._cache: dict[str, tuple[float, any]] = {}  # key -> (timestamp, value)
 
     def get_keypair(self) -> Keypair:
         if self._keypair is None:
@@ -156,8 +156,73 @@ class WalletService:
             logger.warning(f"Could not fetch USDC balance: {e}")
             return 0.0
 
-    async def get_total_usd_balance(self, sol_price: float) -> dict:
-        """Get total portfolio value: SOL + USDC combined."""
+    # SPL token mints we track (excluding SOL native and USDC which have their own methods)
+    TRACKED_TOKEN_MINTS = {
+        "JTO": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
+        "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+        "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+        "PYTH": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+        "RAY": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+        "ETH": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs",
+        "ORCA": "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE",
+    }
+
+    async def get_spl_token_balances(self) -> dict[str, float]:
+        """Get balances for all tracked SPL tokens. Returns {symbol: amount}."""
+        cached = self._get_cached("spl_tokens")
+        if cached is not None:
+            return cached  # type: ignore
+
+        # Fetch ALL token accounts owned by this wallet in one RPC call
+        try:
+            resp = await self._client.post(
+                self.rpc_url,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "getTokenAccountsByOwner",
+                    "params": [
+                        self.public_key,
+                        {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+                        {"encoding": "jsonParsed"},
+                    ],
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                logger.warning(f"RPC error fetching token accounts: {data['error']}")
+                return {}
+
+            # Build reverse lookup: mint -> symbol
+            mint_to_symbol = {v: k for k, v in self.TRACKED_TOKEN_MINTS.items()}
+
+            accounts = data.get("result", {}).get("value", [])
+            balances: dict[str, float] = {}
+            for account in accounts:
+                parsed = account.get("account", {}).get("data", {}).get("parsed", {})
+                info = parsed.get("info", {})
+                mint = info.get("mint", "")
+                symbol = mint_to_symbol.get(mint)
+                if symbol:
+                    amount = info.get("tokenAmount", {}).get("uiAmount", 0.0)
+                    if amount and amount > 0:
+                        balances[symbol] = amount
+
+            self._set_cached("spl_tokens", balances)  # type: ignore
+            return balances
+        except Exception as e:
+            logger.warning(f"Could not fetch SPL token balances: {e}")
+            return {}
+
+    async def get_total_usd_balance(self, sol_price: float, token_prices: Optional[dict] = None) -> dict:
+        """Get total portfolio value: SOL + USDC + all SPL tokens.
+
+        Args:
+            sol_price: Current SOL price in USD.
+            token_prices: Optional dict of {symbol: {"price": float}} for SPL tokens.
+                          If not provided, SPL tokens are excluded from total.
+        """
         sol_balance, usdc_balance = 0.0, 0.0
         try:
             sol_balance = await self.get_balance_sol()
@@ -167,12 +232,35 @@ class WalletService:
             usdc_balance = await self.get_usdc_balance()
         except Exception as e:
             logger.warning(f"Could not fetch USDC balance: {e}")
+
         sol_usd = sol_balance * sol_price
+
+        # Calculate SPL token holdings value
+        token_holdings = {}
+        tokens_usd = 0.0
+        try:
+            spl_balances = await self.get_spl_token_balances()
+            for symbol, amount in spl_balances.items():
+                price = 0.0
+                if token_prices and symbol in token_prices:
+                    price = token_prices[symbol].get("price", 0.0)
+                usd_value = amount * price
+                tokens_usd += usd_value
+                token_holdings[symbol] = {
+                    "amount": amount,
+                    "price": price,
+                    "usd_value": usd_value,
+                }
+        except Exception as e:
+            logger.warning(f"Could not value SPL tokens: {e}")
+
         return {
             "sol": sol_balance,
             "usdc": usdc_balance,
             "sol_usd_value": sol_usd,
-            "total_usd": sol_usd + usdc_balance,
+            "token_holdings": token_holdings,
+            "tokens_usd": tokens_usd,
+            "total_usd": sol_usd + usdc_balance + tokens_usd,
         }
 
     async def close(self):

@@ -59,6 +59,14 @@ SOURCE_CATEGORIES = {
         ],
         "tavily_domains": ["x.com", "twitter.com", "taostats.io", "bittensor.com"],
     },
+    "kalshi": {
+        "label": "Kalshi / Prediction Markets",
+        "queries": [
+            "Kalshi prediction market strategy edge trading",
+            "Kalshi bot automated trading binary events",
+        ],
+        "tavily_domains": ["kalshi.com", "x.com", "twitter.com", "reddit.com", "polymarket.com"],
+    },
 }
 
 # Legacy flat list for DDG fallback
@@ -299,6 +307,66 @@ class ScoutService:
 
     # ── Report generation ─────────────────────────────────────────────
 
+    async def _get_kalshi_snapshot(self) -> Optional[dict]:
+        """Pull live Kalshi market data: balance, positions, top movers, hot markets."""
+        try:
+            from app.services.kalshi_client import get_async_kalshi_client
+            client = get_async_kalshi_client()
+
+            balance = await client.get_balance()
+            balance_cents = balance.get("balance", 0) if isinstance(balance, dict) else balance
+            positions = await client.get_positions()
+            fills = await client.get_fills(limit=20)
+            settlements = await client.get_settlements(limit=20)
+
+            # Get active positions with non-zero count
+            active_positions = [p for p in positions if p.get("position", 0) != 0]
+
+            # Calculate P&L from settlements
+            total_payout = sum(s.get("revenue", 0) for s in settlements)
+            total_cost = sum(s.get("cost", 0) for s in settlements if s.get("cost"))
+
+            # Try to get high-volume markets for opportunity scan
+            hot_markets = []
+            try:
+                from app.services.kalshi_client import KalshiTradingClient
+                sync_client = KalshiTradingClient()
+                events = sync_client.get_events(limit=10, status="open")
+                for event in events[:10]:
+                    markets = event.get("markets", [])
+                    for m in markets[:3]:
+                        vol = m.get("volume", 0) or 0
+                        yes_price = m.get("yes_ask", 0) or 0
+                        no_price = m.get("no_ask", 0) or 0
+                        if vol > 50:
+                            hot_markets.append({
+                                "ticker": m.get("ticker", ""),
+                                "title": m.get("title", "")[:100],
+                                "yes_price": yes_price,
+                                "no_price": no_price,
+                                "volume": vol,
+                                "close_time": m.get("close_time", ""),
+                            })
+                hot_markets.sort(key=lambda x: x["volume"], reverse=True)
+                hot_markets = hot_markets[:10]
+            except Exception as e:
+                logger.debug(f"Scout: couldn't fetch hot Kalshi markets: {e}")
+
+            return {
+                "balance_cents": balance_cents,
+                "balance_usd": round(balance_cents / 100, 2) if isinstance(balance_cents, (int, float)) else 0,
+                "active_positions": len(active_positions),
+                "positions": active_positions[:10],
+                "recent_fills": len(fills),
+                "recent_settlements": len(settlements),
+                "settlement_payout_cents": total_payout,
+                "settlement_cost_cents": total_cost,
+                "hot_markets": hot_markets,
+            }
+        except Exception as e:
+            logger.warning(f"Scout: Kalshi snapshot failed: {e}")
+            return None
+
     async def generate_report(self) -> dict:
         """Search all sources, deep-scrape top articles, and generate report."""
         logger.info("Scout: running multi-source intelligence scan")
@@ -317,6 +385,9 @@ class ScoutService:
                 r["full_content"] = content
                 r["scraped"] = True
 
+        # Pull live Kalshi market data
+        kalshi_snapshot = await self._get_kalshi_snapshot()
+
         today = date.today().isoformat()
         scan_ts = datetime.utcnow().isoformat()
         for r in results:
@@ -328,6 +399,7 @@ class ScoutService:
             "result_count": len(results),
             "sources_searched": list(SOURCE_CATEGORIES.keys()),
             "posts": results,
+            "kalshi_snapshot": kalshi_snapshot,
         }
 
         SCOUT_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -338,9 +410,9 @@ class ScoutService:
         logger.info(f"Scout: found {len(results)} results across {len(SOURCE_CATEGORIES)} categories, saved to {log_path}")
         return report
 
-    async def analyze_with_claude(self, posts: list[dict], today: str) -> str:
+    async def analyze_with_claude(self, posts: list[dict], today: str, kalshi_snapshot: dict = None) -> str:
         """Use Claude Sonnet to analyze posts and generate the formatted report."""
-        if not posts:
+        if not posts and not kalshi_snapshot:
             return f"🚀 <b>Daily TradingView Bot Intelligence – {today}</b>\n\nNo new posts found."
 
         raw = "\n\n".join(
@@ -349,25 +421,48 @@ class ScoutService:
             for i, p in enumerate(posts)
         )
 
+        # Append Kalshi market data if available
+        kalshi_section = ""
+        if kalshi_snapshot:
+            kalshi_section = "\n\n--- KALSHI PREDICTION MARKET DATA ---\n"
+            kalshi_section += f"Balance: ${kalshi_snapshot.get('balance_usd', 0)}\n"
+            kalshi_section += f"Active positions: {kalshi_snapshot.get('active_positions', 0)}\n"
+            kalshi_section += f"Recent fills: {kalshi_snapshot.get('recent_fills', 0)}\n"
+            kalshi_section += f"Recent settlements: {kalshi_snapshot.get('recent_settlements', 0)}\n"
+            hot = kalshi_snapshot.get("hot_markets", [])
+            if hot:
+                kalshi_section += "\nTop markets by volume:\n"
+                for m in hot[:10]:
+                    kalshi_section += (
+                        f"  {m['ticker']}: {m['title']} | "
+                        f"Yes: {m['yes_price']}¢ No: {m['no_price']}¢ | "
+                        f"Vol: {m['volume']}\n"
+                    )
+
         system_prompt = (
             "You are TradeBot Scout analyzing posts from multiple sources about TradingView bots, "
-            "Pine Script, crypto trading signals, and on-chain analytics. "
-            "Sources include X.com, trading blogs, on-chain analytics sites, and crypto news. "
+            "Pine Script, crypto trading signals, on-chain analytics, and Kalshi prediction markets. "
+            "Sources include X.com, trading blogs, on-chain analytics sites, crypto news, and live Kalshi data. "
             "Produce a concise Telegram update using HTML formatting (bold with <b>, code with <code>). "
-            "Maximum 450 words. Use this exact structure:\n\n"
+            "Maximum 550 words. Use this exact structure:\n\n"
             f"🚀 <b>Daily TradingView Bot Intelligence – {today}</b>\n\n"
             "<b>Overview:</b> [1-2 sentence summary of hottest topics]\n\n"
             "🔥 <b>Top Indicator & Strategy Suggestions:</b>\n"
             "• [Indicator/Strategy] – [one-line why useful for bots] (up to 5)\n\n"
             "📊 <b>On-Chain & Market Signals:</b>\n"
             "• [signal/insight] (up to 3)\n\n"
+            "🎲 <b>Kalshi Prediction Markets:</b>\n"
+            "• Account: [balance, positions, recent activity]\n"
+            "• Hot markets: [top 3-5 interesting markets with prices and why they matter]\n"
+            "• Edge opportunities: [any mispriced contracts, high-volume movers, or tail bets]\n\n"
             "<b>Other Key Insights:</b>\n"
             "• [bullet] (up to 3)\n\n"
             "📌 <b>Worth Reading:</b>\n"
             "1. [one-sentence summary] → [URL]\n"
             "(3-5 highest-value items with actual URLs from the data)\n\n"
             "Rules: be concise and actionable, include only real URLs from the provided data, "
-            "prioritize real trader discussions and data-backed insights over hype."
+            "prioritize real trader discussions and data-backed insights over hype. "
+            "For Kalshi, highlight tail bets (1-20¢ or 80-99¢) and high-volume markets."
         )
 
         cfg = get("claude")
@@ -386,7 +481,7 @@ class ScoutService:
                     max_tokens=1024,
                     temperature=0.5,
                     system=system_prompt,
-                    messages=[{"role": "user", "content": f"Analyze these posts:\n\n{raw}"}],
+                    messages=[{"role": "user", "content": f"Analyze these posts:\n\n{raw}{kalshi_section}"}],
                 )
                 return msg.content[0].text.strip()
             else:
@@ -396,7 +491,7 @@ class ScoutService:
                 if not resolved:
                     raise FileNotFoundError("Claude CLI not found")
 
-                full_prompt = f"{system_prompt}\n\nAnalyze these posts:\n\n{raw}"
+                full_prompt = f"{system_prompt}\n\nAnalyze these posts:\n\n{raw}{kalshi_section}"
                 proc = await asyncio.create_subprocess_exec(
                     resolved, "--print", "--model", model, full_prompt,
                     stdout=asyncio.subprocess.PIPE,
@@ -424,7 +519,8 @@ class ScoutService:
         """Analyze posts with Claude Sonnet and format as Telegram message."""
         posts = report.get("posts", [])
         today = report.get("date", date.today().isoformat())
-        msg = await self.analyze_with_claude(posts, today)
+        kalshi_snapshot = report.get("kalshi_snapshot")
+        msg = await self.analyze_with_claude(posts, today, kalshi_snapshot=kalshi_snapshot)
         if len(msg) > 3900:
             msg = msg[:3900] + "\n...(truncated)"
         return msg

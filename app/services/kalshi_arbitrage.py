@@ -122,7 +122,7 @@ class KalshiArbitrageScanner:
 
         try:
             # Fetch all open markets with full pricing data (direct API)
-            markets = await client.get_markets_full(status="open", limit=200)
+            markets = await client.discover_active_markets(min_volume=10)
             logger.info(f"Arbitrage scan #{self._scan_count}: checking {len(markets)} markets")
 
             # Strategy 1: Yes/No spread arbitrage

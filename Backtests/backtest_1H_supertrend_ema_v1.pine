@@ -1,0 +1,167 @@
+// =============================================================================
+// Supertrend + EMA Ribbon v1.0 — 1H BACKTEST STRATEGY
+//
+// Goal: More frequent signals than 4H strategies while staying profitable.
+// Catches intermediate trends using Supertrend direction + EMA 9/21 ribbon.
+//
+// Entry:
+//   LONG:  Supertrend flips bullish + EMA9 > EMA21 + volume > 1.2x avg
+//          + RSI not overbought (< 75) + price above EMA21
+//   SHORT: Supertrend flips bearish + EMA9 < EMA21 + volume > 1.2x avg
+//          + RSI not oversold (> 25) + price below EMA21
+//
+// Exit:
+//   TP 3.0x ATR / SL 1.5x ATR (R:R 2:1)
+//   Trailing stop activates at 1.5x ATR profit, trails at 1.0x ATR
+//   Supertrend flip forces exit (trend reversal)
+//
+// Target tokens: SOL, ETH on 1H
+// =============================================================================
+
+//@version=6
+strategy("Supertrend+EMA Ribbon v1", overlay=true,
+         initial_capital=1000,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=15,
+         commission_value=0.1, slippage=2)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+// SuperTrend
+stFactor = input.float(2.5, "SuperTrend Factor", minval=1.0, maxval=5.0, step=0.5, group="SuperTrend")
+stPeriod = input.int(12, "SuperTrend ATR Period", minval=5, maxval=30, group="SuperTrend")
+
+// EMA Ribbon
+emaFast = input.int(9, "EMA Fast", minval=3, maxval=20, group="EMA Ribbon")
+emaSlow = input.int(21, "EMA Slow", minval=10, maxval=50, group="EMA Ribbon")
+
+// RSI Filter
+rsiLen    = input.int(14, "RSI Length", group="Filters")
+rsiOBLvl  = input.int(75, "RSI Overbought", group="Filters")
+rsiOSLvl  = input.int(25, "RSI Oversold", group="Filters")
+
+// Volume Filter
+volLen   = input.int(20, "Volume SMA Length", group="Filters")
+volMult  = input.float(1.2, "Volume Spike Multiplier", minval=1.0, maxval=3.0, step=0.1, group="Filters")
+
+// ATR for exits
+atrLen = input.int(14, "ATR Length", group="Exits")
+slMult = input.float(1.5, "SL ATR Multiplier", minval=0.5, maxval=3.0, step=0.5, group="Exits")
+tpMult = input.float(3.0, "TP ATR Multiplier", minval=1.0, maxval=6.0, step=0.5, group="Exits")
+trailActivate = input.float(1.5, "Trail Activate (ATR mult)", minval=0.5, maxval=4.0, step=0.5, group="Exits")
+trailOffset   = input.float(1.0, "Trail Offset (ATR mult)", minval=0.5, maxval=3.0, step=0.5, group="Exits")
+
+// Cooldown
+cooldownBars = input.int(3, "Cooldown (bars)", minval=1, maxval=10, group="Filters")
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// --- SuperTrend ---
+[stLine, stDir] = ta.supertrend(stFactor, stPeriod)
+stBull = stDir < 0
+stBear = stDir > 0
+stFlipBull = stBull and not stBull[1]
+stFlipBear = stBear and not stBear[1]
+
+// --- EMA Ribbon ---
+ema9  = ta.ema(close, emaFast)
+ema21 = ta.ema(close, emaSlow)
+ribbonBull = ema9 > ema21
+ribbonBear = ema9 < ema21
+
+// --- RSI ---
+rsiVal = ta.rsi(close, rsiLen)
+rsiOkLong  = rsiVal < rsiOBLvl and rsiVal > 35  // Not overbought, not deeply oversold
+rsiOkShort = rsiVal > rsiOSLvl and rsiVal < 65  // Not oversold, not deeply overbought
+
+// --- Volume ---
+volMA = ta.sma(volume, volLen)
+volOk = volume > volMA * volMult
+
+// --- ATR ---
+atrVal = ta.atr(atrLen)
+
+// --- Cooldown ---
+var int lastBar = 0
+cooldownOk = bar_index - lastBar >= cooldownBars
+
+// =============================================================================
+// ENTRY CONDITIONS
+// =============================================================================
+
+// Primary: Supertrend flip + EMA ribbon agrees + volume + RSI filter
+longCond  = stFlipBull and ribbonBull and close > ema21 and volOk and rsiOkLong and cooldownOk
+shortCond = stFlipBear and ribbonBear and close < ema21 and volOk and rsiOkShort and cooldownOk
+
+// Secondary: Supertrend already bullish, EMA ribbon just crossed over (catches
+// trends that started with a weak flip but then EMA confirms)
+emaCrossUp   = ta.crossover(ema9, ema21)
+emaCrossDown = ta.crossunder(ema9, ema21)
+
+longCond2  = stBull and emaCrossUp and close > ema21 and volOk and rsiOkLong and cooldownOk
+shortCond2 = stBear and emaCrossDown and close < ema21 and volOk and rsiOkShort and cooldownOk
+
+// Combine
+goLong  = (longCond or longCond2) and strategy.position_size <= 0
+goShort = (shortCond or shortCond2) and strategy.position_size >= 0
+
+if goLong
+    strategy.entry("Long", strategy.long)
+    lastBar := bar_index
+
+if goShort
+    strategy.entry("Short", strategy.short)
+    lastBar := bar_index
+
+// =============================================================================
+// EXIT CONDITIONS
+// =============================================================================
+
+// ATR-based TP/SL with trailing stop
+if strategy.position_size > 0
+    sl = strategy.position_avg_price - slMult * atrVal
+    tp = strategy.position_avg_price + tpMult * atrVal
+    trailPrice = strategy.position_avg_price + trailActivate * atrVal
+    strategy.exit("XL", "Long", stop=sl, limit=tp,
+         trail_price=trailPrice,
+         trail_offset=math.round(trailOffset * atrVal / syminfo.mintick))
+
+if strategy.position_size < 0
+    sl = strategy.position_avg_price + slMult * atrVal
+    tp = strategy.position_avg_price - tpMult * atrVal
+    trailPrice = strategy.position_avg_price - trailActivate * atrVal
+    strategy.exit("XS", "Short", stop=sl, limit=tp,
+         trail_price=trailPrice,
+         trail_offset=math.round(trailOffset * atrVal / syminfo.mintick))
+
+// Supertrend flip forces exit — don't fight the trend
+if stBear and strategy.position_size > 0
+    strategy.close("Long", comment="ST Flip")
+if stBull and strategy.position_size < 0
+    strategy.close("Short", comment="ST Flip")
+
+// =============================================================================
+// PLOTS
+// =============================================================================
+
+plot(stLine, "SuperTrend", stBull ? color.new(color.green, 20) : color.new(color.red, 20), linewidth=2)
+plot(ema9, "EMA 9", color.new(color.aqua, 30), linewidth=1)
+plot(ema21, "EMA 21", color.new(color.orange, 30), linewidth=1)
+
+// Ribbon fill
+fill(plot(ema9, display=display.none), plot(ema21, display=display.none),
+     color=ribbonBull ? color.new(color.green, 85) : color.new(color.red, 85))
+
+// Signal markers
+plotshape(goLong, "Long", shape.triangleup, location.belowbar,
+          color.new(color.green, 0), size=size.small)
+plotshape(goShort, "Short", shape.triangledown, location.abovebar,
+          color.new(color.red, 0), size=size.small)
+
+// Background: in position
+bgCol = strategy.position_size > 0 ? color.new(color.green, 93) : strategy.position_size < 0 ? color.new(color.red, 93) : na
+bgcolor(bgCol)

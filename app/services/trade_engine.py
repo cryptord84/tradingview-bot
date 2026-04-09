@@ -14,6 +14,9 @@ from app.services.claude_decision import get_claude_decision
 from app.services.jupiter_client import JupiterClient
 from app.services.news_service import NewsService
 from app.services.kamino_client import KaminoClient
+from app.services.confluence_filter import get_confluence_filter
+from app.services.dry_run_manager import get_dry_run_manager
+from app.services.sol_risk_manager import get_sol_risk_manager
 from app.services.paper_trading import get_paper_trader
 from app.services.telegram_service import TelegramService
 from app.services.wallet_service import WalletService
@@ -127,10 +130,23 @@ class SignalQueue:
 _signal_queue: Optional[SignalQueue] = None
 
 
+async def _confluence_timeout_handler(signal: WebhookSignal, source_ip: str):
+    """Called when confluence timeout fires with on_timeout='execute'."""
+    engine = TradeEngine()
+    try:
+        await engine.process_signal(signal, source_ip)
+    finally:
+        await engine.shutdown()
+
+
 def get_signal_queue() -> SignalQueue:
     global _signal_queue
     if _signal_queue is None:
         _signal_queue = SignalQueue()
+        # Wire confluence timeout callback
+        from app.services.confluence_filter import get_confluence_filter
+        cf = get_confluence_filter()
+        cf.set_confirmed_callback(_confluence_timeout_handler)
     return _signal_queue
 
 
@@ -188,6 +204,17 @@ class TradeEngine:
             # 3. Notify Telegram
             await self.telegram.notify_webhook_received(signal.model_dump())
 
+            # 3.5. Confluence filter — hold signal until a second strategy confirms
+            cf = get_confluence_filter()
+            if cf.enabled:
+                confirmed_signal = await cf.check(signal, source_ip)
+                if confirmed_signal is None:
+                    # Signal is being held — will be processed via timeout callback
+                    result["status"] = "confluence_pending"
+                    return result
+                # Use the confirmed signal (may differ if higher-conf was picked)
+                signal = confirmed_signal
+
             # 4. Gather context for Claude
             sol_price = await self.jupiter.get_sol_price()
             balance_sol = await self.wallet.get_balance_sol()
@@ -208,8 +235,10 @@ class TradeEngine:
             # Total purchasing power = USDC in wallet + Kamino deposits + SOL value
             sol_usd_value = balance_sol * sol_price
             total_usd = usdc_balance + kamino_usdc + sol_usd_value
-            # Tradeable USDC = wallet USDC + Kamino (SOL reserved for gas)
-            tradeable_usd = usdc_balance + kamino_usdc
+            # Tradeable USDC = wallet USDC + Kamino, minus reserve for future trades
+            kamino_cfg = get("kamino") or {}
+            usdc_reserve = kamino_cfg.get("reserve_usdc", 0.0)
+            tradeable_usd = max(0, usdc_balance + kamino_usdc - usdc_reserve)
 
             # Get actual token price (use Jupiter price lookup, fall back to signal estimate)
             token_symbol = signal.symbol.replace("USDT", "").replace("USD", "")
@@ -315,8 +344,90 @@ class TradeEngine:
             trade_usd = tradeable_usd * (size_pct / 100)
             max_purchase_usd = risk_cfg.get("max_purchase_usd", 500.0)
             trade_usd = min(trade_usd, max_purchase_usd)
-            # Convert to SOL equivalent for logging/compatibility
-            trade_sol = trade_usd / sol_price if sol_price > 0 else 0
+            # ── SOL RISK MANAGER PRE-TRADE CHECK ──
+            sol_rm = get_sol_risk_manager()
+            risk_check = sol_rm.check_order(token_symbol, trade_usd, signal.signal_type.value)
+            if not risk_check["allowed"]:
+                result["status"] = "risk_blocked"
+                result["error"] = risk_check["reason"]
+                await self.telegram.send_message(
+                    f"[RISK] Blocked {signal.signal_type.value} {signal.symbol}: "
+                    f"{risk_check['reason']}"
+                )
+                insert_trade({
+                    "signal_type": signal.signal_type.value,
+                    "symbol": signal.symbol,
+                    "action": "REJECT",
+                    "amount_sol": 0,
+                    "price_usd": token_price,
+                    "confidence_score": signal.confidence_score,
+                    "claude_reasoning": claude_resp.reasoning,
+                    "wallet_address": self.wallet.public_key,
+                    "notes": f"SOL risk blocked: {risk_check['reason']}",
+                })
+                return result
+            # Apply risk-capped size
+            trade_usd = risk_check["capped_usd"]
+
+            # Calculate actual token quantity purchased
+            token_qty = trade_usd / token_price if token_price > 0 else 0
+
+            # ── DRY-RUN SIMULATION MODE (per-alert) ──
+            drm = get_dry_run_manager()
+            drm.record_signal_received()
+            strategy_name = signal.strategy or "unknown"
+            token_symbol_dr = signal.symbol.replace("USDT", "").replace("USD", "")
+            tf_dr = signal.timeframe or ""
+
+            if drm.is_dry_run(strategy_name, token_symbol_dr, tf_dr):
+                # Calculate TP/SL for simulation (strategy-aware)
+                sim_tp = None
+                sim_sl = None
+                if signal.atr and signal.atr > 0:
+                    tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy)
+                    sim_tp = token_price + (signal.atr * tp_mult)
+                    sim_sl = token_price - (signal.atr * sl_mult)
+
+                sim_entry = drm.log_simulated_trade(
+                    strategy=strategy_name,
+                    token=token_symbol_dr,
+                    timeframe=tf_dr,
+                    signal_type=signal.signal_type.value,
+                    entry_price=token_price,
+                    trade_usd=trade_usd,
+                    confidence=signal.confidence_score,
+                    atr=signal.atr,
+                    tp_price=sim_tp,
+                    sl_price=sim_sl,
+                    claude_decision=claude_resp.decision.value,
+                    claude_reasoning=claude_resp.reasoning,
+                )
+
+                result["status"] = "dry_run"
+                result["dry_run"] = sim_entry
+
+                await self.telegram.send_message(
+                    f"[DRY-RUN] {signal.signal_type.value} {signal.symbol} "
+                    f"via {strategy_name} {tf_dr}\n"
+                    f"WOULD EXECUTE: ${trade_usd:.2f} @ ${token_price:.4f}\n"
+                    f"TP: ${sim_tp:.4f if sim_tp else 0} | SL: ${sim_sl:.4f if sim_sl else 0}\n"
+                    f"R:R: {sim_entry.get('expected_rr', '?')} | "
+                    f"Projected: ${sim_entry.get('simulated_pnl', 0):.2f}\n"
+                    f"Cumulative sim P&L: ${drm.get_status()['simulated_pnl']:.2f}"
+                )
+
+                insert_trade({
+                    "signal_type": signal.signal_type.value,
+                    "symbol": signal.symbol,
+                    "action": "DRY_RUN",
+                    "amount_sol": token_qty,
+                    "price_usd": token_price,
+                    "confidence_score": signal.confidence_score,
+                    "claude_reasoning": claude_resp.reasoning,
+                    "wallet_address": "dry_run",
+                    "notes": f"Sim via {strategy_name} {tf_dr} | P&L: ${sim_entry.get('simulated_pnl', 0):.2f}",
+                })
+                return result
 
             # ── PAPER TRADING MODE ──
             paper_trader = get_paper_trader()
@@ -349,7 +460,7 @@ class TradeEngine:
                     "signal_type": signal.signal_type.value,
                     "symbol": signal.symbol,
                     "action": "PAPER",
-                    "amount_sol": trade_sol,
+                    "amount_sol": token_qty,
                     "price_usd": token_price,
                     "confidence_score": signal.confidence_score,
                     "claude_reasoning": claude_resp.reasoning,
@@ -367,7 +478,7 @@ class TradeEngine:
                     "signal_type": "CLOSE",
                     "symbol": signal.symbol,
                     "action": "EXECUTE",
-                    "amount_sol": trade_sol,
+                    "amount_sol": token_qty,
                     "price_usd": token_price,
                     "confidence_score": signal.confidence_score,
                     "claude_reasoning": claude_resp.reasoning,
@@ -427,6 +538,10 @@ class TradeEngine:
             result["status"] = "executed"
             result["tx_signature"] = swap_result["tx_signature"]
 
+            # Record trade in SOL risk manager for exposure tracking
+            if signal.signal_type.value == "BUY":
+                sol_rm.record_trade(token_symbol, trade_usd)
+
             # Invalidate cache so next balance read is fresh
             self.wallet.invalidate_cache()
 
@@ -440,7 +555,8 @@ class TradeEngine:
                 "signal_type": signal.signal_type.value,
                 "symbol": signal.symbol,
                 "action": "EXECUTE",
-                "amount_sol": trade_sol,
+                "amount_sol": token_qty,
+                "amount_usd": trade_usd,
                 "price_usd": token_price,
                 "fees_sol": 0.000005,  # Base tx fee
                 "leverage": leverage,
@@ -454,17 +570,17 @@ class TradeEngine:
             await self.telegram.notify_trade_executed(
                 tx_sig=swap_result["tx_signature"],
                 action=signal.signal_type.value,
-                amount_sol=trade_sol,
+                amount_sol=token_qty,
                 price_usd=token_price,
                 fees_sol=0.000005,
                 new_balance_sol=new_balance,
+                symbol=signal.symbol,
+                trade_usd=trade_usd,
             )
 
             # Create position record for TP/SL monitoring (BUY only)
             if signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0:
-                pos_cfg = get("position_monitor") or {}
-                tp_mult = pos_cfg.get("tp_multiplier", 4.0)
-                sl_mult = pos_cfg.get("sl_multiplier", 1.5)
+                tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy)
                 tp_price = token_price + (signal.atr * tp_mult)
                 sl_price = token_price - (signal.atr * sl_mult)
 
@@ -477,7 +593,7 @@ class TradeEngine:
                         "symbol": signal.symbol,
                         "direction": "long",
                         "entry_price": token_price,
-                        "amount_sol": trade_sol,
+                        "amount_sol": token_qty,
                         "amount_usdc": trade_usd,
                         "tp_price": tp_price,
                         "sl_price": sl_price,
@@ -488,7 +604,7 @@ class TradeEngine:
                         "notes": f"TP=${tp_price:.2f} SL=${sl_price:.2f} ATR={signal.atr:.4f}",
                     })
                     logger.info(
-                        f"Position #{pos_id} opened: {trade_sol:.4f} {token_symbol} @ ${token_price:.4f}, "
+                        f"Position #{pos_id} opened: {token_qty:.4f} {token_symbol} @ ${token_price:.4f}, "
                         f"TP=${tp_price:.4f}, SL=${sl_price:.4f}"
                     )
                 else:
@@ -554,6 +670,29 @@ class TradeEngine:
     def _token_decimals(self, symbol: str) -> int:
         """Get decimal places for a token (for lamport conversion)."""
         return self._TOKEN_DECIMALS.get(symbol, 9)
+
+    @staticmethod
+    def _get_strategy_tp_sl(strategy: Optional[str]) -> tuple[float, float]:
+        """Get TP/SL multipliers for a strategy, falling back to global defaults."""
+        pos_cfg = get("position_monitor") or {}
+        default_tp = pos_cfg.get("tp_multiplier", 4.0)
+        default_sl = pos_cfg.get("sl_multiplier", 1.5)
+
+        if not strategy:
+            return default_tp, default_sl
+
+        # Check strategy-specific overrides
+        strategy_cfg = get("strategy_profiles") or {}
+        # Match by exact name or case-insensitive prefix
+        strategy_upper = strategy.upper()
+        for name, profile in strategy_cfg.items():
+            if strategy_upper.startswith(name.upper()):
+                return (
+                    profile.get("tp_multiplier", default_tp),
+                    profile.get("sl_multiplier", default_sl),
+                )
+
+        return default_tp, default_sl
 
     async def shutdown(self):
         self._running = False

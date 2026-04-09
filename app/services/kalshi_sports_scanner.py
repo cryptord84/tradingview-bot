@@ -154,7 +154,7 @@ class KalshiSportsScanner:
 
         try:
             # Fetch all open markets and filter for sports
-            all_markets = await client.get_markets_full(status="open", limit=200)
+            all_markets = await client.discover_active_markets(min_volume=0)
             league_counts = {league: 0 for league in SPORTS_LEAGUES}
 
             for m in all_markets:

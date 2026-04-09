@@ -274,6 +274,13 @@ class KalshiMarketMaker:
     # =========================================================================
 
     async def _run_loop(self):
+        # Cancel orphaned orders from prior runs
+        try:
+            await self._cancel_all_orders()
+            logger.info("Market maker: cleaned up orphaned orders on startup")
+        except Exception as e:
+            logger.warning(f"Market maker startup cleanup failed: {e}")
+
         while self._running and not self._kill_switch:
             try:
                 self._cycle_count += 1
@@ -376,7 +383,7 @@ class KalshiMarketMaker:
         - Avoid finance/economics (nearly efficient, 0.17pp gap)
         - Require higher volume minimums (thin markets hurt makers)
         """
-        markets = await client.get_markets_full(status="open", limit=200)
+        markets = await client.discover_active_markets(min_volume=10)
         scored = []
 
         for m in markets:

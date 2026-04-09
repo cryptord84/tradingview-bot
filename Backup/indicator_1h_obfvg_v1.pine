@@ -1,0 +1,351 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TradingBot - Order Block + FVG Indicator v1.0
+// Live indicator with webhook alerts for ETH, WIF, BONK on 1H
+// Smart Money Concepts: Order Blocks + Fair Value Gaps
+
+//@version=6
+indicator("OB+FVG Alert v1.0", overlay=true, max_boxes_count=30)
+
+// ─── INPUTS ────────────────────────────────────────────────────────────────────
+
+// Webhook
+webhook_secret   = input.string("e4a01f966ff71dc5e192db6b9163a4c5d2d4894031e4ec25719e07d70aa038bb", "Webhook Secret", group="Webhook")
+
+// Order Block Settings
+ob_strength      = input.float(1.5, "OB Min Move (ATR mult)", minval=0.5, maxval=5.0, step=0.1, group="Order Blocks")
+ob_max_age       = input.int(50, "OB Max Age (bars)", minval=10, maxval=200, group="Order Blocks")
+ob_mitigation    = input.string("Wick", "OB Touch Type", options=["Wick", "Close"], group="Order Blocks")
+
+// FVG Settings
+fvg_min_size     = input.float(0.3, "FVG Min Size (ATR mult)", minval=0.1, maxval=2.0, step=0.1, group="Fair Value Gaps")
+fvg_max_age      = input.int(30, "FVG Max Age (bars)", minval=5, maxval=100, group="Fair Value Gaps")
+fvg_fill_pct     = input.float(50.0, "FVG Fill % to Enter", minval=0, maxval=100, step=10, group="Fair Value Gaps")
+
+// Filters
+require_trend    = input.bool(true, "Require Trend Alignment", group="Filters")
+trend_ema_len    = input.int(50, "Trend EMA Length", minval=10, maxval=200, group="Filters")
+use_macro_filter = input.bool(true, "Use SMA 200 Macro Filter", group="Filters")
+macro_sma_len    = input.int(200, "Macro SMA Length", minval=50, maxval=500, group="Filters")
+
+// Risk
+atr_len          = input.int(14, "ATR Length", group="Risk")
+tp_atr_mult      = input.float(3.0, "TP (ATR multiplier)", minval=1.0, maxval=8.0, step=0.5, group="Risk")
+sl_atr_mult      = input.float(1.5, "SL (ATR multiplier)", minval=0.5, maxval=4.0, step=0.25, group="Risk")
+
+// Visual
+show_ob          = input.bool(true, "Show Order Blocks", group="Visual")
+show_fvg         = input.bool(true, "Show FVG Zones", group="Visual")
+
+// ─── CORE CALCULATIONS ─────────────────────────────────────────────────────────
+
+atr_val   = ta.atr(atr_len)
+ema_trend = ta.ema(close, trend_ema_len)
+sma_macro = ta.sma(close, macro_sma_len)
+
+is_uptrend   = close > ema_trend
+is_downtrend = close < ema_trend
+above_macro  = close > sma_macro
+below_macro  = close < sma_macro
+
+// ─── ORDER BLOCK DETECTION ─────────────────────────────────────────────────────
+
+var float[] bull_ob_top = array.new_float(0)
+var float[] bull_ob_bot = array.new_float(0)
+var int[]   bull_ob_bar = array.new_int(0)
+var float[] bear_ob_top = array.new_float(0)
+var float[] bear_ob_bot = array.new_float(0)
+var int[]   bear_ob_bar = array.new_int(0)
+
+is_bearish_candle = close[1] < open[1]
+is_bullish_candle = close[1] > open[1]
+
+bull_impulse = is_bearish_candle and close > high[1] and (close - open) > ob_strength * atr_val
+bear_impulse = is_bullish_candle and close < low[1] and (open - close) > ob_strength * atr_val
+
+if bull_impulse
+    array.push(bull_ob_top, math.max(open[1], close[1]))
+    array.push(bull_ob_bot, math.min(open[1], close[1]))
+    array.push(bull_ob_bar, bar_index - 1)
+
+if bear_impulse
+    array.push(bear_ob_top, math.max(open[1], close[1]))
+    array.push(bear_ob_bot, math.min(open[1], close[1]))
+    array.push(bear_ob_bar, bar_index - 1)
+
+// Clean up old/mitigated OBs
+if array.size(bull_ob_top) > 0
+    for i = array.size(bull_ob_top) - 1 to 0
+        age = bar_index - array.get(bull_ob_bar, i)
+        bot = array.get(bull_ob_bot, i)
+        if age > ob_max_age or close < bot - atr_val
+            array.remove(bull_ob_top, i)
+            array.remove(bull_ob_bot, i)
+            array.remove(bull_ob_bar, i)
+
+if array.size(bear_ob_top) > 0
+    for i = array.size(bear_ob_top) - 1 to 0
+        age = bar_index - array.get(bear_ob_bar, i)
+        top = array.get(bear_ob_top, i)
+        if age > ob_max_age or close > top + atr_val
+            array.remove(bear_ob_top, i)
+            array.remove(bear_ob_bot, i)
+            array.remove(bear_ob_bar, i)
+
+while array.size(bull_ob_top) > 10
+    array.shift(bull_ob_top)
+    array.shift(bull_ob_bot)
+    array.shift(bull_ob_bar)
+
+while array.size(bear_ob_top) > 10
+    array.shift(bear_ob_top)
+    array.shift(bear_ob_bot)
+    array.shift(bear_ob_bar)
+
+f_touching_bull_ob() =>
+    result = false
+    if array.size(bull_ob_top) > 0
+        for i = 0 to array.size(bull_ob_top) - 1
+            top = array.get(bull_ob_top, i)
+            bot = array.get(bull_ob_bot, i)
+            if ob_mitigation == "Wick"
+                if low <= top and low >= bot
+                    result := true
+            else
+                if close <= top and close >= bot
+                    result := true
+    result
+
+f_touching_bear_ob() =>
+    result = false
+    if array.size(bear_ob_top) > 0
+        for i = 0 to array.size(bear_ob_top) - 1
+            top = array.get(bear_ob_top, i)
+            bot = array.get(bear_ob_bot, i)
+            if ob_mitigation == "Wick"
+                if high >= bot and high <= top
+                    result := true
+            else
+                if close >= bot and close <= top
+                    result := true
+    result
+
+touch_bull_ob = f_touching_bull_ob()
+touch_bear_ob = f_touching_bear_ob()
+
+// ─── FAIR VALUE GAP DETECTION ──────────────────────────────────────────────────
+
+var float[] bull_fvg_top = array.new_float(0)
+var float[] bull_fvg_bot = array.new_float(0)
+var int[]   bull_fvg_bar = array.new_int(0)
+var float[] bear_fvg_top = array.new_float(0)
+var float[] bear_fvg_bot = array.new_float(0)
+var int[]   bear_fvg_bar = array.new_int(0)
+
+bull_fvg_exists = low > high[2] and (low - high[2]) > fvg_min_size * atr_val
+bear_fvg_exists = high < low[2] and (low[2] - high) > fvg_min_size * atr_val
+
+if bull_fvg_exists
+    array.push(bull_fvg_top, low)
+    array.push(bull_fvg_bot, high[2])
+    array.push(bull_fvg_bar, bar_index)
+
+if bear_fvg_exists
+    array.push(bear_fvg_top, low[2])
+    array.push(bear_fvg_bot, high)
+    array.push(bear_fvg_bar, bar_index)
+
+if array.size(bull_fvg_top) > 0
+    for i = array.size(bull_fvg_top) - 1 to 0
+        age = bar_index - array.get(bull_fvg_bar, i)
+        bot = array.get(bull_fvg_bot, i)
+        if age > fvg_max_age or close < bot - atr_val * 0.5
+            array.remove(bull_fvg_top, i)
+            array.remove(bull_fvg_bot, i)
+            array.remove(bull_fvg_bar, i)
+
+if array.size(bear_fvg_top) > 0
+    for i = array.size(bear_fvg_top) - 1 to 0
+        age = bar_index - array.get(bear_fvg_bar, i)
+        top = array.get(bear_fvg_top, i)
+        if age > fvg_max_age or close > top + atr_val * 0.5
+            array.remove(bear_fvg_top, i)
+            array.remove(bear_fvg_bot, i)
+            array.remove(bear_fvg_bar, i)
+
+while array.size(bull_fvg_top) > 10
+    array.shift(bull_fvg_top)
+    array.shift(bull_fvg_bot)
+    array.shift(bull_fvg_bar)
+
+while array.size(bear_fvg_top) > 10
+    array.shift(bear_fvg_top)
+    array.shift(bear_fvg_bot)
+    array.shift(bear_fvg_bar)
+
+f_filling_bull_fvg() =>
+    result = false
+    if array.size(bull_fvg_top) > 0
+        for i = 0 to array.size(bull_fvg_top) - 1
+            top = array.get(bull_fvg_top, i)
+            bot = array.get(bull_fvg_bot, i)
+            gap_size = top - bot
+            fill_level = top - gap_size * (fvg_fill_pct / 100.0)
+            if low <= top and low >= fill_level
+                result := true
+    result
+
+f_filling_bear_fvg() =>
+    result = false
+    if array.size(bear_fvg_top) > 0
+        for i = 0 to array.size(bear_fvg_top) - 1
+            top = array.get(bear_fvg_top, i)
+            bot = array.get(bear_fvg_bot, i)
+            gap_size = top - bot
+            fill_level = bot + gap_size * (fvg_fill_pct / 100.0)
+            if high >= bot and high <= fill_level
+                result := true
+    result
+
+fill_bull_fvg = f_filling_bull_fvg()
+fill_bear_fvg = f_filling_bear_fvg()
+
+// ─── ENTRY SIGNALS ─────────────────────────────────────────────────────────────
+
+// Use OB+FVG confluence (best backtest results)
+raw_long  = touch_bull_ob and fill_bull_fvg
+raw_short = touch_bear_ob and fill_bear_fvg
+
+// Trend filters
+trend_long  = not require_trend or is_uptrend
+trend_short = not require_trend or is_downtrend
+macro_long  = not use_macro_filter or above_macro
+macro_short = not use_macro_filter or below_macro
+
+// Final signals
+long_signal  = raw_long and trend_long and macro_long
+short_signal = raw_short and trend_short and macro_short
+
+// ─── CONFIDENCE SCORING ────────────────────────────────────────────────────────
+
+// Pre-compute RSI at top level (Pine v6 requires consistent calls)
+rsi_val = ta.rsi(close, 14)
+
+long_conf_score = 50 + (is_uptrend ? 10 : 0) + (above_macro ? 10 : 0) + (touch_bull_ob ? 10 : 0) + (fill_bull_fvg ? 10 : 0) + (rsi_val < 40 ? 10 : 0)
+short_conf_score = 50 + (is_downtrend ? 10 : 0) + (below_macro ? 10 : 0) + (touch_bear_ob ? 10 : 0) + (fill_bear_fvg ? 10 : 0) + (rsi_val > 60 ? 10 : 0)
+
+long_conf  = math.min(long_conf_score, 100)
+short_conf = math.min(short_conf_score, 100)
+
+// ─── POSITION SIZE ─────────────────────────────────────────────────────────────
+
+long_pos_size  = long_conf >= 90 ? 50.0 : long_conf >= 70 ? 30.0 : 20.0
+short_pos_size = short_conf >= 90 ? 50.0 : short_conf >= 70 ? 30.0 : 20.0
+
+// ─── WEBHOOK ALERTS ────────────────────────────────────────────────────────────
+
+// Pre-build alert strings at top level
+long_alert_msg = '{"secret":"' + webhook_secret +
+      '","signal_type":"BUY"' +
+      ',"symbol":"' + syminfo.ticker + '"' +
+      ',"entry_price_estimate":' + str.tostring(close) +
+      ',"confidence_score":' + str.tostring(long_conf) +
+      ',"suggested_leverage":1' +
+      ',"suggested_position_size_percent":' + str.tostring(long_pos_size) +
+      ',"bull_score":' + str.tostring(touch_bull_ob ? 1 : 0) +
+      ',"bear_score":0' +
+      ',"rsi":' + str.tostring(math.round(rsi_val)) +
+      ',"atr":' + str.tostring(atr_val) +
+      ',"ob_touch":1' +
+      ',"fvg_fill":' + str.tostring(fill_bull_fvg ? 1 : 0) +
+      ',"trend_aligned":' + str.tostring(is_uptrend ? 1 : 0) +
+      ',"above_sma200":' + str.tostring(above_macro ? 1 : 0) +
+      ',"tp_price":' + str.tostring(close + tp_atr_mult * atr_val) +
+      ',"sl_price":' + str.tostring(close - sl_atr_mult * atr_val) +
+      ',"timeframe":"' + timeframe.period + '"' +
+      ',"strategy":"ob_fvg_v1"}'
+
+short_alert_msg = '{"secret":"' + webhook_secret +
+      '","signal_type":"SELL"' +
+      ',"symbol":"' + syminfo.ticker + '"' +
+      ',"entry_price_estimate":' + str.tostring(close) +
+      ',"confidence_score":' + str.tostring(short_conf) +
+      ',"suggested_leverage":1' +
+      ',"suggested_position_size_percent":' + str.tostring(short_pos_size) +
+      ',"bull_score":0' +
+      ',"bear_score":' + str.tostring(touch_bear_ob ? 1 : 0) +
+      ',"rsi":' + str.tostring(math.round(rsi_val)) +
+      ',"atr":' + str.tostring(atr_val) +
+      ',"ob_touch":1' +
+      ',"fvg_fill":' + str.tostring(fill_bear_fvg ? 1 : 0) +
+      ',"trend_aligned":' + str.tostring(is_downtrend ? 1 : 0) +
+      ',"below_sma200":' + str.tostring(below_macro ? 1 : 0) +
+      ',"tp_price":' + str.tostring(close - tp_atr_mult * atr_val) +
+      ',"sl_price":' + str.tostring(close + sl_atr_mult * atr_val) +
+      ',"timeframe":"' + timeframe.period + '"' +
+      ',"strategy":"ob_fvg_v1"}'
+
+if long_signal
+    alert(long_alert_msg, alert.freq_once_per_bar_close)
+
+if short_signal
+    alert(short_alert_msg, alert.freq_once_per_bar_close)
+
+// ─── VISUAL ────────────────────────────────────────────────────────────────────
+
+plot(ema_trend, "Trend EMA", color=color.new(color.yellow, 60), linewidth=1)
+plot(sma_macro, "SMA 200", color=color.new(color.white, 70), linewidth=1)
+
+plotshape(long_signal, "Long", shape.triangleup, location.belowbar,
+         color.new(color.lime, 0), size=size.small)
+plotshape(short_signal, "Short", shape.triangledown, location.abovebar,
+         color.new(color.red, 0), size=size.small)
+
+// Draw Order Block boxes (most recent 3)
+if show_ob and array.size(bull_ob_top) > 0
+    for i = 0 to math.min(array.size(bull_ob_top) - 1, 2)
+        ob_bar_idx = array.get(bull_ob_bar, i)
+        box.new(ob_bar_idx, array.get(bull_ob_top, i), bar_index, array.get(bull_ob_bot, i),
+               border_color=color.new(color.lime, 70), bgcolor=color.new(color.lime, 90),
+               xloc=xloc.bar_index)
+
+if show_ob and array.size(bear_ob_top) > 0
+    for i = 0 to math.min(array.size(bear_ob_top) - 1, 2)
+        ob_bar_idx = array.get(bear_ob_bar, i)
+        box.new(ob_bar_idx, array.get(bear_ob_top, i), bar_index, array.get(bear_ob_bot, i),
+               border_color=color.new(color.red, 70), bgcolor=color.new(color.red, 90),
+               xloc=xloc.bar_index)
+
+if show_fvg and array.size(bull_fvg_top) > 0
+    for i = 0 to math.min(array.size(bull_fvg_top) - 1, 2)
+        fvg_bar_idx = array.get(bull_fvg_bar, i)
+        box.new(fvg_bar_idx, array.get(bull_fvg_top, i), bar_index, array.get(bull_fvg_bot, i),
+               border_color=color.new(color.teal, 60), bgcolor=color.new(color.teal, 85),
+               border_style=line.style_dashed, xloc=xloc.bar_index)
+
+if show_fvg and array.size(bear_fvg_top) > 0
+    for i = 0 to math.min(array.size(bear_fvg_top) - 1, 2)
+        fvg_bar_idx = array.get(bear_fvg_bar, i)
+        box.new(fvg_bar_idx, array.get(bear_fvg_top, i), bar_index, array.get(bear_fvg_bot, i),
+               border_color=color.new(color.orange, 60), bgcolor=color.new(color.orange, 85),
+               border_style=line.style_dashed, xloc=xloc.bar_index)
+
+// ─── INFO TABLE ────────────────────────────────────────────────────────────────
+
+var table info = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 80),
+                          border_color=color.new(color.gray, 70), border_width=1)
+
+if barstate.islast
+    table.cell(info, 0, 0, "OB+FVG v1.0", text_color=color.lime, text_size=size.small)
+    table.cell(info, 1, 0, syminfo.ticker, text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 1, "Bull OBs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 1, str.tostring(array.size(bull_ob_top)), text_color=color.lime, text_size=size.tiny)
+    table.cell(info, 0, 2, "Bear OBs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 2, str.tostring(array.size(bear_ob_top)), text_color=color.red, text_size=size.tiny)
+    table.cell(info, 0, 3, "Bull FVGs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 3, str.tostring(array.size(bull_fvg_top)), text_color=color.teal, text_size=size.tiny)
+    table.cell(info, 0, 4, "Bear FVGs", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 4, str.tostring(array.size(bear_fvg_top)), text_color=color.orange, text_size=size.tiny)
+    table.cell(info, 0, 5, "Trend", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 5, is_uptrend ? "BULL" : "BEAR", text_color=is_uptrend ? color.lime : color.red, text_size=size.tiny)
+    table.cell(info, 0, 6, "ATR", text_color=color.gray, text_size=size.tiny)
+    table.cell(info, 1, 6, str.tostring(atr_val, "#.####"), text_color=color.white, text_size=size.tiny)

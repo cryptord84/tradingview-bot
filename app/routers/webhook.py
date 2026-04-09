@@ -49,9 +49,10 @@ async def receive_webhook(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    # Validate secret
+    # Validate secret — require exact match
     expected_secret = get("webhook", "secret", "")
-    if body.get("secret") != expected_secret:
+    incoming_secret = body.get("secret", "")
+    if not expected_secret or incoming_secret != expected_secret:
         logger.warning(f"Invalid webhook secret from {request.client.host}")
         raise HTTPException(status_code=403, detail="Invalid secret")
 

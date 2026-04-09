@@ -130,10 +130,12 @@ class KalshiTechnicalBot:
         self.telegram_alerts = tech_cfg.get("telegram_alerts", True)
         self.target_tickers = tech_cfg.get("target_tickers", [])
         self.max_markets_to_scan = tech_cfg.get("max_markets_to_scan", 20)
+        self.cfg = tech_cfg  # Store for runtime config access
 
         # Runtime state
         self._signals: list[TechSignal] = []
         self._positions: list[dict] = []  # Active positions from auto-trade
+        self._pending_orders: set = set()  # Track resting orders to avoid duplicates
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._scan_count = 0
@@ -164,6 +166,9 @@ class KalshiTechnicalBot:
     async def _scan_loop(self):
         while self._running:
             try:
+                # Clear stale pending orders each cycle — orders from previous
+                # scans are either filled or expired by now
+                self._pending_orders.clear()
                 await self.scan_all()
             except Exception as e:
                 logger.error(f"Tech bot scan error: {e}")
@@ -194,16 +199,17 @@ class KalshiTechnicalBot:
                     pass
             return markets
 
-        # Auto-select: high volume, tail prices, high-bias categories
-        all_markets = await client.get_markets_full(status="open", limit=100)
+        # Auto-select: discover markets across active series (bypasses MVE flood)
+        max_days = self.cfg.get("max_days_to_close", 0)
+        all_markets = await client.discover_active_markets(min_volume=10, max_days_to_close=max_days)
         candidates = []
         for m in all_markets:
             vol = int(float(m.get("volume_fp", "0") or "0"))
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
-            if vol < 25 or yes_ask < 5 or yes_ask > 95:
+            if vol < 10 or yes_ask < 5 or yes_ask > 95:
                 continue
-            # Skip dead zone — near-zero edge at 40-60¢
-            if 40 <= yes_ask <= 60:
+            # Skip dead zone — near-zero edge at 48-52¢
+            if 48 <= yes_ask <= 52:
                 continue
             # Skip low-edge finance/economics markets
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
@@ -229,6 +235,15 @@ class KalshiTechnicalBot:
 
         markets = await self._get_target_markets(client)
         logger.info(f"Tech scan #{self._scan_count}: analyzing {len(markets)} markets")
+
+        # Subscribe to WS feed for liquidity-based sizing
+        try:
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            for m in markets:
+                await ws.subscribe(m.get("ticker", ""))
+        except Exception:
+            pass
 
         for m in markets:
             ticker = m.get("ticker", "")
@@ -317,7 +332,7 @@ class KalshiTechnicalBot:
             )
 
         # Moderate bullish: MACD positive + CCI rising above 0
-        if curr_hist > 0 and curr_cci > 50 and prev_hist <= 0:
+        if curr_hist > 0 and curr_cci > 25 and prev_hist <= 0:
             return TechSignal(
                 ticker=ticker, title=title, side="yes", strength="moderate",
                 macd_hist=curr_hist, cci_val=curr_cci, price=curr_price,
@@ -325,11 +340,35 @@ class KalshiTechnicalBot:
             )
 
         # Moderate bearish: MACD negative + CCI falling below 0
-        if curr_hist < 0 and curr_cci < -50 and prev_hist >= 0:
+        if curr_hist < 0 and curr_cci < -25 and prev_hist >= 0:
             return TechSignal(
                 ticker=ticker, title=title, side="no", strength="moderate",
                 macd_hist=curr_hist, cci_val=curr_cci, price=curr_price,
                 confidence=0.5,
+            )
+
+        # Trending bullish: MACD histogram positive and increasing for 3+ bars
+        if (len(histogram) >= 3 and curr_hist > 0
+                and histogram[-2] > 0 and histogram[-3] > 0
+                and curr_hist > histogram[-2] > histogram[-3]
+                and curr_cci > 0):
+            confidence = min(0.6, 0.35 + abs(curr_hist) * 5)
+            return TechSignal(
+                ticker=ticker, title=title, side="yes", strength="moderate",
+                macd_hist=curr_hist, cci_val=curr_cci, price=curr_price,
+                confidence=confidence,
+            )
+
+        # Trending bearish: MACD histogram negative and decreasing for 3+ bars
+        if (len(histogram) >= 3 and curr_hist < 0
+                and histogram[-2] < 0 and histogram[-3] < 0
+                and curr_hist < histogram[-2] < histogram[-3]
+                and curr_cci < 0):
+            confidence = min(0.6, 0.35 + abs(curr_hist) * 5)
+            return TechSignal(
+                ticker=ticker, title=title, side="no", strength="moderate",
+                macd_hist=curr_hist, cci_val=curr_cci, price=curr_price,
+                confidence=confidence,
             )
 
         return None
@@ -337,30 +376,56 @@ class KalshiTechnicalBot:
     # ── Execution ──
 
     async def _execute_signals(self, signals: list[TechSignal], client):
-        """Auto-trade strong signals."""
+        """Auto-trade strong and moderate signals."""
         from app.database import insert_kalshi_trade
 
-        # Only trade strong signals
-        strong = [s for s in signals if s.strength == "strong"]
-        if not strong:
+        # Trade strong + moderate signals (strong first)
+        tradeable = [s for s in signals if s.strength in ("strong", "moderate")]
+        tradeable.sort(key=lambda s: s.confidence, reverse=True)
+        if not tradeable:
             return
 
         if len(self._positions) >= self.max_positions:
             logger.info(f"Max positions ({self.max_positions}) reached, skipping execution")
             return
 
-        for sig in strong[:2]:  # Max 2 trades per scan
+        for sig in tradeable[:2]:  # Max 2 trades per scan
+            # Skip if we already have a resting order on this ticker+side
+            existing_key = f"{sig.ticker}_{sig.side}"
+            if existing_key in self._pending_orders:
+                logger.debug(f"Skipping duplicate order for {existing_key}")
+                continue
+
             price = sig.price
-            cost = price * self.contracts_per_trade
+            count = self.contracts_per_trade
+            cost = price * count
             if cost > self.max_cost_per_trade_cents:
                 logger.info(f"Trade cost ${cost/100:.2f} exceeds max, skipping")
                 continue
 
+            # Risk auditor gate
+            try:
+                from app.services.kalshi_risk_manager import get_risk_manager
+                rm = get_risk_manager()
+                if rm.enabled:
+                    audit = rm.audit_trade(
+                        ticker=sig.ticker, side=sig.side, price_cents=price,
+                        count=count, confidence=sig.confidence,
+                        bot_name="tech", title=sig.title,
+                    )
+                    if not audit["approved"]:
+                        logger.info(f"Tech trade BLOCKED by auditor: {audit['reason']}")
+                        continue
+                    if audit.get("adjustments", {}).get("count"):
+                        count = audit["adjustments"]["count"]
+            except Exception as e:
+                logger.warning(f"Risk audit failed (allowing trade): {e}")
+
             try:
                 if sig.side == "yes":
-                    result = await client.buy_yes(sig.ticker, price, self.contracts_per_trade)
+                    result = await client.buy_yes(sig.ticker, price, count)
                 else:
-                    result = await client.buy_no(sig.ticker, price, self.contracts_per_trade)
+                    result = await client.buy_no(sig.ticker, price, count)
 
                 order = result.get("order", {})
                 self._total_trades += 1
@@ -372,24 +437,25 @@ class KalshiTechnicalBot:
                     "title": sig.title,
                     "side": sig.side,
                     "action": "buy",
-                    "count": self.contracts_per_trade,
+                    "count": count,
                     "price_cents": price,
-                    "total_cost_cents": cost,
+                    "total_cost_cents": price * count,
                     "status": order.get("status", "placed"),
                     "notes": f"Tech bot: {sig.strength} {sig.side} | MACD={sig.macd_hist:.4f} CCI={sig.cci_val:.1f}",
                 })
 
-                # Track position
+                # Track position and pending order
                 self._positions.append({
                     "ticker": sig.ticker,
                     "side": sig.side,
-                    "count": self.contracts_per_trade,
+                    "count": count,
                     "entry_price": price,
                     "entry_time": datetime.utcnow().isoformat(),
                 })
+                self._pending_orders.add(existing_key)
 
                 logger.info(
-                    f"Tech bot TRADE: {sig.side.upper()} {self.contracts_per_trade}x "
+                    f"Tech bot TRADE: {sig.side.upper()} {count}x "
                     f"@{price}¢ on {sig.ticker} (MACD={sig.macd_hist:.4f}, CCI={sig.cci_val:.1f})"
                 )
 

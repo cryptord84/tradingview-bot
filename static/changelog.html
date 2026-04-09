@@ -202,10 +202,49 @@ footer a:hover { color: var(--green); }
 <div class="version-block">
   <div class="version-header">
     <div>
+      <span class="version-tag">v1.8 Kalshi Risk &amp; Infrastructure</span>
+      <span class="version-date">&nbsp;&nbsp;2026-04-03</span>
+    </div>
+    <span class="version-status status-active">LIVE</span>
+  </div>
+  <div class="version-body">
+    <ul>
+      <li><span class="change-type type-feature">feature</span> Global circuit breaker &mdash; aggregate P&amp;L monitoring, auto-kills all bots on daily loss threshold ($10 default)</li>
+      <li><span class="change-type type-feature">feature</span> Pre-trade risk gate &mdash; every buy order checked against daily loss limit before API submission</li>
+      <li><span class="change-type type-feature">feature</span> Emergency flatten &mdash; cancel all orders + sell all positions when breaker trips</li>
+      <li><span class="change-type type-feature">feature</span> Category exposure limits &mdash; per-category daily caps (sports, esports, crypto, politics, finance, weather)</li>
+      <li><span class="change-type type-feature">feature</span> Liquidity-based position sizing &mdash; orderbook depth tiers control max order size (thin books = fewer contracts)</li>
+      <li><span class="change-type type-feature">feature</span> Risk Auditor agent &mdash; 4th AI agent reviews consensus votes, can veto trades on risk grounds</li>
+      <li><span class="change-type type-feature">feature</span> Rate limiter &mdash; 10 req/s token-bucket shared across all bots, configurable</li>
+      <li><span class="change-type type-feature">feature</span> Kalshi WebSocket feed &mdash; real-time orderbook + trades via wss://api.elections.kalshi.com</li>
+      <li><span class="change-type type-feature">feature</span> Prometheus /metrics endpoint &mdash; P&amp;L per bot, trades, positions, rate limit tokens, category exposure</li>
+      <li><span class="change-type type-feature">feature</span> Unified P&amp;L dashboard &mdash; aggregated P&amp;L across all bots with live trade feed</li>
+      <li><span class="change-type type-feature">feature</span> 6 new Telegram commands: /kalshi, /kalshi_reset, /prices, /arb, /spread, /risk</li>
+      <li><span class="change-type type-infra">infra</span> Async Kalshi client &mdash; all bots use asyncio.to_thread() wrapper, no event loop blocking</li>
+      <li><span class="change-type type-infra">infra</span> Pydantic config validation &mdash; 12 models validate entire kalshi: section at startup</li>
+      <li><span class="change-type type-infra">infra</span> WS feed integrated into Market Maker + Spread Bot (REST fallback preserved)</li>
+      <li><span class="change-type type-infra">infra</span> Telegram commands parallelized with asyncio.gather, configurable API base URL</li>
+      <li><span class="change-type type-infra">infra</span> Microstructure research applied &mdash; skip finance, dead zone filter, tail preference, category scoring</li>
+      <li><span class="change-type type-fix">fix</span> WebSocket extra_headers for websockets v11 compatibility</li>
+      <li><span class="change-type type-fix">fix</span> Dashboard balance display &mdash; async client missing api_key_id property proxy</li>
+      <li><span class="change-type type-infra">infra</span> /health endpoint upgraded &mdash; per-service status for all 8 bots + WS + circuit breaker</li>
+    </ul>
+    <div class="metrics-row">
+      <div class="metric"><span class="metric-label">New Services: </span><span class="metric-value good">4</span></div>
+      <div class="metric"><span class="metric-label">New Endpoints: </span><span class="metric-value">10</span></div>
+      <div class="metric"><span class="metric-label">New Commands: </span><span class="metric-value good">6</span></div>
+      <div class="metric"><span class="metric-label">Bug Fixes: </span><span class="metric-value good">2</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="version-block">
+  <div class="version-header">
+    <div>
       <span class="version-tag">v1.7 Strategy Lab</span>
       <span class="version-date">&nbsp;&nbsp;2026-04-01</span>
     </div>
-    <span class="version-status status-active">LIVE</span>
+    <span class="version-status status-tested">TESTED</span>
   </div>
   <div class="version-body">
     <ul>

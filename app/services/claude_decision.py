@@ -262,8 +262,31 @@ async def get_claude_decision(
         )
     except Exception as e:
         logger.error(f"Claude decision error ({mode} mode): {e}")
+        # Confidence-based failover: auto-execute high-conviction signals when Claude is unavailable.
+        # This prevents missed trades during API overload (exit code 1 / usage limit).
+        conf = signal.confidence_score if signal else 0
+        if conf >= 80:
+            logger.warning(
+                f"Claude unavailable — auto-executing {signal.signal_type.value} {signal.symbol} "
+                f"(confidence={conf} >= 80, bypassing Claude)"
+            )
+            return ClaudeResponse(
+                decision=ClaudeDecision.EXECUTE,
+                reasoning=(
+                    f"Claude API unavailable ({str(e)}). "
+                    f"Auto-executing: confidence {conf}/100 meets ≥80 bypass threshold."
+                ),
+                risk_score=5,
+            )
+        logger.warning(
+            f"Claude unavailable — skipping {signal.signal_type.value} {signal.symbol} "
+            f"(confidence={conf} < 80, no bypass)"
+        )
         return ClaudeResponse(
             decision=ClaudeDecision.REJECT,
-            reasoning=f"Claude {mode} error: {str(e)}. Rejecting for safety.",
+            reasoning=(
+                f"Claude {mode} error: {str(e)}. "
+                f"Confidence {conf}/100 below 80 bypass threshold — rejecting for safety."
+            ),
             risk_score=10,
         )

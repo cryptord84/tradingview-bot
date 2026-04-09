@@ -1,0 +1,132 @@
+// =============================================================================
+// Stochastic RSI Momentum v1.0 — 1H BACKTEST STRATEGY
+//
+// Different approach: momentum continuation, NOT mean reversion.
+// Enters when StochRSI crosses up from oversold WITH trend confirmation.
+// StochRSI oscillates much faster than RSI — more frequent signals.
+//
+// Longs only — proven more reliable on crypto.
+//
+// Entry:
+//   StochRSI K crosses above D in lower zone (< 30)
+//   + ADX > 18 (some trend present, not dead chop)
+//   + Price > EMA 50 (only buy in uptrend)
+//   + Volume above average
+//
+// Exit:
+//   ATR-based TP/SL + StochRSI overbought exit
+//
+// Target: SOL, ETH on 1H
+// =============================================================================
+
+//@version=6
+strategy("StochRSI Momentum v1 — 1H", overlay=true, max_bars_back=500,
+         initial_capital=1000, default_qty_type=strategy.percent_of_equity,
+         default_qty_value=15, commission_type=strategy.commission.percent,
+         commission_value=0.1, slippage=2)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+grp_srsi = "Stochastic RSI"
+srsi_rsi_len   = input.int(14, "RSI Length", minval=5, maxval=25, group=grp_srsi)
+srsi_stoch_len = input.int(14, "Stoch Length", minval=5, maxval=25, group=grp_srsi)
+srsi_k_smooth  = input.int(3, "K Smoothing", minval=1, maxval=10, group=grp_srsi)
+srsi_d_smooth  = input.int(3, "D Smoothing", minval=1, maxval=10, group=grp_srsi)
+srsi_buy_zone  = input.float(30, "Buy Zone (K below this)", minval=10, maxval=50, step=5, group=grp_srsi)
+srsi_sell_zone = input.float(80, "Overbought Exit (K above this)", minval=60, maxval=95, step=5, group=grp_srsi)
+
+grp_adx = "ADX Trend Filter"
+adx_len       = input.int(14, "ADX Length", minval=7, maxval=25, group=grp_adx)
+adx_threshold = input.float(18, "Min ADX (trend strength)", minval=10, maxval=30, step=1, group=grp_adx)
+
+grp_trend = "Trend"
+ema_len = input.int(50, "EMA Length", minval=20, maxval=200, group=grp_trend)
+
+grp_vol = "Volume"
+vol_len  = input.int(20, "MA Length", group=grp_vol)
+vol_mult = input.float(0.9, "Min Volume (x avg)", minval=0.5, maxval=2.0, step=0.1, group=grp_vol)
+
+grp_risk = "Risk Management"
+atr_len     = input.int(14, "ATR Length", group=grp_risk)
+sl_atr_mult = input.float(1.5, "SL ATR Multiplier", minval=0.5, maxval=3.0, step=0.5, group=grp_risk)
+tp_atr_mult = input.float(3.0, "TP ATR Multiplier", minval=1.5, maxval=6.0, step=0.5, group=grp_risk)
+trail_activate = input.float(1.5, "Trail Start (ATR)", minval=0.5, maxval=4.0, step=0.5, group=grp_risk)
+trail_offset   = input.float(1.0, "Trail Offset (ATR)", minval=0.5, maxval=3.0, step=0.5, group=grp_risk)
+use_srsi_exit  = input.bool(true, "Exit on StochRSI overbought", group=grp_risk)
+
+grp_cool = "Cooldown"
+cooldown_bars = input.int(5, "Bars Between Signals", minval=1, maxval=20, group=grp_cool)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+// Stochastic RSI
+rsi_val = ta.rsi(close, srsi_rsi_len)
+srsi_k_raw = ta.stoch(rsi_val, rsi_val, rsi_val, srsi_stoch_len)
+srsi_k = ta.sma(srsi_k_raw, srsi_k_smooth)
+srsi_d = ta.sma(srsi_k, srsi_d_smooth)
+
+// K crossing above D in buy zone
+srsi_cross_up = ta.crossover(srsi_k, srsi_d) and srsi_k[1] < srsi_buy_zone
+
+// ADX + DI
+[diplus, diminus, adx_val] = ta.dmi(adx_len, adx_len)
+trend_present = adx_val > adx_threshold
+trend_bullish = diplus > diminus
+
+// EMA trend
+ema_val = ta.ema(close, ema_len)
+above_ema = close > ema_val
+
+// Volume
+vol_ma = ta.sma(volume, vol_len)
+vol_ok = volume > vol_ma * vol_mult
+
+// ATR
+atr_val = ta.atr(atr_len)
+
+// Cooldown
+var int bars_since = 100
+bars_since := bars_since + 1
+cooldown_ok = bars_since >= cooldown_bars
+
+// =============================================================================
+// ENTRY: LONGS ONLY
+// =============================================================================
+
+long_signal = srsi_cross_up and trend_present and trend_bullish and above_ema and vol_ok and cooldown_ok and barstate.isconfirmed
+
+if long_signal
+    bars_since := 0
+
+// =============================================================================
+// EXECUTION
+// =============================================================================
+
+if long_signal
+    sl = close - sl_atr_mult * atr_val
+    tp = close + tp_atr_mult * atr_val
+    trailPrice = close + trail_activate * atr_val
+    trailTicks = math.round(trail_offset * atr_val / syminfo.mintick)
+    strategy.entry("SRSI Long", strategy.long)
+    strategy.exit("SRSI Exit", "SRSI Long", stop=sl, limit=tp, trail_price=trailPrice, trail_offset=trailTicks)
+
+// StochRSI overbought exit — momentum exhausted
+if use_srsi_exit and strategy.position_size > 0 and srsi_k > srsi_sell_zone and ta.crossunder(srsi_k, srsi_d)
+    strategy.close("SRSI Long", comment="SRSI OB Exit")
+
+// =============================================================================
+// PLOTS
+// =============================================================================
+
+plot(ema_val, "EMA", color=color.new(color.white, 30), linewidth=2)
+
+// Entry markers
+plotshape(long_signal, "Buy", shape.triangleup, location.belowbar, color.lime, size=size.small)
+
+// Trend background
+bgCol = above_ema and trend_present and trend_bullish ? color.new(color.green, 95) : na
+bgcolor(bgCol)

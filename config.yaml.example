@@ -65,6 +65,71 @@ signal_queue:
                                     # Set to 0 to disable batching (FIFO order)
                                     # 4H candle alerts arrive within ~2-3s of each other
 
+# --- Per-Alert Dry-Run Simulation ---
+dry_run:
+  default_mode: "live"                 # "live" = trade normally, "dry_run" = simulate only
+                                       # Per-alert overrides are managed via dashboard toggles
+  known_alerts:                        # Pre-populate dashboard with your active alerts
+    - { strategy: "BB Squeeze v1.0", token: "BONK", timeframe: "4H" }
+    - { strategy: "BB Squeeze v1.0", token: "SOL", timeframe: "4H" }
+    - { strategy: "OB+FVG Alert v1.0", token: "ETH", timeframe: "1H" }
+    - { strategy: "OB+FVG Alert v1.0", token: "WIF", timeframe: "1H" }
+    - { strategy: "OB+FVG Alert v1.0", token: "BONK", timeframe: "1H" }
+    - { strategy: "BB Squeeze v2.0", token: "JTO", timeframe: "4H" }
+    - { strategy: "BB Squeeze v2.0", token: "RAY", timeframe: "4H" }
+    - { strategy: "Mean Reversion v1.3.2", token: "WIF", timeframe: "4H" }
+    - { strategy: "Mean Reversion v1.3.2", token: "ORCA", timeframe: "4H" }
+    - { strategy: "Mean Reversion v1.3.2", token: "wETH", timeframe: "4H" }
+    - { strategy: "Confluence Pro v3.5.3", token: "PYTH", timeframe: "1H" }
+    - { strategy: "Confluence Pro v3.5.3", token: "WIF", timeframe: "1H" }
+    - { strategy: "RSI Divergence v1.0", token: "SOL", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "RSI Divergence v1.0", token: "WIF", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "RSI Divergence v1.0", token: "ETH", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "RSI Divergence v1.0", token: "BONK", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "Volume Momentum v1.0", token: "SOL", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "Volume Momentum v1.0", token: "WIF", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "Volume Momentum v1.0", token: "ETH", timeframe: "4H", mode: "dry_run" }
+    - { strategy: "Volume Momentum v1.0", token: "BONK", timeframe: "4H", mode: "dry_run" }
+
+# --- Confluence Filter (Cross-Alert Confirmation) ---
+confluence:
+  enabled: false                       # Set true to require 2 strategies before executing
+  window_seconds: 1800                 # 30 min — time window for a second alert to confirm
+  min_strategies: 2                    # Number of different strategies needed
+  on_timeout: "drop"                   # "drop" = discard unconfirmed, "execute" = trade anyway
+  bypass_confidence: 95                # Signals above this confidence skip confluence check
+
+# --- Strategy-Specific TP/SL Profiles ---
+# Override the global position_monitor tp/sl multipliers per strategy.
+# Keys are matched as case-insensitive prefix of the strategy name from alerts.
+strategy_profiles:
+  "Mean Reversion":
+    tp_multiplier: 2.5              # Tighter TP — mean reversion targets smaller moves
+    sl_multiplier: 1.0              # Tighter SL — quick invalidation
+  "BB Squeeze":
+    tp_multiplier: 5.0              # Wider TP — squeeze breakouts can run
+    sl_multiplier: 2.0              # Wider SL — give room for volatility expansion
+  "OB+FVG":
+    tp_multiplier: 3.5              # Moderate — targeting next order block
+    sl_multiplier: 1.5              # Standard
+  "Confluence Pro":
+    tp_multiplier: 4.0              # Standard multi-factor
+    sl_multiplier: 1.5
+  "RSI Divergence":
+    tp_multiplier: 3.0              # Moderate — divergences target mean reversion
+    sl_multiplier: 1.5              # Standard protective stop
+  "Volume Momentum":
+    tp_multiplier: 4.5              # Wider TP — momentum breakouts can run
+    sl_multiplier: 1.5              # Standard protective stop
+
+# --- SOL Risk Manager (Jupiter Trades) ---
+sol_risk:
+  enabled: true
+  max_daily_loss_usd: 50.0           # Stop all BUY trades after this much realized loss
+  max_token_exposure_usd: 200.0      # Max USD committed to any single token per day
+  max_single_trade_usd: 100.0        # Hard cap per individual trade
+  max_open_positions: 3              # Max concurrent open positions
+
 # --- Risk Management ---
 risk:
   max_purchase_sol: 5.0           # Max SOL per single trade
@@ -202,13 +267,14 @@ kalshi:
     cci_period: 20                             # CCI lookback period
     cci_overbought: 100                        # CCI bullish threshold
     cci_oversold: -100                         # CCI bearish threshold
-    auto_trade: false                          # DANGER: auto-execute strong signals
+    auto_trade: false                          # Auto-execute strong + moderate signals
     contracts_per_trade: 5                     # Contracts per signal
     max_positions: 5                           # Max concurrent positions
-    max_cost_per_trade_cents: 500              # Max $5 per trade
+    max_cost_per_trade_cents: 200              # Max $2 per trade
     telegram_alerts: true
     target_tickers: []                         # Empty = auto-select by volume
     max_markets_to_scan: 20
+    max_days_to_close: 7                       # Skip markets closing > N days out (0=no filter)
   # Sports Scanner (multi-league market tracker)
   sports_scanner:
     enabled: false                             # Enable sports market scanning
@@ -284,14 +350,15 @@ kalshi:
       - "contrarian"                           # Crowd sentiment reversal
       - "momentum"                             # Trend following
     auto_trade: false                          # DANGER: auto-execute on consensus
-    min_consensus_strength: 0.7                # Minimum agent agreement to trade
-    require_unanimous: false                   # Require all agents to agree
+    min_consensus_strength: 0.65               # 2/3 agents agreeing with conviction
+    require_unanimous: false                   # Majority rules — contrarian + momentum rarely agree
     contracts_per_trade: 5
     max_positions: 3                           # Conservative due to AI uncertainty
     max_cost_per_trade_cents: 500              # Max $5 per trade
     telegram_alerts: true
     target_tickers: []                         # Empty = auto-select by volume
     max_markets_to_analyze: 5                  # Limit Claude API calls
+    max_days_to_close: 7                       # Skip markets closing > N days out (0=no filter)
   # WebSocket Feed (real-time orderbook + trade streaming)
   websocket:
     enabled: true                              # Enable WS feed for live orderbook data
@@ -302,6 +369,14 @@ kalshi:
     max_daily_loss_cents: 1000                 # Trip at $10 daily loss — kills all bots
     check_interval_seconds: 30                 # How often to check aggregate P&L
     telegram_alerts: true                      # Alert on trip via Telegram
+    category_limits:                           # Max exposure per category (cents)
+      sports_cents: 1000                       # $10 max in sports markets
+      esports_cents: 1000                      # $10 max in esports markets
+      crypto_cents: 1000                       # $10 max in crypto markets
+      finance_cents: 500                       # $5 max in finance (low edge)
+      politics_cents: 1000                     # $10 max in politics markets
+      weather_cents: 1000                      # $10 max in weather markets
+      other_cents: 1000                        # $10 max in uncategorized
 
 # --- Portfolio Rebalancer ---
 rebalancer:

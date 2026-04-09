@@ -200,6 +200,7 @@ class PositionMonitor:
                         input_mint=input_mint,
                         output_mint=output_mint,
                         amount_lamports=amount_lamports,
+                        slippage_bps=300,  # 3% — higher tolerance for closes
                     )
                     break
                 except Exception as e:
@@ -300,7 +301,7 @@ class PositionMonitor:
                 f"Entry: ${pos['entry_price']:.2f}\n"
                 f"Exit: ${current_price:.2f}\n"
                 f"{trail_info}"
-                f"Amount: {pos['amount_sol']:.4f} SOL\n"
+                f"Amount: {pos['amount_sol']:.4f} {token_symbol} (${pos.get('amount_usdc', pos['amount_sol'] * pos['entry_price']):.2f})\n"
                 f"{pnl_emoji} P&L: <b>${pnl_usdc:+.2f}</b> ({pnl_percent:+.1f}%)\n"
                 f"TX: <code>{swap_result['tx_signature'][:20]}...</code>"
             )

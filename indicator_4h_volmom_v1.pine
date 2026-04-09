@@ -1,0 +1,114 @@
+// =============================================================================
+// Volume Momentum v1.0 — 4H ALERT INDICATOR (Long + Short)
+//
+// Entry:
+//   Volume spike (1.8x SMA) + significant momentum move (> 0.5x ATR)
+//   LONG:  bullish momentum, not a repeat of the prior bar's spike
+//   SHORT: bearish momentum, not a repeat of the prior bar's spike
+//
+// Exit (handled by position monitor):
+//   TP/SL via ATR multipliers in config
+//
+// SETUP:
+//   1. Open TradingView -> token/USDT -> 4H timeframe
+//   2. Pine Editor -> paste this -> Add to chart
+//   3. Set your webhook secret in indicator settings (Webhook group)
+//   4. Create alert: Condition = this indicator -> "Any alert() function call"
+//   5. Webhook URL: https://your-bot-url/webhook
+// =============================================================================
+
+//@version=6
+indicator("Volume Momentum v1.0 — 4H Alerts", overlay=true, max_bars_back=500)
+
+// =============================================================================
+// INPUTS
+// =============================================================================
+
+grp_wh = "Webhook"
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret", group=grp_wh)
+
+grp_vol = "Volume"
+vol_len      = input.int(20,  "Volume SMA Length",     minval=5,  group=grp_vol)
+vol_spike    = input.float(1.8, "Volume Spike Multiplier", minval=1.1, step=0.1, group=grp_vol)
+
+grp_mom = "Momentum"
+mom_len      = input.int(10, "Momentum Length", minval=2, group=grp_mom)
+
+grp_atr = "ATR Filter"
+atr_len      = input.int(14,  "ATR Length",           minval=5,  group=grp_atr)
+atr_mult     = input.float(0.5, "Min Move (ATR mult)", minval=0.1, step=0.1, group=grp_atr)
+
+grp_cool = "Cooldown"
+cooldown_bars = input.int(4, "Bars Between Signals", minval=0, maxval=20, group=grp_cool)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+
+vol_sma     = ta.sma(volume, vol_len)
+is_vol_spike = volume > vol_sma * vol_spike
+
+mom         = close - close[mom_len]
+atr_val     = ta.atr(atr_len)
+big_move    = math.abs(mom) > atr_val * atr_mult
+
+bull_mom    = mom > 0
+bear_mom    = mom < 0
+
+rsi_val     = ta.rsi(close, 14)
+vol_ratio   = volume / vol_sma
+
+// Cooldown
+var int bars_since_signal = 100
+bars_since_signal := bars_since_signal + 1
+cooldown_ok = bars_since_signal >= cooldown_bars
+
+// =============================================================================
+// SIGNALS
+// =============================================================================
+
+buy_signal  = is_vol_spike and big_move and bull_mom and not (is_vol_spike[1] and bull_mom[1]) and cooldown_ok and barstate.isconfirmed
+sell_signal = is_vol_spike and big_move and bear_mom and not (is_vol_spike[1] and bear_mom[1]) and cooldown_ok and barstate.isconfirmed
+
+if buy_signal or sell_signal
+    bars_since_signal := 0
+
+// =============================================================================
+// CONFIDENCE SCORING
+// =============================================================================
+
+mom_strength = math.abs(mom) / atr_val
+conf = math.min(math.round(50 + vol_ratio * 10 + mom_strength * 5), 95)
+
+buy_conf  = buy_signal  ? conf : 0
+sell_conf = sell_signal ? conf : 0
+
+calc_lev(c) => c >= 85 ? 5 : c >= 70 ? 3 : c >= 55 ? 2 : 1
+
+pos_size_pct = conf >= 80 ? 50 : conf >= 60 ? 35 : 25
+
+// =============================================================================
+// ALERT CONDITIONS
+// =============================================================================
+
+alertcondition(buy_signal,  "BUY Signal",  "BUY")
+alertcondition(sell_signal, "SELL Signal", "SELL")
+
+// =============================================================================
+// ALERT MESSAGES (webhook JSON)
+// =============================================================================
+
+if buy_signal
+    alert('{"secret":"' + webhook_secret + '","signal_type":"BUY","symbol":"' + syminfo.ticker + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(buy_conf) + ',"suggested_leverage":' + str.tostring(calc_lev(buy_conf)) + ',"suggested_position_size_percent":' + str.tostring(pos_size_pct) + ',"bull_score":3,"bear_score":0' + ',"rsi":' + str.tostring(math.round(rsi_val, 2)) + ',"atr":' + str.tostring(atr_val) + ',"vol_ratio":' + str.tostring(math.round(vol_ratio, 2)) + ',"momentum":' + str.tostring(math.round(mom, 6)) + ',"timeframe":"' + timeframe.period + '","strategy":"Volume Momentum v1.0"}', alert.freq_once_per_bar_close)
+
+if sell_signal
+    alert('{"secret":"' + webhook_secret + '","signal_type":"SELL","symbol":"' + syminfo.ticker + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(sell_conf) + ',"suggested_leverage":' + str.tostring(calc_lev(sell_conf)) + ',"suggested_position_size_percent":' + str.tostring(pos_size_pct) + ',"bull_score":0,"bear_score":3' + ',"rsi":' + str.tostring(math.round(rsi_val, 2)) + ',"atr":' + str.tostring(atr_val) + ',"vol_ratio":' + str.tostring(math.round(vol_ratio, 2)) + ',"momentum":' + str.tostring(math.round(mom, 6)) + ',"timeframe":"' + timeframe.period + '","strategy":"Volume Momentum v1.0"}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// VISUALS
+// =============================================================================
+
+bgcolor(is_vol_spike ? color.new(color.yellow, 90) : na, title="Volume Spike BG")
+
+plotshape(buy_signal,  "BUY",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(sell_signal, "SELL", shape.triangledown, location.abovebar, color.red,   size=size.normal)

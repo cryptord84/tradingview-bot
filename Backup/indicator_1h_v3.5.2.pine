@@ -1,38 +1,47 @@
 // =============================================================================
-// SOL Confluence Pro v3.7 - BACKTEST STRATEGY
-// Optimized for 1H timeframe + small capital ($100 starting)
+// Confluence Pro v3.5.3 — 1H ALERT INDICATOR (Multi-Token)
 //
-// v3.7 CHANGES — "v3.5 + Lower TP" (single variable test):
-//   v3.5 was the best version (PF 0.982, R:R 1.23:1). v3.6 tried 3
-//   changes at once and regressed to PF 0.812. v3.7 returns to v3.5's
-//   exact config with ONE change: TP lowered from 3.5x to 3.0x ATR.
+// Built directly from backtest_1H_confluence_v3.5.pine
+// v3.5.3: Added deep dip override — captures extreme dips with relaxed gates.
 //
-//   Rationale: v3.5 had small winners at $0.05, $0.09, $0.10 that exited
-//   via trail stop before reaching TP. A lower TP converts some of these
-//   to full TP hits, increasing avg win without changing entry quality.
+// 9-factor confluence system with ADX trend filter.
+// Longs only by default (shorts require sustained bear market).
 //
-//   ONLY CHANGE from v3.5:
-//   1. TP: 3.0x ATR (from 3.5x) — more achievable target
+// Profitable tokens (backtested):
+//   BONK (PF 2.327), PYTH (PF 1.811), RAY (PF 1.418), WIF (PF 1.254)
+//   NOTE: SOL excluded — PF 0.982 (below breakeven on 1H)
 //
-//   EVERYTHING ELSE identical to v3.5:
-//   - Confluence: 5, Position: 25%, SL: 1.5x ATR
-//   - ADX > 20 (no rising requirement)
-//   - Trail: activate 1.5x, offset 1.0x ATR
-//   - Breakeven: 1.0x ATR
-//   - Bear close >= 5, min hold 4 bars, no ST close
-//   - Cooldown: 3, longs only, vol 1.5x, HTF 4H EMA50, $100 capital
+// Entry (normal):
+//   Bull confluence >= 5/9 + Volume spike 1.5x + HTF 4H EMA50 bullish
+//   + ADX(14) > 20 (trending market filter)
+//
+// Entry (deep dip override):
+//   Price drops > 2.5x ATR below lower BB = extreme dip
+//   Only 3 bull confirms needed, HTF/ADX/volume gates bypassed
+//   RSI oversold strongly recommended (configurable)
+//   More conservative than 4H (2.5x vs 2.0x) to avoid overlap
+//
+// Exit (handled by position monitor):
+//   TP 3.5x ATR / SL 1.5x ATR + trailing stop + breakeven
 //
 // Confluence factors:
 //   Bull (max 9): EMA ribbon, RSI, MACD hist, Supertrend, BB, VWAP+Cloud,
 //                 Fibonacci, Banker Fund Flow (L3), MACD Divergence (L2)
 //   Bear (max 8): EMA ribbon, RSI, MACD hist, Supertrend, BB, VWAP+Cloud,
 //                 Fibonacci, MACD Divergence (L2)
+//
+// SETUP:
+//   1. Open TradingView -> token/USDT -> 1H timeframe
+//   2. Pine Editor -> paste this -> Add to chart
+//   3. Set your webhook secret in indicator settings
+//   4. Create alert: Condition = this indicator -> "Any alert() function call"
+//   5. Webhook URL: https://your-bot-url/webhook
+//   6. Expiration: max allowed, set calendar reminder to renew
+//   7. Repeat for each token: BONK, PYTH, RAY, WIF
 // =============================================================================
 
 //@version=5
-strategy("SOL Confluence Pro v3.7", overlay=true, default_qty_type=strategy.percent_of_equity,
-     default_qty_value=25, initial_capital=100, slippage=3, commission_type=strategy.commission.percent,
-     commission_value=0.1, pyramiding=0, calc_on_every_tick=false)
+indicator("Confluence Pro v3.5.3 — 1H Alerts", overlay=true, max_bars_back=500)
 
 // =============================================================================
 // INPUTS
@@ -83,27 +92,18 @@ grp_adx = "ADX Trend Filter"
 adx_len       = input.int(14,   "ADX Length",    group=grp_adx)
 adx_threshold = input.float(20, "ADX Minimum",   group=grp_adx, tooltip="Only enter trades when ADX > this value (trending market)")
 
-grp_risk = "Risk Management"
-sl_atr_mult    = input.float(1.5, "Stop Loss ATR Multiplier",   group=grp_risk)
-tp_atr_mult    = input.float(3.0, "Take Profit ATR Multiplier", group=grp_risk)
-risk_per_trade = input.float(2.0, "Risk Per Trade %", minval=0.5, maxval=10, group=grp_risk)
-
-grp_trail = "Trailing Stop"
-trail_activate_mult = input.float(1.5, "Activate After ATR Move",  group=grp_trail, tooltip="Trail activates once price moves this many ATRs in your favor")
-trail_offset_mult   = input.float(1.0, "Trail Offset ATR",         group=grp_trail, tooltip="Once active, trail stop follows price at this many ATRs distance")
-breakeven_mult      = input.float(1.0, "Move SL to Breakeven After ATR", group=grp_trail, tooltip="After this much profit in ATRs, move stop to entry price")
-
-grp_close = "Close Conditions"
-close_bear_threshold = input.int(5,  "Bear Score to Close Long", minval=3, maxval=8, group=grp_close, tooltip="Close on strong reversal signal")
-close_bull_threshold = input.int(5,  "Bull Score to Close Short", minval=3, maxval=9, group=grp_close)
-min_hold_bars        = input.int(4,  "Min Hold Bars Before Close", minval=1, maxval=24, group=grp_close)
-
 grp_short = "Short Control"
 short_enabled      = input.bool(false, "Enable Short Signals", group=grp_short)
 short_bear_bars    = input.int(50, "Bars Below SMA200 Required", minval=5, maxval=200, group=grp_short)
 
 grp_cool = "Cooldown"
 cooldown_bars = input.int(3, "Bars Between Signals", minval=0, maxval=50, group=grp_cool)
+
+grp_dip = "Deep Dip Override"
+dip_enabled      = input.bool(true, "Enable Deep Dip Override", group=grp_dip, tooltip="Capture extreme dips that normal confluence misses. Bypasses HTF, ADX, and volume gates.")
+dip_atr_mult     = input.float(2.5, "ATR Below BB (depth)", minval=1.0, maxval=5.0, step=0.5, group=grp_dip, tooltip="How far below lower BB (in ATR units) qualifies as deep dip. 2.5 = more conservative than 4H (2.0)")
+dip_min_confirm  = input.int(3, "Min Bull Confirms for Dip", minval=1, maxval=6, group=grp_dip, tooltip="Relaxed confluence threshold for dip entries (normal requires 5/9)")
+dip_rsi_required = input.bool(true, "Require RSI Oversold", group=grp_dip, tooltip="Strongly recommended — ensures dip isn't a falling knife")
 
 // =============================================================================
 // HELPER: Weighted Simple Average (used by Banker Fund Flow)
@@ -150,8 +150,7 @@ vol_spike = volume > vol_ma * vol_spike_mult
 // ATR
 atr_val = ta.atr(14)
 
-// ADX — trend strength filter (v3.5 addition)
-// DMI calculation
+// ADX — trend strength filter
 up_move   = high - high[1]
 down_move = low[1] - low
 plus_dm   = (up_move > down_move and up_move > 0) ? up_move : 0.0
@@ -244,119 +243,60 @@ bear_score = (ema_bear      ? 1 : 0) + (rsi_bear      ? 1 : 0) + (macd_bear     
              (fib_bear      ? 1 : 0) + (macd_div_bear ? 1 : 0)
 
 // =============================================================================
-// SIGNALS (v3.5: confluence >= 5 + ADX trending filter)
+// DEEP DIP OVERRIDE — capture extreme dips that normal confluence misses
 // =============================================================================
 
-long_signal  = bull_score >= min_confluence and vol_spike and htf_bullish and cooldown_ok and adx_trending
-short_signal = bear_score >= min_confluence and vol_spike and htf_bearish and cooldown_ok and short_allowed and adx_trending
+// Measure how far price has dropped below the lower BB (in ATR units)
+dip_depth = bb_lower > 0 and atr_val > 0 ? (bb_lower - low) / atr_val : 0.0
+is_deep_dip = dip_enabled and dip_depth >= dip_atr_mult
+
+// Deep dip confirmation: relaxed confluence + optional RSI oversold
+dip_confirms_met = is_deep_dip and bull_score >= dip_min_confirm
+dip_rsi_ok = not dip_rsi_required or (rsi_val < rsi_os)
+deep_dip_signal = dip_confirms_met and dip_rsi_ok and cooldown_ok and barstate.isconfirmed
+
+// =============================================================================
+// SIGNALS (confluence >= 5 + ADX trending filter)
+// =============================================================================
+
+// Normal signal: full gates (confluence + volume + HTF + ADX)
+normal_signal = bull_score >= min_confluence and vol_spike and htf_bullish and cooldown_ok and adx_trending and barstate.isconfirmed
+
+// Combined: normal OR deep dip override
+long_signal  = normal_signal or deep_dip_signal
+is_dip_entry = deep_dip_signal and not normal_signal  // Track which type fired
+
+short_signal = bear_score >= min_confluence and vol_spike and htf_bearish and cooldown_ok and short_allowed and adx_trending and barstate.isconfirmed
+
+// Close conditions (for webhook notification)
+close_long  = bear_score >= 5 and barstate.isconfirmed
+close_short = bull_score >= 5 and barstate.isconfirmed
 
 // Reset cooldown on signal fire
 if long_signal or short_signal
     bars_since_signal := 0
 
-// --- Position Tracking ---
-var bool  in_long        = false
-var bool  in_short       = false
-var float entry_price    = na
-var float entry_atr      = na
-var int   bars_in_trade  = 0
-var bool  at_breakeven   = false
-
-// Count bars since entry
-bars_in_trade := (in_long or in_short) ? bars_in_trade + 1 : 0
-
-// --- Breakeven Stop (at 1.0x ATR — protect capital early) ---
-if in_long and not at_breakeven and not na(entry_price) and not na(entry_atr)
-    if close >= entry_price + entry_atr * breakeven_mult
-        trail_offset_be  = entry_atr * trail_offset_mult / syminfo.mintick
-        activate_dist_be = entry_atr * trail_activate_mult / syminfo.mintick
-        strategy.exit("Long Exit", "Long", stop=entry_price, limit=entry_price + entry_atr * tp_atr_mult,
-                      trail_points=activate_dist_be, trail_offset=trail_offset_be)
-        at_breakeven := true
-
-if in_short and not at_breakeven and not na(entry_price) and not na(entry_atr)
-    if close <= entry_price - entry_atr * breakeven_mult
-        trail_offset_be  = entry_atr * trail_offset_mult / syminfo.mintick
-        activate_dist_be = entry_atr * trail_activate_mult / syminfo.mintick
-        strategy.exit("Short Exit", "Short", stop=entry_price, limit=entry_price - entry_atr * tp_atr_mult,
-                      trail_points=activate_dist_be, trail_offset=trail_offset_be)
-        at_breakeven := true
-
-// --- Close Conditions (bear >= 5, NO Supertrend close) ---
-close_long_confluence  = bear_score >= close_bear_threshold and bars_in_trade >= min_hold_bars
-close_short_confluence = bull_score >= close_bull_threshold and bars_in_trade >= min_hold_bars
-
-close_long  = close_long_confluence
-close_short = close_short_confluence
-
-// Confidence (bull out of 9, bear out of 8)
-long_conf  = math.min(100, math.round(bull_score / 9.0 * 60 + (vol_spike ? 20 : 0) + (htf_bullish ? 20 : 0)))
+// Confidence (bull out of 9, bear out of 8) — dip entries get depth bonus
+dip_bonus = is_dip_entry ? math.min(15, math.round(dip_depth * 5)) : 0
+long_conf  = math.min(100, math.round(bull_score / 9.0 * 60 + (vol_spike ? 20 : 0) + (htf_bullish ? 20 : 0) + dip_bonus))
 short_conf = math.min(100, math.round(bear_score / 8.0 * 60 + (vol_spike ? 20 : 0) + (htf_bearish ? 20 : 0)))
 
 calc_lev(c)  => c >= 85 ? 5 : c >= 70 ? 3 : c >= 55 ? 2 : 1
 calc_size(c) => c >= 85 ? 15.0 : c >= 70 ? 10.0 : c >= 55 ? 7.0 : 5.0
 
 // =============================================================================
-// STRATEGY EXECUTION (for backtesting)
+// ALERT CONDITIONS
 // =============================================================================
 
-if long_signal and not in_long
-    entry_price   := close
-    entry_atr     := atr_val
-    bars_in_trade := 0
-    at_breakeven  := false
-
-    sl = close - atr_val * sl_atr_mult
-    tp = close + atr_val * tp_atr_mult
-
-    trail_offset_e  = atr_val * trail_offset_mult / syminfo.mintick
-    activate_dist_e = atr_val * trail_activate_mult / syminfo.mintick
-
-    strategy.entry("Long", strategy.long)
-    strategy.exit("Long Exit", "Long", stop=sl, limit=tp,
-                  trail_points=activate_dist_e, trail_offset=trail_offset_e)
-    in_long  := true
-    in_short := false
-
-if short_signal and not in_short
-    entry_price   := close
-    entry_atr     := atr_val
-    bars_in_trade := 0
-    at_breakeven  := false
-
-    sl = close + atr_val * sl_atr_mult
-    tp = close - atr_val * tp_atr_mult
-
-    trail_offset_e  = atr_val * trail_offset_mult / syminfo.mintick
-    activate_dist_e = atr_val * trail_activate_mult / syminfo.mintick
-
-    strategy.entry("Short", strategy.short)
-    strategy.exit("Short Exit", "Short", stop=sl, limit=tp,
-                  trail_points=activate_dist_e, trail_offset=trail_offset_e)
-    in_short := true
-    in_long  := false
-
-if close_long and in_long
-    strategy.close("Long")
-    in_long       := false
-    entry_price   := na
-    entry_atr     := na
-    bars_in_trade := 0
-    at_breakeven  := false
-
-if close_short and in_short
-    strategy.close("Short")
-    in_short      := false
-    entry_price   := na
-    entry_atr     := na
-    bars_in_trade := 0
-    at_breakeven  := false
+alertcondition(long_signal,  "BUY Signal",   "BUY")
+alertcondition(short_signal, "SELL Signal",  "SELL")
+alertcondition(close_long,   "CLOSE Long",   "CLOSE")
 
 // =============================================================================
-// WEBHOOK ALERT JSON PAYLOADS
+// ALERT MESSAGES (webhook JSON payloads)
 // =============================================================================
 
-if long_signal and not in_long[1]
+if long_signal
     alert('{"secret":"' + webhook_secret + '","signal_type":"BUY","symbol":"' + syminfo.ticker +
          '","entry_price_estimate":' + str.tostring(close) +
          ',"confidence_score":' + str.tostring(long_conf) +
@@ -367,12 +307,14 @@ if long_signal and not in_long[1]
          ',"banker_entry":' + str.tostring(banker_entry ? 1 : 0) +
          ',"macd_divergence":' + str.tostring(macd_div_bull ? 1 : 0) +
          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
-         ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+         ',"atr":' + str.tostring(atr_val) +
          ',"adx":' + str.tostring(math.round(adx_val, 2)) +
+         ',"deep_dip":' + str.tostring(is_dip_entry ? 1 : 0) +
+         ',"dip_depth_atr":' + str.tostring(math.round(dip_depth, 2)) +
          ',"timeframe":"' + timeframe.period + '"}',
          alert.freq_once_per_bar_close)
 
-if short_signal and not in_short[1]
+if short_signal
     alert('{"secret":"' + webhook_secret + '","signal_type":"SELL","symbol":"' + syminfo.ticker +
          '","entry_price_estimate":' + str.tostring(close) +
          ',"confidence_score":' + str.tostring(short_conf) +
@@ -383,12 +325,12 @@ if short_signal and not in_short[1]
          ',"banker_entry":0' +
          ',"macd_divergence":' + str.tostring(macd_div_bear ? 1 : 0) +
          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
-         ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+         ',"atr":' + str.tostring(atr_val) +
          ',"adx":' + str.tostring(math.round(adx_val, 2)) +
          ',"timeframe":"' + timeframe.period + '"}',
          alert.freq_once_per_bar_close)
 
-if (close_long and in_long[1]) or (close_short and in_short[1])
+if close_long
     alert('{"secret":"' + webhook_secret + '","signal_type":"CLOSE","symbol":"' + syminfo.ticker +
          '","entry_price_estimate":' + str.tostring(close) +
          ',"confidence_score":0,"suggested_leverage":1,"suggested_position_size_percent":0' +
@@ -396,7 +338,7 @@ if (close_long and in_long[1]) or (close_short and in_short[1])
          ',"bear_score":' + str.tostring(bear_score) +
          ',"banker_entry":0,"macd_divergence":0' +
          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
-         ',"atr":' + str.tostring(math.round(atr_val, 4)) +
+         ',"atr":' + str.tostring(atr_val) +
          ',"adx":' + str.tostring(math.round(adx_val, 2)) +
          ',"timeframe":"' + timeframe.period + '"}',
          alert.freq_once_per_bar_close)
@@ -412,10 +354,9 @@ plot(sma200, "SMA 200", color=color.new(color.red,    30), linewidth=2)
 plot(st_line, "Supertrend", color=st_dir < 0 ? color.green : color.red, linewidth=2, style=plot.style_linebr)
 
 plotshape(banker_entry, "Banker Entry", shape.triangleup, location.belowbar, color.new(color.teal, 20), size=size.tiny)
-plotshape(long_signal and not in_long[1], "BUY", shape.triangleup, location.belowbar, color.lime, size=size.normal)
-plotshape(short_signal and not in_short[1], "SELL", shape.triangledown, location.abovebar, color.red, size=size.normal)
-plotshape(close_long and in_long, "CLOSE L", shape.xcross, location.belowbar, color.yellow, size=size.small)
-plotshape(close_short and in_short, "CLOSE S", shape.xcross, location.abovebar, color.yellow, size=size.small)
+plotshape(normal_signal, "BUY", shape.triangleup, location.belowbar, color.lime, size=size.normal, text="BUY")
+plotshape(is_dip_entry, "DIP BUY", shape.triangleup, location.belowbar, color.fuchsia, size=size.normal, text="DIP BUY")
+plotshape(short_signal, "SELL", shape.triangledown, location.abovebar, color.red, size=size.normal, text="SELL")
 
 // Bear market zone shading
 bgcolor(bear_market and short_enabled ? color.new(color.red, 95) : na, title="Bear Market Zone")
@@ -423,39 +364,39 @@ bgcolor(bear_market and short_enabled ? color.new(color.red, 95) : na, title="Be
 // ADX trending zone
 bgcolor(adx_trending ? color.new(color.blue, 96) : na, title="ADX Trending")
 
-// Breakeven level
-plot(in_long and not na(entry_price) ? entry_price : na,
-     "Breakeven", color=at_breakeven ? color.new(color.white, 30) : color.new(color.white, 80), style=plot.style_linebr, linewidth=1)
-// Trailing stop activation zone
-plot(in_long and not na(entry_price) ? entry_price + entry_atr * trail_activate_mult : na,
-     "Trail Activate", color=color.new(color.aqua, 60), style=plot.style_linebr, linewidth=1)
+// Deep dip zone highlight
+bgcolor(is_deep_dip ? color.new(color.fuchsia, 88) : na, title="Deep Dip Zone")
 
-// Info table
-var table t = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 80), border_width=1)
+// =============================================================================
+// INFO TABLE
+// =============================================================================
+
+var table t = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 80), border_width=1)
 if barstate.islast
-    table.cell(t, 0, 0, "Bull",       text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 0, str.tostring(bull_score) + "/9", text_color=bull_score >= min_confluence ? color.lime : color.gray, text_size=size.small)
-    table.cell(t, 0, 1, "Bear",       text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 1, str.tostring(bear_score) + "/8", text_color=bear_score >= min_confluence ? color.red : color.gray, text_size=size.small)
-    table.cell(t, 0, 2, "RSI",        text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 2, str.tostring(math.round(rsi_val, 1)), text_color=color.white, text_size=size.small)
-    table.cell(t, 0, 3, "ADX",        text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 3, str.tostring(math.round(adx_val, 1)), text_color=adx_trending ? color.lime : color.gray, text_size=size.small)
-    table.cell(t, 0, 4, "HTF 4H50",   text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 4, htf_bullish ? "BULL" : "BEAR", text_color=htf_bullish ? color.lime : color.red, text_size=size.small)
-    table.cell(t, 0, 5, "Vol Spike",  text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 5, vol_spike ? "YES" : "NO", text_color=vol_spike ? color.lime : color.gray, text_size=size.small)
-    table.cell(t, 0, 6, "Banker",     text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 6, banker_entry ? "ENTRY" : "-", text_color=banker_entry ? color.teal : color.gray, text_size=size.small)
-    table.cell(t, 0, 7, "MACD Div",   text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 7, macd_div_bull ? "BULL" : macd_div_bear ? "BEAR" : "-", text_color=macd_div_bull ? color.lime : macd_div_bear ? color.red : color.gray, text_size=size.small)
-    table.cell(t, 0, 8, "Bear Mkt",   text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 8, bear_market ? "YES (" + str.tostring(bars_below_sma200) + ")" : "NO", text_color=bear_market ? color.red : color.gray, text_size=size.small)
-    table.cell(t, 0, 9, "Cooldown",   text_color=color.white, text_size=size.small)
-    table.cell(t, 1, 9, cooldown_ok ? "READY" : str.tostring(cooldown_bars - bars_since_signal) + " bars", text_color=cooldown_ok ? color.lime : color.yellow, text_size=size.small)
-    table.cell(t, 0, 10, "In Trade",   text_color=color.white, text_size=size.small)
-    trade_lbl = in_long ? "LONG " + str.tostring(bars_in_trade) + (at_breakeven ? " BE" : "") : in_short ? "SHORT " + str.tostring(bars_in_trade) + (at_breakeven ? " BE" : "") : "-"
-    table.cell(t, 1, 10, trade_lbl, text_color=in_long ? color.lime : in_short ? color.red : color.gray, text_size=size.small)
-    table.cell(t, 0, 11, "Confidence", text_color=color.white, text_size=size.small)
-    best_conf = bull_score > bear_score ? long_conf : short_conf
-    table.cell(t, 1, 11, str.tostring(best_conf) + "%", text_color=best_conf >= 70 ? color.lime : best_conf >= 50 ? color.yellow : color.gray, text_size=size.small)
+    table.cell(t, 0, 0, "1H v3.5.3",  text_color=color.aqua, text_size=size.small)
+    table.cell(t, 1, 0, "MULTI-TOKEN", text_color=color.lime, text_size=size.small)
+    table.cell(t, 0, 1, "Bull",       text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 1, str.tostring(bull_score) + "/9", text_color=bull_score >= min_confluence ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 2, "Bear",       text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 2, str.tostring(bear_score) + "/8", text_color=bear_score >= min_confluence ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 3, "RSI",        text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 3, str.tostring(math.round(rsi_val, 1)), text_color=color.white, text_size=size.small)
+    table.cell(t, 0, 4, "ADX",        text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 4, str.tostring(math.round(adx_val, 1)), text_color=adx_trending ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 5, "HTF 4H50",   text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 5, htf_bullish ? "BULL" : "BEAR", text_color=htf_bullish ? color.lime : color.red, text_size=size.small)
+    table.cell(t, 0, 6, "Vol Spike",  text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 6, vol_spike ? "YES" : "NO", text_color=vol_spike ? color.lime : color.gray, text_size=size.small)
+    table.cell(t, 0, 7, "Banker",     text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 7, banker_entry ? "ENTRY" : "-", text_color=banker_entry ? color.teal : color.gray, text_size=size.small)
+    table.cell(t, 0, 8, "MACD Div",   text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 8, macd_div_bull ? "BULL" : macd_div_bear ? "BEAR" : "-", text_color=macd_div_bull ? color.lime : macd_div_bear ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 9, "Bear Mkt",   text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 9, bear_market ? "YES (" + str.tostring(bars_below_sma200) + ")" : "NO", text_color=bear_market ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 10, "Cooldown",   text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 10, cooldown_ok ? "READY" : str.tostring(cooldown_bars - bars_since_signal) + " bars", text_color=cooldown_ok ? color.lime : color.yellow, text_size=size.small)
+    // Deep dip override status
+    table.cell(t, 0, 11, "Dip Depth",  text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 11, dip_depth > 0 ? str.tostring(math.round(dip_depth, 1)) + "x ATR" : "-", text_color=is_deep_dip ? color.fuchsia : color.gray, text_size=size.small)
+    table.cell(t, 0, 12, "Dip Override", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 12, not dip_enabled ? "OFF" : is_deep_dip ? "ACTIVE" : "STANDBY", text_color=not dip_enabled ? color.gray : is_deep_dip ? color.fuchsia : color.gray, text_size=size.small)

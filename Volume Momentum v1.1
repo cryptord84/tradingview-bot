@@ -1,0 +1,56 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © clawbotrd84
+
+//@version=6
+indicator("Volume Momentum v1.0 — 4H Alerts", overlay=true)
+
+// ─── Inputs ───
+volLen      = input.int(20, "Volume SMA Length", minval=5)
+volSpike    = input.float(1.8, "Volume Spike Multiplier", minval=1.1, step=0.1)
+momLen      = input.int(10, "Momentum Length", minval=2)
+atrLen      = input.int(14, "ATR Length", minval=5)
+atrMult     = input.float(0.5, "ATR Filter (min move)", minval=0.1, step=0.1)
+webhookUrl  = input.string("", "Webhook URL (unused — set in alert)")
+
+// ─── Calculations ───
+vol         = volume
+volSma      = ta.sma(vol, volLen)
+isVolSpike  = vol > volSma * volSpike
+
+mom         = close - close[momLen]
+atr         = ta.atr(atrLen)
+bigMove     = math.abs(mom) > atr * atrMult
+
+bullMom     = mom > 0
+bearMom     = mom < 0
+
+// ─── Signals ───
+buySignal   = isVolSpike and bigMove and bullMom and not (isVolSpike[1] and bullMom[1])
+sellSignal  = isVolSpike and bigMove and bearMom and not (isVolSpike[1] and bearMom[1])
+
+// ─── Visuals ───
+plotshape(buySignal,  title="BUY",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.green, 0), size=size.small, text="VM▲")
+plotshape(sellSignal, title="SELL", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),   size=size.small, text="VM▼")
+
+// Volume spike background
+bgcolor(isVolSpike ? color.new(color.yellow, 90) : na, title="Volume Spike BG")
+
+// ─── Confidence scoring ───
+// Higher volume spike ratio + stronger momentum = higher confidence
+volRatio    = vol / volSma
+momStrength = math.abs(mom) / atr
+conf        = math.min(math.round(50 + volRatio * 10 + momStrength * 5), 95)
+
+// ─── Webhook secret ───
+secret = "e4a01f966ff71dc5e192db6b9163a4c5d2d4894031e4ec25719e07d70aa038bb"
+
+// ─── Alert conditions (for "Any alert() function call") ───
+if buySignal
+    alert('{"action":"BUY","ticker":"' + syminfo.ticker + '","confidence":' + str.tostring(conf) + ',"strategy":"VolMom","timeframe":"' + timeframe.period + '","secret":"' + secret + '"}', alert.freq_once_per_bar_close)
+
+if sellSignal
+    alert('{"action":"SELL","ticker":"' + syminfo.ticker + '","confidence":' + str.tostring(conf) + ',"strategy":"VolMom","timeframe":"' + timeframe.period + '","secret":"' + secret + '"}', alert.freq_once_per_bar_close)
+
+// ─── Also register alertcondition for dropdown-style alerts ───
+alertcondition(buySignal,  title="VM Buy Signal",  message="Volume Momentum BUY on {{ticker}} ({{interval}})")
+alertcondition(sellSignal, title="VM Sell Signal", message="Volume Momentum SELL on {{ticker}} ({{interval}})")

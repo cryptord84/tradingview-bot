@@ -1,0 +1,102 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © clawbotrd84
+
+//@version=6
+indicator("RSI Divergence Detector v1.0 — 4H Alerts", overlay=true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+i_secret    = input.string("e4a01f966ff71dc5e192db6b9163a4c5d2d4894031e4ec25719e07d70aa038bb", "Webhook Secret")
+i_rsiLen    = input.int(14, "RSI Length", minval=2)
+i_atrLen    = input.int(14, "ATR Length", minval=1)
+i_pivotLB   = input.int(5,  "Pivot Lookback", minval=2, maxval=20)
+i_pivotRB   = input.int(5,  "Pivot Right Bars", minval=2, maxval=20)
+i_minBars   = input.int(5,  "Min Bars Between Pivots", minval=2)
+i_maxBars   = input.int(60, "Max Bars Between Pivots", minval=10)
+i_baseConf  = input.int(65, "Base Confidence", minval=30, maxval=95)
+i_baseLev   = input.int(2,  "Suggested Leverage", minval=1, maxval=10)
+i_basePosSize = input.float(5.0, "Base Position Size %", minval=1.0, maxval=25.0)
+
+// ── Calculations ────────────────────────────────────────────────────────────
+rsiVal  = ta.rsi(close, i_rsiLen)
+atrVal  = ta.atr(i_atrLen)
+
+// Pivot detection
+pivotLow  = ta.pivotlow(low, i_pivotLB, i_pivotRB)
+pivotHigh = ta.pivothigh(high, i_pivotLB, i_pivotRB)
+rsiAtPivotLow  = ta.pivotlow(rsiVal, i_pivotLB, i_pivotRB)
+rsiAtPivotHigh = ta.pivothigh(rsiVal, i_pivotLB, i_pivotRB)
+
+// Track previous pivots
+var float prevPivotLowPrice  = na
+var float prevPivotLowRSI    = na
+var int   prevPivotLowBar    = na
+
+var float prevPivotHighPrice = na
+var float prevPivotHighRSI   = na
+var int   prevPivotHighBar   = na
+
+// ── Bullish Divergence: price makes lower low, RSI makes higher low ─────────
+bullDiv = false
+if not na(pivotLow)
+    if not na(prevPivotLowPrice)
+        barsDiff = bar_index - i_pivotRB - prevPivotLowBar
+        if barsDiff >= i_minBars and barsDiff <= i_maxBars
+            if low[i_pivotRB] < prevPivotLowPrice and rsiAtPivotLow > prevPivotLowRSI
+                bullDiv := true
+    prevPivotLowPrice := low[i_pivotRB]
+    prevPivotLowRSI   := rsiAtPivotLow
+    prevPivotLowBar   := bar_index - i_pivotRB
+
+// ── Bearish Divergence: price makes higher high, RSI makes lower high ───────
+bearDiv = false
+if not na(pivotHigh)
+    if not na(prevPivotHighPrice)
+        barsDiff = bar_index - i_pivotRB - prevPivotHighBar
+        if barsDiff >= i_minBars and barsDiff <= i_maxBars
+            if high[i_pivotRB] > prevPivotHighPrice and rsiAtPivotHigh < prevPivotHighRSI
+                bearDiv := true
+    prevPivotHighPrice := high[i_pivotRB]
+    prevPivotHighRSI   := rsiAtPivotHigh
+    prevPivotHighBar   := bar_index - i_pivotRB
+
+// ── Confidence scoring ──────────────────────────────────────────────────────
+bullConf = i_baseConf
+if bullDiv
+    bullConf += rsiVal < 30 ? 15 : rsiVal < 40 ? 8 : 0
+    bullConf := math.min(bullConf, 95)
+
+bearConf = i_baseConf
+if bearDiv
+    bearConf += rsiVal > 70 ? 15 : rsiVal > 60 ? 8 : 0
+    bearConf := math.min(bearConf, 95)
+
+// Bull / bear scores
+bullScore = bullDiv ? math.round(50 + (50 - rsiVal) * 0.8) : 0
+bearScore = bearDiv ? math.round(50 + (rsiVal - 50) * 0.8) : 0
+
+// ── Visuals ─────────────────────────────────────────────────────────────────
+plotshape(bullDiv, title="Bull Div", location=location.belowbar, style=shape.triangleup,
+     color=color.new(color.green, 0), size=size.small, text="Bull Div")
+plotshape(bearDiv, title="Bear Div", location=location.abovebar, style=shape.triangledown,
+     color=color.new(color.red, 0), size=size.small, text="Bear Div")
+
+// ── Token detection ─────────────────────────────────────────────────────────
+rawSym = syminfo.ticker
+token  = str.contains(rawSym, "SOL") ? "SOL" : str.contains(rawSym, "WIF") ? "WIF" : str.contains(rawSym, "ETH") ? "ETH" : str.contains(rawSym, "BONK") ? "BONK" : rawSym
+
+// ── Timeframe string ────────────────────────────────────────────────────────
+tf = timeframe.period == "240" ? "4H" : timeframe.period == "60" ? "1H" : timeframe.period == "D" ? "1D" : timeframe.period
+
+// ── Alert conditions (for alert dialog) ─────────────────────────────────────
+alertcondition(bullDiv, "BUY Signal", "BUY")
+alertcondition(bearDiv, "SELL Signal", "SELL")
+
+// ── Webhook alerts (dynamic JSON payload) ───────────────────────────────────
+bullMsg = '{"secret":"' + i_secret + '","signal_type":"BUY","symbol":"' + token + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(bullConf) + ',"suggested_leverage":' + str.tostring(i_baseLev) + ',"suggested_position_size_percent":' + str.tostring(i_basePosSize) + ',"bull_score":' + str.tostring(bullScore) + ',"bear_score":' + str.tostring(bearScore) + ',"rsi":' + str.tostring(math.round(rsiVal, 2)) + ',"atr":' + str.tostring(math.round(atrVal, 6)) + ',"timeframe":"' + tf + '","strategy":"RSI Divergence v1.0"}'
+
+bearMsg = '{"secret":"' + i_secret + '","signal_type":"SELL","symbol":"' + token + '","entry_price_estimate":' + str.tostring(close) + ',"confidence_score":' + str.tostring(bearConf) + ',"suggested_leverage":' + str.tostring(i_baseLev) + ',"suggested_position_size_percent":' + str.tostring(i_basePosSize) + ',"bull_score":' + str.tostring(bullScore) + ',"bear_score":' + str.tostring(bearScore) + ',"rsi":' + str.tostring(math.round(rsiVal, 2)) + ',"atr":' + str.tostring(math.round(atrVal, 6)) + ',"timeframe":"' + tf + '","strategy":"RSI Divergence v1.0"}'
+
+if bullDiv
+    alert(bullMsg, alert.freq_once_per_bar_close)
+if bearDiv
+    alert(bearMsg, alert.freq_once_per_bar_close)

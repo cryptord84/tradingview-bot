@@ -42,7 +42,7 @@
         <span class="font-bold">SOL Bot Cheatsheet</span>
     </div>
     <div class="flex items-center gap-3">
-        <span class="text-xs text-slate-500">Last updated: 2026-04-01</span>
+        <span class="text-xs text-slate-500">Last updated: 2026-04-03</span>
         <button onclick="exportPDF()" style="background:transparent;border:1px solid #475569;border-radius:6px;padding:3px 10px;color:#94a3b8;font-size:.7rem;cursor:pointer;font-family:inherit;">Export PDF</button>
     </div>
 </header>
@@ -476,6 +476,12 @@ cloudflared tunnel --url http://localhost:8000</code>
             <tr><td><code>/scan</code></td><td>Scan indicators</td><td>Check Indicators/ directory for new or changed Pine scripts</td></tr>
             <tr><td><code>/review</code></td><td>Review indicator</td><td>Claude AI analysis of indicator script</td></tr>
             <tr><td><code>/txlog</code></td><td>TX log</td><td>Recent wallet transactions from Solscan</td></tr>
+            <tr><td><code>/kalshi</code></td><td>Kalshi portfolio</td><td>Balance, P&amp;L, positions, circuit breaker status</td></tr>
+            <tr><td><code>/kalshi_reset</code></td><td>Reset circuit breaker</td><td>Resume trading after breaker trip</td></tr>
+            <tr><td><code>/prices</code></td><td>Live prices</td><td>Multi-token price snapshot</td></tr>
+            <tr><td><code>/arb</code></td><td>Arbitrage status</td><td>Scanner status + latest opportunities</td></tr>
+            <tr><td><code>/spread</code></td><td>Spread bot status</td><td>Inventory details per market</td></tr>
+            <tr><td><code>/risk</code></td><td>Risk status</td><td>Circuit breaker + P&amp;L usage percentage</td></tr>
             <tr><td><code>/start</code></td><td>Start the bot</td><td>Activates signal processing</td></tr>
             <tr><td><code>/stop</code></td><td>Stop the bot</td><td>Pauses signal processing</td></tr>
         </table>
@@ -632,7 +638,7 @@ openssl rsa -in keys/kalshi_private.pem -pubout -out keys/kalshi_public.pem
                     <tr><td><span class="badge badge-green">Market Maker</span></td><td>Multi-strategy: midpoint, VWAP, volatility</td><td>10s</td></tr>
                     <tr><td><span class="badge badge-yellow">Whale Tracker</span></td><td>Large trade monitor (&ge;50 contracts)</td><td>60s</td></tr>
                     <tr><td><span class="badge badge-yellow">Technical Bot</span></td><td>MACD(12/26/9) + CCI(20) signals</td><td>300s</td></tr>
-                    <tr><td><span class="badge badge-yellow">AI Agent</span></td><td>3 Claude agents: analyst, contrarian, momentum</td><td>600s</td></tr>
+                    <tr><td><span class="badge badge-yellow">AI Agent</span></td><td>4 Claude agents: analyst, contrarian, momentum + risk auditor</td><td>600s</td></tr>
                     <tr><td><span class="badge badge-blue">Sports</span></td><td>MLB, NBA, NFL, NHL, Soccer, UFC, WNBA</td><td>120s</td></tr>
                     <tr><td><span class="badge badge-blue">Esports</span></td><td>CS2, DotA2, LoL, Valorant, Overwatch</td><td>120s</td></tr>
                 </table>
@@ -663,9 +669,57 @@ openssl rsa -in keys/kalshi_private.pem -pubout -out keys/kalshi_public.pem
                     <li><strong>Analyst</strong>: Fundamental probability estimation</li>
                     <li><strong>Contrarian</strong>: Crowd sentiment reversal</li>
                     <li><strong>Momentum</strong>: Trend following</li>
+                    <li><strong>Risk Auditor</strong>: Reviews votes, can veto trades on risk grounds</li>
                     <li>Weighted vote by confidence, min 70% strength to trade</li>
+                    <li>Risk Auditor must APPROVE before any trade executes</li>
                 </ul>
             </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+            <div>
+                <h3>Risk Infrastructure</h3>
+                <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                    <li><strong>Circuit Breaker</strong>: Global daily loss limit, kills all bots on trip</li>
+                    <li><strong>Pre-Trade Gate</strong>: Every buy checked against daily loss + category limit</li>
+                    <li><strong>Emergency Flatten</strong>: Cancels all orders + sells positions on trip</li>
+                    <li><strong>Rate Limiter</strong>: 10 req/s token bucket, shared across all bots</li>
+                    <li>Reset via <code>/kalshi_reset</code> or dashboard</li>
+                </ul>
+            </div>
+            <div>
+                <h3>Category Exposure Limits</h3>
+                <table>
+                    <tr><th>Category</th><th>Default</th></tr>
+                    <tr><td>Sports</td><td>$10</td></tr>
+                    <tr><td>Esports</td><td>$10</td></tr>
+                    <tr><td>Crypto</td><td>$10</td></tr>
+                    <tr><td>Politics</td><td>$10</td></tr>
+                    <tr><td>Finance</td><td>$5 (low edge)</td></tr>
+                    <tr><td>Weather</td><td>$10</td></tr>
+                </table>
+                <p class="text-xs text-slate-500 mt-1">Detected from ticker prefix or title keywords. Resets daily at midnight UTC.</p>
+            </div>
+            <div>
+                <h3>Liquidity-Based Sizing</h3>
+                <table>
+                    <tr><th>Book Depth</th><th>Max Order</th></tr>
+                    <tr><td>&ge;500 contracts</td><td>Configured max</td></tr>
+                    <tr><td>&ge;200</td><td>50 contracts</td></tr>
+                    <tr><td>&ge;50</td><td>20 contracts</td></tr>
+                    <tr><td>&ge;10</td><td>10 contracts</td></tr>
+                    <tr><td>&lt;10</td><td>5 contracts</td></tr>
+                </table>
+                <p class="text-xs text-slate-500 mt-1">Reads WS orderbook depth. Falls back to 20 if no WS data.</p>
+            </div>
+        </div>
+        <div class="mt-4">
+            <h3>WebSocket Feed &amp; Async Client</h3>
+            <ul class="text-sm text-slate-300 space-y-1 list-disc list-inside">
+                <li><strong>WS Feed</strong>: Real-time orderbook + trades via <code>wss://api.elections.kalshi.com/trade-api/ws/v2</code></li>
+                <li><strong>Async Client</strong>: All bots use <code>AsyncKalshiClient</code> via <code>asyncio.to_thread()</code> &mdash; no event loop blocking</li>
+                <li><strong>Pydantic Validation</strong>: All config validated at startup. Typos caught immediately.</li>
+                <li><strong>Metrics</strong>: Prometheus-style at <code>/api/metrics</code> &mdash; P&amp;L, trades, positions, rate limit tokens, category exposure</li>
+            </ul>
         </div>
         <div class="warn mt-4">&#9888;&#65039; All Kalshi bots default to <code>enabled: false</code> and <code>auto_trade: false</code>. Enable manually in <code>config.yaml</code> or via dashboard toggles. Auto-trade requires explicit opt-in per bot.</div>
     </div>

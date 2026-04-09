@@ -163,6 +163,13 @@ class KalshiSpreadBot:
 
     async def _run_loop(self):
         """Main polling loop."""
+        # Cancel any orphaned orders from a previous run
+        try:
+            await self._cancel_all_orders()
+            logger.info("Spread bot: cleaned up orphaned orders on startup")
+        except Exception as e:
+            logger.warning(f"Spread bot startup cleanup failed: {e}")
+
         while self._running and not self._kill_switch:
             try:
                 self._cycle_count += 1
@@ -257,7 +264,7 @@ class KalshiSpreadBot:
         - Prefer high-bias categories (sports, entertainment, politics)
         - Avoid finance/economics (nearly efficient, 0.17pp gap)
         """
-        markets = await client.get_markets_full(status="open", limit=100)
+        markets = await client.discover_active_markets(min_volume=10)
         candidates = []
 
         for m in markets:
@@ -551,22 +558,39 @@ class KalshiSpreadBot:
     # =========================================================================
 
     async def _cancel_all_orders(self):
-        """Cancel all resting orders across all markets."""
+        """Cancel all resting spread bot orders (tracked + orphaned from prior runs)."""
         from app.services.kalshi_client import get_async_kalshi_client
         client = get_async_kalshi_client()
 
+        # Cancel tracked orders
         for ticker, state in self._markets.items():
             for order_id in [state.yes_order_id, state.no_order_id]:
                 if order_id:
                     try:
                         await client.cancel_order(order_id)
-                    except Exception as e:
-                        logger.error(f"Failed to cancel {order_id}: {e}")
-
+                    except Exception:
+                        pass
             state.yes_order_id = None
             state.no_order_id = None
             state.yes_order_price = 0
             state.no_order_price = 0
+
+        # Also cancel any orphaned sb- orders from prior runs
+        try:
+            orders = await client.get_open_orders()
+            cancelled = 0
+            for o in orders:
+                cid = o.get("client_order_id", "")
+                if cid.startswith("sb-"):
+                    try:
+                        await client.cancel_order(o.get("order_id", ""))
+                        cancelled += 1
+                    except Exception:
+                        pass
+            if cancelled:
+                logger.info(f"Cancelled {cancelled} orphaned spread bot orders")
+        except Exception as e:
+            logger.warning(f"Failed to clean up orphaned orders: {e}")
 
     async def flatten_market(self, ticker: str):
         """Close out all inventory in a specific market at market price."""

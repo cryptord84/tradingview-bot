@@ -207,6 +207,11 @@ def init_db():
         conn.execute("SELECT trail_sl_price FROM positions LIMIT 1")
     except Exception:
         conn.execute("ALTER TABLE positions ADD COLUMN trail_sl_price REAL")
+    # Migration: add amount_usd column to trades if not exists
+    try:
+        conn.execute("SELECT amount_usd FROM trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE trades ADD COLUMN amount_usd REAL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -215,9 +220,9 @@ def insert_trade(trade: dict) -> int:
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO trades
-        (timestamp, tx_id, signal_type, symbol, action, amount_sol, price_usd,
+        (timestamp, tx_id, signal_type, symbol, action, amount_sol, amount_usd, price_usd,
          fees_sol, leverage, wallet_address, confidence_score, claude_reasoning, pnl_usd, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             trade.get("timestamp", datetime.utcnow().isoformat()),
             trade.get("tx_id"),
@@ -225,6 +230,7 @@ def insert_trade(trade: dict) -> int:
             trade["symbol"],
             trade["action"],
             trade.get("amount_sol", 0),
+            trade.get("amount_usd", 0),
             trade.get("price_usd", 0),
             trade.get("fees_sol", 0),
             trade.get("leverage", 1),

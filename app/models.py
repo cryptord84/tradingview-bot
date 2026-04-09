@@ -26,6 +26,7 @@ class WebhookSignal(BaseModel):
     rsi: Optional[float] = None
     atr: Optional[float] = None
     timeframe: Optional[str] = None
+    strategy: Optional[str] = None  # Alert/indicator name e.g. "BB Squeeze v1.0"
 
 
 class ClaudeDecision(str, Enum):
@@ -66,8 +67,10 @@ class TradeRecord(BaseModel):
 class DashboardStats(BaseModel):
     wallet_balance_sol: float = 0.0
     wallet_balance_usdc: float = 0.0
-    wallet_balance_usd: float = 0.0   # total: SOL value + USDC
+    wallet_balance_usd: float = 0.0   # total: SOL value + USDC + SPL tokens
     sol_price_usd: float = 0.0
+    token_holdings: dict = {}          # {symbol: {amount, price, usd_value}}
+    tokens_usd: float = 0.0           # total USD value of SPL token holdings
     total_trades: int = 0
     winning_trades: int = 0
     losing_trades: int = 0
@@ -234,11 +237,22 @@ class WebSocketConfig(BaseModel):
     max_reconnect_delay: int = Field(default=60, ge=5)
 
 
+class CategoryLimitsConfig(BaseModel):
+    sports_cents: int = Field(default=1000, ge=0)
+    esports_cents: int = Field(default=1000, ge=0)
+    crypto_cents: int = Field(default=1000, ge=0)
+    finance_cents: int = Field(default=500, ge=0)
+    politics_cents: int = Field(default=1000, ge=0)
+    weather_cents: int = Field(default=1000, ge=0)
+    other_cents: int = Field(default=1000, ge=0)
+
+
 class RiskManagerConfig(BaseModel):
     enabled: bool = True
     max_daily_loss_cents: int = Field(default=1000, ge=100)
     check_interval_seconds: int = Field(default=30, ge=10)
     telegram_alerts: bool = True
+    category_limits: CategoryLimitsConfig = CategoryLimitsConfig()
 
 
 class KalshiConfig(BaseModel):

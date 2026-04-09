@@ -6,13 +6,14 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get, reload_config
 from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
+from app.services.price_feed import get_price_feed
 from app import state
 from app.services.kamino_client import KaminoClient
 from app.services.ngrok_monitor import get_ngrok_monitor
@@ -24,29 +25,57 @@ logger = logging.getLogger("bot.dashboard")
 router = APIRouter(prefix="/api", tags=["dashboard"])
 
 
+# Module-level wallet singleton — keeps the 15s balance cache alive across requests
+_wallet: WalletService = None
+
+def _get_wallet() -> WalletService:
+    global _wallet
+    if _wallet is None:
+        _wallet = WalletService()
+    return _wallet
+
+
 @router.get("/stats")
 async def get_dashboard_stats():
     """Get live dashboard statistics."""
     try:
-        jupiter = JupiterClient()
-        wallet = WalletService()
+        wallet = _get_wallet()
 
-        sol_price = await jupiter.get_sol_price()
-        balances = await wallet.get_total_usd_balance(sol_price)
+        # Use PriceFeed (real-time WebSocket) for prices — instant, no network call
+        feed = get_price_feed()
+        token_prices = {}
+        sol_price = 0.0
+        if feed.is_running:
+            all_prices = feed.get_all_prices()
+            if "SOL" in all_prices:
+                sol_price = all_prices["SOL"]["price"]
+            # Convert to format wallet expects: {symbol: {"price": float}}
+            token_prices = all_prices
+
+        # Fallback to HTTP if PriceFeed has no SOL price yet
+        if sol_price <= 0:
+            jupiter = JupiterClient()
+            try:
+                sol_price = await jupiter.get_sol_price()
+                if not token_prices:
+                    token_prices = await jupiter.get_multi_token_prices()
+            finally:
+                await jupiter.close()
+
+        balances = await wallet.get_total_usd_balance(sol_price, token_prices)
 
         db_stats = get_stats()
         total = db_stats["total_trades"]
         wins = db_stats["winning_trades"]
         total_usd = balances["total_usd"]
 
-        await jupiter.close()
-        await wallet.close()
-
         return DashboardStats(
             wallet_balance_sol=balances["sol"],
             wallet_balance_usdc=balances["usdc"],
             wallet_balance_usd=total_usd,
             sol_price_usd=sol_price,
+            token_holdings=balances.get("token_holdings", {}),
+            tokens_usd=balances.get("tokens_usd", 0.0),
             total_trades=total,
             winning_trades=wins,
             losing_trades=db_stats["losing_trades"],
@@ -60,7 +89,6 @@ async def get_dashboard_stats():
         )
     except Exception as e:
         logger.error(f"Stats error: {e}")
-        # Return defaults on error (e.g., no wallet configured yet)
         db_stats = get_stats()
         return DashboardStats(
             total_trades=db_stats["total_trades"],
@@ -521,22 +549,43 @@ async def get_positions_api(status: str = "all", limit: int = 50):
     # Add live P&L for open positions
     has_open = any(p["status"] == "open" for p in positions)
     if has_open:
-        jupiter = JupiterClient()
-        try:
-            current_price = await jupiter.get_sol_price()
-            for p in positions:
-                if p["status"] == "open":
-                    p["current_price"] = current_price
-                    p["unrealized_pnl_usdc"] = (current_price - p["entry_price"]) * p["amount_sol"]
-                    p["unrealized_pnl_percent"] = ((current_price - p["entry_price"]) / p["entry_price"]) * 100
-                    p["distance_to_tp_percent"] = ((p["tp_price"] - current_price) / current_price) * 100
-                    p["distance_to_sl_percent"] = ((current_price - p["sl_price"]) / current_price) * 100
-                    # Effective SL considers trailing stop
-                    trail_sl = p.get("trail_sl_price") or 0
-                    p["effective_sl"] = max(p["sl_price"], trail_sl)
-                    p["trail_active"] = trail_sl > p["sl_price"]
-        finally:
-            await jupiter.close()
+        # Use PriceFeed (real-time WebSocket) — no network call needed
+        feed = get_price_feed()
+        token_prices = {}
+        sol_price = 0.0
+        if feed.is_running:
+            all_prices = feed.get_all_prices()
+            if "SOL" in all_prices:
+                sol_price = all_prices["SOL"]["price"]
+            token_prices = all_prices
+
+        # Fallback to HTTP if PriceFeed unavailable
+        if sol_price <= 0:
+            jupiter = JupiterClient()
+            try:
+                token_prices = await jupiter.get_multi_token_prices()
+                sol_price = await jupiter.get_sol_price()
+            finally:
+                await jupiter.close()
+
+        for p in positions:
+            if p["status"] == "open":
+                token_sym = p["symbol"].replace("USDT", "").replace("USD", "")
+                if token_sym == "SOL":
+                    current_price = sol_price
+                elif token_sym in token_prices:
+                    current_price = token_prices[token_sym].get("price", p["entry_price"])
+                else:
+                    current_price = p["entry_price"]
+                p["current_price"] = current_price
+                p["unrealized_pnl_usdc"] = (current_price - p["entry_price"]) * p["amount_sol"]
+                p["unrealized_pnl_percent"] = ((current_price - p["entry_price"]) / p["entry_price"]) * 100 if p["entry_price"] > 0 else 0
+                p["distance_to_tp_percent"] = ((p["tp_price"] - current_price) / current_price) * 100 if current_price > 0 else 0
+                p["distance_to_sl_percent"] = ((current_price - p["sl_price"]) / current_price) * 100 if current_price > 0 else 0
+                # Effective SL considers trailing stop
+                trail_sl = p.get("trail_sl_price") or 0
+                p["effective_sl"] = max(p["sl_price"], trail_sl)
+                p["trail_active"] = trail_sl > p["sl_price"]
 
     return {"positions": positions, "total": len(positions)}
 
@@ -554,7 +603,11 @@ async def manual_close_position(position_id: int):
     monitor = get_position_monitor()
     jupiter = JupiterClient()
     try:
-        current_price = await jupiter.get_sol_price()
+        token_sym = pos["symbol"].replace("USDT", "").replace("USD", "")
+        if token_sym == "SOL":
+            current_price = await jupiter.get_sol_price()
+        else:
+            current_price = await jupiter.get_token_price(token_sym)
         await monitor._close_position(pos, current_price, "manual", jupiter)
     finally:
         await jupiter.close()
@@ -908,6 +961,17 @@ async def kalshi_status():
         result["connected"] = False
 
     return result
+
+
+@router.get("/kalshi/order-health")
+async def kalshi_order_health(limit: int = 50):
+    """Get order success/failure stats and recent failures."""
+    from app.services.kalshi_client import get_async_kalshi_client
+
+    client = get_async_kalshi_client()
+    if not client.enabled:
+        return {"success_count": 0, "failure_count": 0, "recent_failures": []}
+    return client.get_order_health(limit=min(limit, 200))
 
 
 @router.get("/kalshi/markets")
@@ -1773,3 +1837,368 @@ async def rebalancer_toggle():
     from app.services.portfolio_rebalancer import get_rebalancer
     rebalancer = get_rebalancer()
     return rebalancer.toggle_auto()
+
+
+# ── Prometheus-style Metrics ─────────────────────────────────────
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics():
+    """Prometheus-compatible metrics endpoint (plaintext)."""
+    lines = []
+
+    def gauge(name, value, help_text="", labels=None):
+        if help_text:
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} gauge")
+        label_str = ""
+        if labels:
+            label_str = "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}"
+        lines.append(f"{name}{label_str} {value}")
+
+    def counter(name, value, help_text="", labels=None):
+        if help_text:
+            lines.append(f"# HELP {name} {help_text}")
+            lines.append(f"# TYPE {name} counter")
+        label_str = ""
+        if labels:
+            label_str = "{" + ",".join(f'{k}="{v}"' for k, v in labels.items()) + "}"
+        lines.append(f"{name}{label_str} {value}")
+
+    # P&L per bot
+    try:
+        from app.services.kalshi_market_maker import get_market_maker
+        mm = get_market_maker()
+        gauge("kalshi_pnl_cents", mm._total_pnl_cents,
+              "P&L in cents per bot", {"strategy": "market_maker"})
+        gauge("kalshi_bot_running", int(mm._running), labels={"bot": "market_maker"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_spread_bot import get_spread_bot
+        sb = get_spread_bot()
+        gauge("kalshi_pnl_cents", sb._total_pnl_cents, labels={"strategy": "spread_bot"})
+        gauge("kalshi_bot_running", int(sb._running), labels={"bot": "spread_bot"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_technical_bot import get_technical_bot
+        tb = get_technical_bot()
+        gauge("kalshi_bot_running", int(tb._running), labels={"bot": "technical"})
+        tb_status = tb.get_status()
+        counter("kalshi_trades_total", tb_status.get("trades_executed", 0),
+                "Total trades placed per bot", {"bot": "technical"})
+        counter("kalshi_signals_total", tb_status.get("signals_generated", 0),
+                labels={"bot": "technical"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_ai_agent import get_ai_agent_bot
+        ai = get_ai_agent_bot()
+        gauge("kalshi_bot_running", int(ai._running), labels={"bot": "ai_agent"})
+        ai_status = ai.get_status()
+        counter("kalshi_trades_total", ai_status.get("trades_executed", 0),
+                labels={"bot": "ai_agent"})
+        counter("kalshi_analyses_total", ai_status.get("analyses_completed", 0),
+                "Total AI analyses run", labels={"bot": "ai_agent"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_arbitrage import get_arbitrage_scanner
+        arb = get_arbitrage_scanner()
+        gauge("kalshi_bot_running", int(arb._running), labels={"bot": "arb_scanner"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_sports_scanner import get_sports_scanner
+        sports = get_sports_scanner()
+        gauge("kalshi_bot_running", int(sports._running), labels={"bot": "sports"})
+    except Exception:
+        pass
+
+    try:
+        from app.services.kalshi_esports_scanner import get_esports_scanner
+        esports = get_esports_scanner()
+        gauge("kalshi_bot_running", int(esports._running), labels={"bot": "esports"})
+    except Exception:
+        pass
+
+    # Circuit breaker / risk manager
+    try:
+        from app.services.kalshi_risk_manager import get_risk_manager
+        rm = get_risk_manager()
+        status = rm.get_status()
+        gauge("kalshi_circuit_breaker_tripped", int(status["tripped"]),
+              "Whether the circuit breaker is tripped")
+        gauge("kalshi_aggregate_pnl_cents", status["current_pnl_cents"],
+              "Aggregate P&L across all bots in cents")
+        gauge("kalshi_max_daily_loss_cents", status["max_daily_loss_cents"],
+              "Daily loss limit in cents")
+
+        # Category exposure
+        for cat, cat_data in status.get("categories", {}).items():
+            gauge("kalshi_category_used_cents", cat_data["used_cents"],
+                  "Category exposure used in cents", {"category": cat})
+            gauge("kalshi_category_limit_cents", cat_data["limit_cents"],
+                  labels={"category": cat})
+    except Exception:
+        pass
+
+    # Rate limiter
+    try:
+        from app.services.kalshi_client import get_kalshi_client
+        client = get_kalshi_client()
+        gauge("kalshi_rate_limit_tokens", client._limiter._tokens,
+              "Rate limit tokens remaining")
+    except Exception:
+        pass
+
+    # Active positions from DB
+    try:
+        db_stats = get_kalshi_stats()
+        gauge("kalshi_active_positions", db_stats.get("open_positions", 0),
+              "Number of open Kalshi positions")
+        counter("kalshi_db_trades_total", db_stats.get("total_positions", 0),
+                "Total trades recorded in DB")
+    except Exception:
+        pass
+
+    # WebSocket feed
+    try:
+        from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+        ws = get_kalshi_ws_feed()
+        gauge("kalshi_ws_connected", int(ws._connected),
+              "Whether Kalshi WebSocket is connected")
+        gauge("kalshi_ws_subscriptions", len(ws._subscribed_tickers),
+              "Number of WS ticker subscriptions")
+    except Exception:
+        pass
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ── DRY-RUN SIMULATION ENDPOINTS ────────────────────────────────────────────
+
+
+@router.get("/dryrun/alerts")
+async def get_dryrun_alerts():
+    """Get all alerts with their live/dry_run mode."""
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    return {
+        "default_mode": drm.get_default_mode(),
+        "alerts": drm.get_all_alerts_with_modes(),
+    }
+
+
+@router.post("/dryrun/toggle")
+async def toggle_dryrun_mode(payload: dict):
+    """Toggle an alert between live and dry_run mode.
+
+    Body: {"strategy": "BB Squeeze v1.0", "token": "SOL", "timeframe": "4H", "mode": "dry_run"}
+    """
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    strategy = payload.get("strategy", "")
+    token = payload.get("token", "")
+    timeframe = payload.get("timeframe", "")
+    mode = payload.get("mode", "")
+    if not strategy or not token or not mode:
+        raise HTTPException(status_code=400, detail="strategy, token, and mode are required")
+    return drm.set_mode(strategy, token, timeframe, mode)
+
+
+@router.get("/dryrun/status")
+async def get_dryrun_status():
+    """Get dry-run simulation status and recent trades."""
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    return drm.get_status()
+
+
+@router.get("/dryrun/trades")
+async def get_dryrun_trades(limit: int = 50):
+    """Get simulated trade log."""
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    return {"trades": drm.get_sim_trades(limit)}
+
+
+@router.post("/dryrun/reset")
+async def reset_dryrun():
+    """Clear all simulated trade history."""
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    drm.reset_sim_trades()
+    return {"status": "ok", "message": "Simulation history cleared"}
+
+
+@router.get("/dryrun/summary")
+async def get_dryrun_hourly_summary():
+    """Get hourly signal summary."""
+    from app.services.dry_run_manager import get_dry_run_manager
+    drm = get_dry_run_manager()
+    return drm.get_hourly_summary()
+
+
+# ── CONFLUENCE FILTER ENDPOINTS ─────────────────────────────────────────────
+
+
+@router.get("/confluence/status")
+async def get_confluence_status():
+    """Get confluence filter status, stats, and pending signals."""
+    from app.services.confluence_filter import get_confluence_filter
+    cf = get_confluence_filter()
+    return cf.get_status()
+
+
+# ── SOL RISK MANAGER ENDPOINTS ──────────────────────────────────────────────
+
+
+@router.get("/sol-risk/status")
+async def get_sol_risk_status():
+    """Get SOL risk manager status — daily P&L, exposure, circuit breaker."""
+    from app.services.sol_risk_manager import get_sol_risk_manager
+    rm = get_sol_risk_manager()
+    return rm.get_status()
+
+
+@router.post("/sol-risk/reset")
+async def reset_sol_risk():
+    """Reset SOL risk manager — clear circuit breaker and exposure tracking."""
+    from app.services.sol_risk_manager import get_sol_risk_manager
+    rm = get_sol_risk_manager()
+    rm.reset()
+    return {"status": "ok", "message": "SOL risk manager reset"}
+
+
+# ── Backtest Scorer ─────────────────────────────────────────────────────────
+
+
+@router.get("/backtest-scorer/experiments")
+async def list_backtest_experiments(status: str = None):
+    """List all strategy comparison experiments."""
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    return scorer.list_experiments(status=status)
+
+
+@router.get("/backtest-scorer/experiments/{name}")
+async def get_backtest_experiment(name: str):
+    """Get full detail for an experiment including trades."""
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    exp = scorer.get_experiment_detail(name)
+    if not exp:
+        raise HTTPException(status_code=404, detail=f"Experiment '{name}' not found")
+    return exp
+
+
+@router.post("/backtest-scorer/experiments")
+async def create_backtest_experiment(body: dict):
+    """Create a new strategy comparison experiment.
+
+    Body: {name, baseline, variants: [...], metric?, min_trades?, hypothesis?}
+    """
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    try:
+        exp = scorer.create_experiment(
+            name=body["name"],
+            baseline=body["baseline"],
+            variants=body["variants"],
+            metric=body.get("metric", "pnl_usd"),
+            min_trades=body.get("min_trades", 30),
+            hypothesis=body.get("hypothesis", ""),
+        )
+        return {"status": "created", "experiment": exp["name"]}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/backtest-scorer/experiments/{name}/trade")
+async def log_backtest_trade(name: str, body: dict):
+    """Log a trade to an experiment.
+
+    Body: {variant, metrics: {pnl_usd: ..., win: ..., ...}}
+    """
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    try:
+        entry = scorer.log_trade(
+            experiment_name=name,
+            variant=body["variant"],
+            metrics=body["metrics"],
+            timestamp=body.get("timestamp"),
+        )
+        return {"status": "logged", "entry": entry}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/backtest-scorer/experiments/{name}/score")
+async def score_backtest_experiment(name: str):
+    """Score an experiment — run statistical comparison."""
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    try:
+        result = scorer.score(name)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/backtest-scorer/experiments/{name}/import-dry-run")
+async def import_dry_run_to_experiment(name: str, body: dict = None):
+    """Import trades from dry-run log into an experiment.
+
+    Body (optional): {variant_map: {"STRATEGY NAME": "variant_name", ...}}
+    """
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    variant_map = (body or {}).get("variant_map")
+    try:
+        count = scorer.import_dry_run_trades(name, variant_map=variant_map)
+        return {"status": "imported", "trades_imported": count}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/backtest-scorer/experiments/{name}")
+async def delete_backtest_experiment(name: str):
+    """Delete an experiment."""
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    if scorer.delete_experiment(name):
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail=f"Experiment '{name}' not found")
+
+
+@router.get("/backtest-scorer/playbook")
+async def get_backtest_playbook():
+    """Get the playbook — all proven winning configurations."""
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    return scorer.get_playbook()
+
+
+@router.post("/backtest-scorer/quick-compare")
+async def quick_compare(body: dict):
+    """One-shot comparison without creating an experiment.
+
+    Body: {baseline_values: [...], variant_values: [...], baseline_label?, variant_label?}
+    """
+    from app.services.backtest_scorer import get_backtest_scorer
+    scorer = get_backtest_scorer()
+    result = scorer.quick_compare(
+        baseline_values=body["baseline_values"],
+        variant_values=body["variant_values"],
+        baseline_label=body.get("baseline_label", "Baseline"),
+        variant_label=body.get("variant_label", "Variant"),
+    )
+    return result

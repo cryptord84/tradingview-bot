@@ -89,17 +89,18 @@ class TelegramService:
         price_usd: float,
         fees_sol: float,
         new_balance_sol: float,
+        symbol: str = "",
+        trade_usd: float = 0.0,
     ):
         if not self.send_on.get("trade_executed", True):
             return
+        token = symbol.replace("USDT", "").replace("USD", "") if symbol else "SOL"
         msg = (
             f"<b>💰 Trade Executed</b>\n\n"
-            f"Action: {action}\n"
-            f"Amount: {amount_sol:.4f} SOL\n"
-            f"Price: ${price_usd:.2f}\n"
-            f"Fees: {fees_sol:.6f} SOL\n"
-            f"TX: <code>{tx_sig}</code>\n"
-            f"New Balance: {new_balance_sol:.4f} SOL"
+            f"Action: {action} {token}\n"
+            f"Amount: ${trade_usd:.2f}\n"
+            f"Price: ${price_usd:.4f}\n"
+            f"TX: <code>{tx_sig}</code>"
         )
         await self.send_message(msg)
 

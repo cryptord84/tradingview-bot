@@ -78,6 +78,30 @@ Respond with ONLY a JSON object:
   "reasoning": "<2-3 sentence explanation>"
 }"""
 
+RISK_AUDITOR_PROMPT = """You are a risk auditor for a prediction market trading system. Your ONLY job is to review proposed trades and approve or reject them based on risk.
+
+You will receive:
+- The market details (ticker, price, volume)
+- Three other agents' votes and reasoning
+- The proposed trade action and size
+
+Apply these risk rules:
+1. REJECT if all agents have low confidence (<0.4) even if they agree on direction
+2. REJECT if the proposed entry price is in the 45-55 cent range (true dead zone only)
+3. REJECT if market volume is very low (<5) — illiquid, hard to exit
+4. REJECT if agent reasoning is contradictory or based on speculation without data
+5. APPROVE if at least 2 agents agree with confidence >0.5 and price is outside 45-55 range
+
+Be balanced. Allow trades with reasonable consensus. Only REJECT when there are clear risk flags.
+
+Respond with ONLY a JSON object:
+{
+  "decision": "APPROVE" | "REJECT",
+  "reasoning": "<1-2 sentence explanation>",
+  "risk_flags": ["flag1", "flag2"],
+  "risk_score": 1-10
+}"""
+
 
 # ─── Agent Decision ──────────────────────────────────────────────────────────
 
@@ -236,6 +260,15 @@ class KalshiAIAgentBot:
         markets = await self._select_markets(client)
         logger.info(f"AI scan #{self._scan_count}: analyzing {len(markets)} markets with {len(self.agents)} agents")
 
+        # Subscribe to WS feed for liquidity-based sizing
+        try:
+            from app.services.kalshi_ws_feed import get_kalshi_ws_feed
+            ws = get_kalshi_ws_feed()
+            for m in markets:
+                await ws.subscribe(m.get("ticker", ""))
+        except Exception:
+            pass
+
         for m in markets:
             ticker = m.get("ticker", "")
             title = m.get("title", ticker)
@@ -256,13 +289,31 @@ class KalshiAIAgentBot:
                     continue
 
                 consensus = ConsensusDecision(ticker, title, decisions)
+
+                # Run Risk Auditor on non-HOLD consensus
+                audit_result = None
+                if consensus.action != "HOLD":
+                    audit_result = await self._run_risk_auditor(
+                        ticker, title, decisions, consensus, context
+                    )
+                    if audit_result.get("decision") == "REJECT":
+                        logger.info(
+                            f"Risk Auditor REJECTED {ticker}: {audit_result.get('reasoning')}"
+                        )
+                        consensus.action = "HOLD"
+                        consensus._auditor_rejected = True
+
                 self._consensus_history.insert(0, consensus)
-                results.append(consensus.to_dict())
+                result_dict = consensus.to_dict()
+                if audit_result:
+                    result_dict["risk_auditor"] = audit_result
+                results.append(result_dict)
 
                 logger.info(
                     f"AI consensus on {ticker}: {consensus.action} "
                     f"(strength={consensus.consensus_strength:.0%}, "
-                    f"unanimous={consensus.unanimous})"
+                    f"unanimous={consensus.unanimous}"
+                    f"{', auditor=REJECT' if audit_result and audit_result.get('decision') == 'REJECT' else ''})"
                 )
 
             except Exception as e:
@@ -309,15 +360,17 @@ class KalshiAIAgentBot:
                     pass
             return markets
 
-        all_markets = await client.get_markets_full(status="open", limit=50)
+        ai_cfg = (get("kalshi") or {}).get("ai_agent", {})
+        max_days = ai_cfg.get("max_days_to_close", 0)
+        all_markets = await client.discover_active_markets(min_volume=10, max_days_to_close=max_days)
         candidates = []
         for m in all_markets:
             vol = int(float(m.get("volume_fp", "0") or "0"))
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
-            if vol < 25 or yes_ask < 5 or yes_ask > 95:
+            if vol < 10 or yes_ask < 5 or yes_ask > 95:
                 continue
-            # Skip dead zone — near-zero edge at 40-60¢
-            if 40 <= yes_ask <= 60:
+            # Skip dead zone — near-zero edge at 48-52¢
+            if 48 <= yes_ask <= 52:
                 continue
             # Skip low-edge finance/economics markets
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
@@ -412,6 +465,46 @@ class KalshiAIAgentBot:
         parsed = self._parse_response(response_text)
         return AgentDecision(agent_name, ticker, title, parsed)
 
+    async def _run_risk_auditor(self, ticker: str, title: str,
+                                decisions: list[AgentDecision],
+                                consensus: 'ConsensusDecision',
+                                context: str) -> dict:
+        """Run the Risk Auditor agent to approve/reject a proposed trade.
+
+        Returns {"decision": "APPROVE"|"REJECT", "reasoning": ..., ...}
+        """
+        # Build summary of other agents' votes
+        agent_summary = []
+        for d in decisions:
+            agent_summary.append(
+                f"  {d.agent_name}: {d.action} (confidence={d.confidence:.2f}, "
+                f"edge={d.edge_cents}c) — {d.reasoning}"
+            )
+
+        audit_context = (
+            f"MARKET: {title}\nTicker: {ticker}\n\n"
+            f"AGENT VOTES:\n" + "\n".join(agent_summary) + "\n\n"
+            f"PROPOSED TRADE: {consensus.action}\n"
+            f"Consensus strength: {consensus.consensus_strength:.0%}\n"
+            f"Unanimous: {consensus.unanimous}\n"
+            f"Average edge: {consensus.avg_edge:.1f}c\n\n"
+            f"MARKET DATA:\n{context}"
+        )
+
+        full_prompt = f"{RISK_AUDITOR_PROMPT}\n\n---\n\n{audit_context}"
+
+        try:
+            response_text = await self._call_claude(full_prompt)
+            parsed = self._parse_response(response_text)
+            logger.info(
+                f"Risk Auditor on {ticker}: {parsed.get('decision', 'UNKNOWN')} "
+                f"(risk_score={parsed.get('risk_score', '?')}) — {parsed.get('reasoning', '')}"
+            )
+            return parsed
+        except Exception as e:
+            logger.warning(f"Risk Auditor failed on {ticker}: {e} — defaulting to REJECT")
+            return {"decision": "REJECT", "reasoning": f"Auditor error: {e}", "risk_flags": ["error"], "risk_score": 10}
+
     async def _call_claude(self, prompt: str) -> str:
         """Call Claude via CLI or API.
 
@@ -491,15 +584,34 @@ class KalshiAIAgentBot:
             try:
                 market = await client.get_market_full(ticker)
                 price = int(round(float(market.get(f"{side}_ask_dollars", "0") or "0") * 100)) or 50
-                cost = price * self.contracts_per_trade
+                count = self.contracts_per_trade
+                cost = price * count
 
                 if cost > self.max_cost_per_trade_cents:
                     continue
 
+                # Rule-based risk audit (fast, before trade)
+                try:
+                    from app.services.kalshi_risk_manager import get_risk_manager
+                    rm = get_risk_manager()
+                    if rm.enabled:
+                        audit = rm.audit_trade(
+                            ticker=ticker, side=side, price_cents=price,
+                            count=count, confidence=r.get("consensus_strength", 0.5),
+                            bot_name="ai", title=r.get("title", ""),
+                        )
+                        if not audit["approved"]:
+                            logger.info(f"AI trade BLOCKED by auditor: {audit['reason']}")
+                            continue
+                        if audit.get("adjustments", {}).get("count"):
+                            count = audit["adjustments"]["count"]
+                except Exception as e:
+                    logger.warning(f"Risk audit failed (allowing trade): {e}")
+
                 if side == "yes":
-                    result = await client.buy_yes(ticker, price, self.contracts_per_trade)
+                    result = await client.buy_yes(ticker, price, count)
                 else:
-                    result = await client.buy_no(ticker, price, self.contracts_per_trade)
+                    result = await client.buy_no(ticker, price, count)
 
                 order = result.get("order", {})
                 self._total_trades += 1
@@ -510,9 +622,9 @@ class KalshiAIAgentBot:
                     "title": r.get("title", ""),
                     "side": side,
                     "action": "buy",
-                    "count": self.contracts_per_trade,
+                    "count": count,
                     "price_cents": price,
-                    "total_cost_cents": cost,
+                    "total_cost_cents": price * count,
                     "status": order.get("status", "placed"),
                     "notes": (
                         f"AI Agent: {r['action']} consensus={r['consensus_strength']:.0%} "
@@ -522,12 +634,12 @@ class KalshiAIAgentBot:
 
                 self._positions.append({
                     "ticker": ticker, "side": side,
-                    "count": self.contracts_per_trade, "entry_price": price,
+                    "count": count, "entry_price": price,
                     "entry_time": datetime.utcnow().isoformat(),
                 })
 
                 logger.info(
-                    f"AI Agent TRADE: {side.upper()} {self.contracts_per_trade}x "
+                    f"AI Agent TRADE: {side.upper()} {count}x "
                     f"@{price}c on {ticker} (consensus={r['consensus_strength']:.0%})"
                 )
 

@@ -151,7 +151,7 @@ class KalshiEsportsScanner:
         new_value_bets = []
 
         try:
-            all_markets = await client.get_markets_full(status="open", limit=200)
+            all_markets = await client.discover_active_markets(min_volume=0)
             game_counts = {game: 0 for game in ESPORTS_GAMES}
 
             for m in all_markets:
