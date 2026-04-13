@@ -1,0 +1,8 @@
+Token,Strategy,TF,PF,WR%,Trades,MaxDD%,NetPft%,Status
+SOL,Supertrend,1H,2.35,44.4,9,2.9,8.0,FAIL (9 trades)
+ETH,Supertrend,1H,0.31,25.0,12,10.0,-9.0,"FAIL (PF 0.31, WR 25.0%, 12 trades, NP -9.0%)"
+JTO,Supertrend,1H,2.66,33.3,6,6.4,23.4,FAIL (6 trades)
+WIF,Supertrend,1H,0.77,41.7,12,11.1,-4.8,"FAIL (PF 0.77, 12 trades, NP -4.8%)"
+BONK,Supertrend,1H,0.44,40.0,10,7.9,-6.2,"FAIL (PF 0.44, 10 trades, NP -6.2%)"
+ORCA,Supertrend,1H,0.01,11.1,9,41.2,-41.9,"FAIL (PF 0.01, WR 11.1%, 9 trades, DD 41.2%, NP -41.9%)"
+RENDER,Supertrend,1H,0.55,42.1,19,19.8,-12.8,"FAIL (PF 0.55, 19 trades, NP -12.8%)"

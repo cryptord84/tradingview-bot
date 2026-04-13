@@ -1,0 +1,46 @@
+//@version=6
+strategy("Donchian Breakout v1.0 — Backtest",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     slippage=3)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+chPeriod  = input.int(20,   "Channel Period",       minval=5)
+volLen    = input.int(20,   "Volume MA Length",     minval=5)
+volMult   = input.float(1.5, "Min Volume (× MA)",  minval=1.0, step=0.1)
+useShort  = input.bool(true, "Enable Short Side")
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+ch_upper = ta.highest(high, chPeriod)[1]
+ch_lower = ta.lowest(low,   chPeriod)[1]
+ch_mid   = (ch_upper + ch_lower) / 2
+
+volOk = volume > ta.sma(volume, volLen) * volMult
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = ta.crossover(close, ch_upper) and volOk
+short_entry = ta.crossunder(close, ch_lower) and volOk
+long_exit   = ta.crossunder(close, ch_mid)
+short_exit  = ta.crossover(close, ch_mid)
+
+// ── Entries/Exits ─────────────────────────────────────────────────────────────
+if long_entry
+    strategy.entry("Long", strategy.long)
+if short_entry and useShort
+    strategy.entry("Short", strategy.short)
+if long_exit
+    strategy.close("Long")
+if short_exit
+    strategy.close("Short")
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(ch_upper, "Channel High", color=color.new(color.green, 50), linewidth=1)
+plot(ch_lower, "Channel Low",  color=color.new(color.red, 50),   linewidth=1)
+plot(ch_mid,   "Channel Mid",  color=color.new(color.gray, 60),  linewidth=1)
+
+plotshape(long_entry,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(short_entry, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)

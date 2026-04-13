@@ -1,0 +1,45 @@
+//@version=6
+strategy("VWAP Deviation v1.0 — Backtest",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.1,
+     slippage=3)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+period    = input.int(20,   "VWAP Period",       minval=5)
+mult      = input.float(2.0, "Band Multiplier",  minval=0.5, step=0.1)
+useShort  = input.bool(true, "Enable Short Side")
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+typical   = (high + low + close) / 3
+vwap_line = math.sum(typical * volume, period) / math.sum(volume, period)
+std_dev   = ta.stdev(typical, period)
+upper     = vwap_line + mult * std_dev
+lower     = vwap_line - mult * std_dev
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = close[1] < lower[1] and close > lower
+short_entry = close[1] > upper[1] and close < upper
+long_exit   = ta.crossover(close, vwap_line)
+short_exit  = ta.crossunder(close, vwap_line)
+
+// ── Entries/Exits ─────────────────────────────────────────────────────────────
+if long_entry
+    strategy.entry("Long", strategy.long)
+if short_entry and useShort
+    strategy.entry("Short", strategy.short)
+if long_exit
+    strategy.close("Long")
+if short_exit
+    strategy.close("Short")
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(vwap_line, "VWAP",       color=color.new(color.blue, 20), linewidth=2)
+plot(upper,     "Upper Band", color=color.new(color.red, 50),   linewidth=1)
+plot(lower,     "Lower Band", color=color.new(color.green, 50), linewidth=1)
+
+plotshape(long_entry,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(short_entry, "Short", shape.triangledown, location.abovebar, color.red,   size=size.small)

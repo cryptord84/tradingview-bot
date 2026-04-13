@@ -1,0 +1,101 @@
+//@version=6
+// VWAP Deviation v1.0 — Alert Indicator
+// Passed backtesting thresholds:
+//   JTO  4H  PF=2.94  WR=55.3%  47 trades  DD=33.4%  NP=418.8%
+//   RENDER 1H PF=1.68  WR=72.7%  66 trades  DD=13.2%  NP=44.0%
+//   SOL  4H  PF=1.46  WR=70.0%  90 trades  DD=28.1%  NP=63.1%
+//
+// Signal logic: mean reversion off rolling VWAP ±2σ bands
+//   BUY:   close crosses back ABOVE lower band (was below it last bar)
+//   SELL:  close crosses back BELOW upper band (was above it last bar)
+//   CLOSE: close crosses VWAP (exit signal)
+
+indicator("VWAP Deviation v1.0 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh  = "Webhook"
+var grp_vwap = "VWAP Settings"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",       group=grp_wh)
+period         = input.int(20,   "VWAP Period",       minval=5,    group=grp_vwap)
+mult           = input.float(2.0, "Band Multiplier",  step=0.1,    group=grp_vwap)
+confidence     = input.int(65,   "Confidence Score",  minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage", minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %", minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+enableShort    = input.bool(true, "Enable Short Signals", group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showBands      = input.bool(true, "Show Bands",        group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+typical   = (high + low + close) / 3
+vwap_line = math.sum(typical * volume, period) / math.sum(volume, period)
+std_dev   = ta.stdev(typical, period)
+upper     = vwap_line + mult * std_dev
+lower     = vwap_line - mult * std_dev
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = close[1] < lower[1] and close > lower
+short_entry = close[1] > upper[1] and close < upper and enableShort
+long_exit   = ta.crossover(close, vwap_line)
+short_exit  = ta.crossunder(close, vwap_line)
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(vwap_line,               "VWAP",       color=color.new(color.blue, 20),  linewidth=2)
+plot(showBands ? upper : na,  "Upper Band", color=color.new(color.red, 50),   linewidth=1)
+plot(showBands ? lower : na,  "Lower Band", color=color.new(color.green, 50), linewidth=1)
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
+plotshape(short_entry, "Short Entry", shape.triangledown, location.abovebar, color.red,    size=size.small)
+plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+plotshape(short_exit,  "Short Exit",  shape.circle,       location.belowbar, color.yellow, size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym  = syminfo.ticker
+_tf   = timeframe.period
+_strat = "VWAP Deviation v1.0"
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+if short_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"SELL"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+if long_exit or short_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+// ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
+alertcondition(long_entry,             "VWAP Dev — BUY",   "VWAP Dev BUY")
+alertcondition(short_entry,            "VWAP Dev — SELL",  "VWAP Dev SELL")
+alertcondition(long_exit or short_exit,"VWAP Dev — CLOSE", "VWAP Dev CLOSE")

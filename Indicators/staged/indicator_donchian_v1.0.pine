@@ -1,0 +1,101 @@
+//@version=6
+// Donchian Breakout v1.0 — Alert Indicator
+// Passed backtesting thresholds:
+//   SOL  1H  PF=1.51  WR=39.1%  46 trades  DD=13.2%  NP=34.6%
+//
+// Signal logic: 20-bar Donchian channel breakout with volume confirmation
+//   BUY:   close breaks above prior-bar channel high + volume surge
+//   SELL:  close breaks below prior-bar channel low + volume surge
+//   CLOSE: close crosses mid-channel
+
+indicator("Donchian Breakout v1.0 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_ch   = "Channel"
+var grp_vol  = "Volume Filter"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+chPeriod       = input.int(20,   "Channel Period",     minval=5,    group=grp_ch)
+volLen         = input.int(20,   "Volume MA Length",   minval=5,    group=grp_vol)
+volMult        = input.float(1.5, "Min Volume (× MA)", step=0.1,    group=grp_vol)
+confidence     = input.int(65,   "Confidence Score",   minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage", minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %",  minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+enableShort    = input.bool(true, "Enable Short Signals", group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showCh         = input.bool(true, "Show Channel",      group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+ch_upper = ta.highest(high, chPeriod)[1]
+ch_lower = ta.lowest(low,   chPeriod)[1]
+ch_mid   = (ch_upper + ch_lower) / 2
+
+volOk = volume > ta.sma(volume, volLen) * volMult
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = ta.crossover(close, ch_upper) and volOk
+short_entry = ta.crossunder(close, ch_lower) and volOk and enableShort
+long_exit   = ta.crossunder(close, ch_mid)
+short_exit  = ta.crossover(close, ch_mid)
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(showCh ? ch_upper : na, "Channel High", color=color.new(color.green, 50), linewidth=1)
+plot(showCh ? ch_lower : na, "Channel Low",  color=color.new(color.red, 50),   linewidth=1)
+plot(showCh ? ch_mid   : na, "Channel Mid",  color=color.new(color.gray, 60),  linewidth=1)
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
+plotshape(short_entry, "Short Entry", shape.triangledown, location.abovebar, color.red,    size=size.small)
+plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+plotshape(short_exit,  "Short Exit",  shape.circle,       location.belowbar, color.yellow, size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym  = syminfo.ticker
+_tf   = timeframe.period
+_strat = "Donchian Breakout v1.0"
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+if short_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"SELL"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+if long_exit or short_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}',
+          realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close)
+
+// ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
+alertcondition(long_entry,             "Donchian — BUY",   "Donchian BUY")
+alertcondition(short_entry,            "Donchian — SELL",  "Donchian SELL")
+alertcondition(long_exit or short_exit,"Donchian — CLOSE", "Donchian CLOSE")

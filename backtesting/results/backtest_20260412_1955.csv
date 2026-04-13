@@ -1,0 +1,11 @@
+Token,Strategy,TF,PF,WR%,Trades,MaxDD%,NetPft%,Status
+SOL,FVG,1H,0.38,19.4,31,14.6,-10.8,"FAIL (PF 0.38, WR 19.4%, NP -10.8%)"
+ETH,FVG,1H,0.67,28.6,28,7.9,-3.7,"FAIL (PF 0.67, WR 28.6%, 28 trades, NP -3.7%)"
+JTO,FVG,1H,33.12,50.0,2,0.4,17.0,FAIL (2 trades)
+WIF,FVG,1H,0.00,0.0,3,1.9,-2.3,"FAIL (PF 0.00, WR 0.0%, 3 trades, NP -2.3%)"
+BONK,FVG,1H,0.35,19.4,36,18.7,-17.3,"FAIL (PF 0.35, WR 19.4%, NP -17.3%)"
+ORCA,FVG,1H,0.00,0.0,4,16.3,-16.3,"FAIL (PF 0.00, WR 0.0%, 4 trades, NP -16.3%)"
+RENDER,FVG,1H,0.35,17.9,56,26.0,-26.0,"FAIL (PF 0.35, WR 17.9%, NP -26.0%)"
+PYTH,FVG,1H,0.12,9.5,21,26.5,-26.5,"FAIL (PF 0.12, WR 9.5%, 21 trades, NP -26.5%)"
+RAY,FVG,1H,0.39,25.6,39,24.3,-23.8,"FAIL (PF 0.39, WR 25.6%, NP -23.8%)"
+W,FVG,1H,0.27,33.3,3,1.5,-1.1,"FAIL (PF 0.27, 3 trades, NP -1.1%)"
