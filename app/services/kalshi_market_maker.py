@@ -199,6 +199,7 @@ class KalshiMarketMaker:
         self.min_spread_cents = mm_cfg.get("min_spread_cents", 2)
         self.max_spread_cents = mm_cfg.get("max_spread_cents", 12)
         self.dynamic_spread = mm_cfg.get("dynamic_spread", True)
+        self.max_days_to_close = mm_cfg.get("max_days_to_close", 0)
 
         # Order sizing
         self.contracts_per_level = mm_cfg.get("contracts_per_level", 5)
@@ -383,7 +384,7 @@ class KalshiMarketMaker:
         - Avoid finance/economics (nearly efficient, 0.17pp gap)
         - Require higher volume minimums (thin markets hurt makers)
         """
-        markets = await client.discover_active_markets(min_volume=10)
+        markets = await client.discover_active_markets(min_volume=10, max_days_to_close=self.max_days_to_close)
         scored = []
 
         for m in markets:

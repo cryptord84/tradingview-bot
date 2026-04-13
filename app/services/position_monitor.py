@@ -189,8 +189,52 @@ class PositionMonitor:
             input_mint = TradeEngine._KNOWN_MINTS.get(token_symbol, jupiter.sol_mint)
             output_mint = jupiter.usdc_mint
             decimals = TradeEngine._TOKEN_DECIMALS.get(token_symbol, 9)
-            # amount_sol stores the token quantity (legacy name)
-            amount_lamports = int(pos["amount_sol"] * (10 ** decimals))
+
+            # Pre-flight balance check: verify wallet holds sufficient tokens.
+            # Uses actual wallet balance for the swap to handle small discrepancies
+            # (fees, rounding) between the recorded position amount and real balance.
+            swap_amount = pos["amount_sol"]
+            try:
+                spl_balances = await wallet.get_spl_token_balances()
+                wallet_amount = spl_balances.get(token_symbol, 0.0)
+
+                if wallet_amount < pos["amount_sol"] * 0.01:
+                    # Wallet holds < 1% of expected — true ghost position
+                    logger.warning(
+                        f"Position #{pos['id']} ghost: expected {pos['amount_sol']:.4f} "
+                        f"{token_symbol}, wallet holds {wallet_amount:.4f}. Marking abandoned."
+                    )
+                    await telegram.notify_error(
+                        f"Ghost position #{pos['id']} {pos['symbol']} abandoned",
+                        f"Expected {pos['amount_sol']:.4f} {token_symbol} in wallet but found "
+                        f"{wallet_amount:.4f}. Position closed as unrecoverable.",
+                    )
+                    close_position(
+                        position_id=pos["id"],
+                        exit_price=current_price,
+                        exit_tx="",
+                        status="abandoned",
+                        pnl_usdc=0.0,
+                        pnl_percent=0.0,
+                    )
+                    await telegram.close()
+                    await wallet.close()
+                    if own_jupiter:
+                        await jupiter.close()
+                    return
+                elif wallet_amount < pos["amount_sol"]:
+                    # Wallet holds slightly less than recorded (fees, rounding).
+                    # Use actual balance so Jupiter doesn't fail on insufficient funds.
+                    logger.info(
+                        f"Position #{pos['id']}: using wallet balance {wallet_amount:.6f} "
+                        f"{token_symbol} (recorded: {pos['amount_sol']:.6f}, "
+                        f"diff: {pos['amount_sol'] - wallet_amount:.6f})"
+                    )
+                    swap_amount = wallet_amount
+            except Exception as e:
+                logger.warning(f"Pre-flight balance check failed for #{pos['id']}: {e}")
+
+            amount_lamports = int(swap_amount * (10 ** decimals))
 
             swap_result = None
             for attempt in range(self.max_retries):

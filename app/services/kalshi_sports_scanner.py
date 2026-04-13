@@ -88,6 +88,7 @@ class KalshiSportsScanner:
         self.scan_interval = sports_cfg.get("scan_interval_seconds", 120)
         self.leagues = sports_cfg.get("leagues", list(SPORTS_LEAGUES.keys()))
         self.min_volume = sports_cfg.get("min_volume", 10)
+        self.max_days_to_close = sports_cfg.get("max_days_to_close", 0)
         self.odds_move_alert_cents = sports_cfg.get("odds_move_alert_cents", 10)
         self.value_threshold_cents = sports_cfg.get("value_threshold_cents", 5)
         self.max_markets_per_league = sports_cfg.get("max_markets_per_league", 20)
@@ -154,7 +155,7 @@ class KalshiSportsScanner:
 
         try:
             # Fetch all open markets and filter for sports
-            all_markets = await client.discover_active_markets(min_volume=0)
+            all_markets = await client.discover_active_markets(min_volume=0, max_days_to_close=self.max_days_to_close)
             league_counts = {league: 0 for league in SPORTS_LEAGUES}
 
             for m in all_markets:
@@ -276,23 +277,42 @@ class KalshiSportsScanner:
         # Buy YES if underpriced (price < 50), NO otherwise
         side = "yes" if best.market.yes_price < 50 else "no"
         price = best.market.yes_price if side == "yes" else best.market.no_price
+        count = self.contracts_per_trade
 
-        cost = self.contracts_per_trade * price
+        cost = count * price
         if cost > self.max_cost_per_trade_cents:
             return
+
+        # Risk auditor gate — liquidity sizing, category limits, dead zone check
+        try:
+            from app.services.kalshi_risk_manager import get_risk_manager
+            rm = get_risk_manager()
+            if rm.enabled:
+                audit = rm.audit_trade(
+                    ticker=best.market.ticker, side=side, price_cents=price,
+                    count=count, confidence=0.5,
+                    bot_name="sports", title=best.market.title,
+                )
+                if not audit["approved"]:
+                    logger.info(f"Sports trade BLOCKED by auditor: {audit['reason']}")
+                    return
+                if audit.get("adjustments", {}).get("count"):
+                    count = audit["adjustments"]["count"]
+        except Exception as e:
+            logger.warning(f"Sports risk audit failed (allowing trade): {e}")
 
         try:
             result = await client.place_order(
                 ticker=best.market.ticker,
                 side=side,
                 action="buy",
-                count=self.contracts_per_trade,
+                count=count,
                 yes_price=price if side == "yes" else None,
                 no_price=price if side == "no" else None,
                 order_type="limit",
             )
             self._trades_executed += 1
-            logger.info(f"Sports auto-trade: {side.upper()} {self.contracts_per_trade}x @{price}¢ on {best.market.ticker}")
+            logger.info(f"Sports auto-trade: {side.upper()} {count}x @{price}¢ on {best.market.ticker}")
         except Exception as e:
             logger.error(f"Sports auto-trade failed: {e}")
 

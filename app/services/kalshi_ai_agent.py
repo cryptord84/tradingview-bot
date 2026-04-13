@@ -222,10 +222,46 @@ class KalshiAIAgentBot:
 
     # ── Lifecycle ──
 
+    def _reload_positions_from_db(self):
+        """Reload open positions from DB so dedup works across restarts."""
+        from app.database import get_db
+        try:
+            conn = get_db()
+            rows = conn.execute("""
+                SELECT t.ticker, t.side, SUM(t.count) as total_count,
+                       AVG(t.price_cents) as avg_price, MIN(t.timestamp) as first_buy,
+                       t.title
+                FROM kalshi_trades t
+                WHERE t.status = 'executed' AND t.action = 'buy'
+                AND NOT EXISTS (
+                    SELECT 1 FROM kalshi_trades s
+                    WHERE s.ticker = t.ticker AND s.side = t.side
+                    AND s.action = 'sell' AND s.status = 'executed'
+                )
+                GROUP BY t.ticker, t.side
+            """).fetchall()
+            conn.close()
+
+            self._positions.clear()
+            for row in rows:
+                ticker, side, count, avg_price, first_buy, title = row
+                self._positions.append({
+                    "ticker": ticker, "side": side,
+                    "count": int(count), "entry_price": int(round(avg_price)),
+                    "entry_time": first_buy, "title": title or ticker,
+                })
+            if self._positions:
+                logger.info(
+                    f"AI Agent reloaded {len(self._positions)} positions from DB"
+                )
+        except Exception as e:
+            logger.warning(f"AI Agent failed to reload positions from DB: {e}")
+
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
             return self._task
         self._running = True
+        self._reload_positions_from_db()
         self._task = asyncio.create_task(self._scan_loop())
         logger.info(f"AI Agent bot started: agents={self.agents}, interval={self.scan_interval}s")
         return self._task
@@ -580,6 +616,27 @@ class KalshiAIAgentBot:
 
             ticker = r["ticker"]
             side = "yes" if r["action"] == "BUY_YES" else "no"
+
+            # DB deduplication: skip if we already have contracts on this ticker+side
+            try:
+                from app.database import get_db
+                conn = get_db()
+                buy_count = conn.execute(
+                    "SELECT COALESCE(SUM(count), 0) FROM kalshi_trades "
+                    "WHERE ticker=? AND side=? AND action='buy' AND status='executed'",
+                    (ticker, side),
+                ).fetchone()[0]
+                sell_count = conn.execute(
+                    "SELECT COALESCE(SUM(count), 0) FROM kalshi_trades "
+                    "WHERE ticker=? AND side=? AND action='sell' AND status='executed'",
+                    (ticker, side),
+                ).fetchone()[0]
+                conn.close()
+                if buy_count - sell_count > 0:
+                    logger.debug(f"AI Agent skipping {ticker} {side}: already {buy_count - sell_count} open contracts")
+                    continue
+            except Exception as e:
+                logger.warning(f"AI Agent DB dedup check failed: {e}")
 
             try:
                 market = await client.get_market_full(ticker)

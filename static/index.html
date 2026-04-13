@@ -663,7 +663,6 @@ footer a:hover { color: var(--green); }
     </div>
     <div>
       <div class="hero-time" id="live-clock">00:00:00</div>
-      <div class="hero-sol-price">SOL &nbsp;<span id="sol-price-hero">$---</span></div>
     </div>
   </div>
 </div>
@@ -771,6 +770,24 @@ footer a:hover { color: var(--green); }
           <div class="price-tile-change">--</div>
           <div class="price-tile-holding" id="hold-ORCA">--</div>
         </div>
+        <div class="price-tile" id="price-RENDER">
+          <div class="price-tile-symbol">RENDER</div>
+          <div class="price-tile-price">$--</div>
+          <div class="price-tile-change">--</div>
+          <div class="price-tile-holding" id="hold-RENDER">--</div>
+        </div>
+        <div class="price-tile" id="price-W">
+          <div class="price-tile-symbol">W</div>
+          <div class="price-tile-price">$--</div>
+          <div class="price-tile-change">--</div>
+          <div class="price-tile-holding" id="hold-W">--</div>
+        </div>
+        <div class="price-tile" id="price-DOG">
+          <div class="price-tile-symbol">DOG</div>
+          <div class="price-tile-price">$--</div>
+          <div class="price-tile-change">--</div>
+          <div class="price-tile-holding" id="hold-DOG">--</div>
+        </div>
       </div>
     </div>
     <!-- Kamino Controls -->
@@ -841,9 +858,9 @@ footer a:hover { color: var(--green); }
         <button onclick="toggleAutoRebalance()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;cursor:pointer;">[ TOGGLE AUTO ]</button>
       </div>
     </div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="rebal-table" style="width:100%;">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th style="text-align:left;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">TOKEN</th>
           <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">TARGET %</th>
           <th style="text-align:right;padding:6px 8px;font-size:.6rem;color:var(--green-dim);letter-spacing:1px;border-bottom:1px solid var(--green-dark);">CURRENT %</th>
@@ -903,9 +920,9 @@ footer a:hover { color: var(--green); }
       <div class="section-title" style="font-size:.55rem;margin-bottom:4px;">Category Exposure</div>
       <div id="kalshi-category-bars" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:4px;font-family:var(--mono);font-size:.55rem;"></div>
     </div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="kalshi-markets-table">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Market</th><th>Yes</th><th>No</th><th>Volume</th><th>Closes</th><th>Action</th>
         </tr></thead>
         <tbody id="kalshi-markets-tbody"></tbody>
@@ -1231,7 +1248,7 @@ footer a:hover { color: var(--green); }
       <span class="section-title" style="margin:0">Recent Executions</span>
       <button onclick="loadTrades()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
     </div>
-    <div style="overflow-x:auto;max-height:320px;overflow-y:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table>
         <thead style="position:sticky;top:0;background:#000500;">
           <tr>
@@ -1258,7 +1275,7 @@ footer a:hover { color: var(--green); }
       <span class="section-title" style="margin:0">Transaction History</span>
       <button onclick="loadWalletTxLog()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
     </div>
-    <div style="overflow-x:auto;max-height:280px;overflow-y:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table>
         <thead style="position:sticky;top:0;background:#000500;">
           <tr>
@@ -1284,9 +1301,9 @@ footer a:hover { color: var(--green); }
       <span class="section-title" style="margin:0">Position Monitor</span>
       <span id="positions-count" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">0 open</span>
     </div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="positions-table">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Symbol</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
         </tr></thead>
         <tbody id="positions-tbody"></tbody>
@@ -1357,9 +1374,9 @@ footer a:hover { color: var(--green); }
 
     <!-- Trade History Table -->
     <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">RECENT PAPER TRADES</div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="paper-trades-table">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Time</th><th>Symbol</th><th>Side</th><th>Amount</th><th>Price</th><th>Fees</th><th>P&L</th><th>Balance</th><th>Status</th>
         </tr></thead>
         <tbody id="paper-trades-tbody"></tbody>
@@ -1407,9 +1424,9 @@ footer a:hover { color: var(--green); }
 
     <!-- Alert Toggle Table -->
     <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">ALERT MODE TOGGLES — click to switch between LIVE and DRY-RUN per alert</div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="dryrun-alerts-table">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Strategy</th><th>Token</th><th>Timeframe</th><th>Mode</th><th>Action</th>
         </tr></thead>
         <tbody id="dryrun-alerts-tbody"></tbody>
@@ -1421,9 +1438,9 @@ footer a:hover { color: var(--green); }
 
     <!-- Recent Simulated Trades -->
     <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-top:16px;margin-bottom:8px;">RECENT SIMULATED TRADES</div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="dryrun-trades-table" style="display:none;">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Time</th><th>Strategy</th><th>Token</th><th>TF</th><th>Side</th><th>Amount</th><th>Price</th><th>R:R</th><th>Sim P&L</th>
         </tr></thead>
         <tbody id="dryrun-trades-tbody"></tbody>
@@ -1508,9 +1525,9 @@ footer a:hover { color: var(--green); }
 
     <!-- Pending Signals -->
     <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">PENDING SIGNALS (waiting for confirmation)</div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="cf-pending-table" style="display:none;">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th>Token</th><th>Strategy</th><th>TF</th><th>Conf</th><th>Waiting</th><th>Remaining</th>
         </tr></thead>
         <tbody id="cf-pending-tbody"></tbody>
@@ -1609,9 +1626,9 @@ footer a:hover { color: var(--green); }
         <button onclick="importBacktests()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;" id="bt-import-btn">[ IMPORT REPORTS ]</button>
       </div>
     </div>
-    <div style="overflow-x:auto;">
+    <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
       <table id="backtests-table">
-        <thead><tr>
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
           <th></th><th class="bt-sort" data-sort="strategy_name">Strategy</th><th class="bt-sort" data-sort="version">Ver</th><th class="bt-sort" data-sort="timeframe">TF</th><th class="bt-sort" data-sort="symbol">Symbol</th><th class="bt-sort" data-sort="total_trades">Trades</th><th class="bt-sort" data-sort="win_rate">Win %</th><th class="bt-sort" data-sort="profit_factor">PF</th><th class="bt-sort" data-sort="net_profit_usd">P&L</th><th class="bt-sort" data-sort="win_loss_ratio">R:R</th><th class="bt-sort" data-sort="max_drawdown">DD</th><th class="bt-sort" data-sort="sharpe_ratio">Sharpe</th><th class="bt-sort" data-sort="created_at">Date</th>
         </tr></thead>
         <tbody id="backtests-tbody"></tbody>
@@ -1909,8 +1926,6 @@ async function loadStats() {
     const r = await fetch(`${API}/api/stats`);
     const d = await r.json();
 
-    setText('sol-price-hero', `$${(d.sol_price_usd||0).toFixed(2)}`);
-
     const solBal = d.wallet_balance_sol || 0;
     const solPrice = d.sol_price_usd || 0;
     const solUsd = solBal * solPrice;
@@ -1932,7 +1947,7 @@ async function loadStats() {
       }
     }
     // SPL token holdings
-    const allTokens = ['JTO','WIF','BONK','PYTH','RAY','ETH','ORCA'];
+    const allTokens = ['JTO','WIF','BONK','PYTH','RAY','ETH','ORCA','RENDER','W','DOG'];
     for (const sym of allTokens) {
       const el = document.getElementById('hold-' + sym);
       if (!el) continue;
@@ -3773,7 +3788,7 @@ async function loadPrices() {
       const chg = info.change_24h || 0;
       changeEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
       changeEl.className = 'price-tile-change ' + (chg >= 0 ? 'up' : 'down');
-      if (info.high_24h != null && info.low_24h != null) {
+      if (rangeEl && info.high_24h != null && info.low_24h != null) {
         rangeEl.textContent = 'L ' + formatPrice(info.low_24h) + '  H ' + formatPrice(info.high_24h);
       }
     }

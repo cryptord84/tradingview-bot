@@ -109,6 +109,7 @@ class KalshiSpreadBot:
         self.stale_order_threshold_cents = spread_cfg.get("stale_order_threshold_cents", 3)
         self.flatten_minutes_before_close = spread_cfg.get("flatten_minutes_before_close", 30)
         self.fee_per_contract_cents = spread_cfg.get("fee_per_contract_cents", 2)
+        self.max_days_to_close = spread_cfg.get("max_days_to_close", 0)
         self.telegram_alerts = spread_cfg.get("telegram_alerts", True)
         self.target_tickers = spread_cfg.get("target_tickers", [])
 
@@ -264,7 +265,7 @@ class KalshiSpreadBot:
         - Prefer high-bias categories (sports, entertainment, politics)
         - Avoid finance/economics (nearly efficient, 0.17pp gap)
         """
-        markets = await client.discover_active_markets(min_volume=10)
+        markets = await client.discover_active_markets(min_volume=10, max_days_to_close=self.max_days_to_close)
         candidates = []
 
         for m in markets:

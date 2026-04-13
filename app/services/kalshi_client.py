@@ -458,7 +458,9 @@ class KalshiTradingClient:
                         raise ValueError(f"Risk gate blocked: {gate['reason']}")
 
                     # Liquidity-based size cap
-                    max_liq_size = rm.get_max_size(ticker)
+                    max_liq_size = rm.get_max_size(
+                        ticker, price_cents=price or 0, side=side,
+                    )
                     if max_liq_size is not None and count > max_liq_size:
                         logger.info(
                             f"Liquidity cap: reducing {ticker} order from {count} to {max_liq_size} contracts"

@@ -275,6 +275,14 @@ kalshi:
     target_tickers: []                         # Empty = auto-select by volume
     max_markets_to_scan: 20
     max_days_to_close: 7                       # Skip markets closing > N days out (0=no filter)
+    # Exit management
+    take_profit_cents: 8                       # Full exit at +8c per contract
+    stop_loss_cents: 12                        # Exit at -12c per contract
+    trailing_stop_cents: 5                     # Trail 5c from peak price
+    time_exit_hours: 48                        # Close position after 48 hours
+    partial_exit_at_cents: 5                   # Sell half at +5c profit
+    anti_chase_pct: 0.10                       # Skip entry if >10% move in 3 candles
+    exit_check_interval_seconds: 120           # Check exits every 2 minutes
   # Sports Scanner (multi-league market tracker)
   sports_scanner:
     enabled: false                             # Enable sports market scanning
@@ -399,6 +407,11 @@ rebalancer:
     BONK: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263"
     PYTH: "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3"
     RAY: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R"
+    ETH: "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs"
+    ORCA: "orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE"
+    RENDER: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof"
+    W: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ"
+    DOG: "dog1viwbb2vWDpER5FrJ4YFG6gq6XuyFohUe9TXN65u"
 
 # --- Paper Trading (simulation mode) ---
 paper_trading:

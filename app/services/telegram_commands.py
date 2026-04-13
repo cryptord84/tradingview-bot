@@ -85,9 +85,10 @@ class TelegramCommandHandler:
     async def poll_updates(self):
         """Fetch new messages from Telegram.
 
-        Uses short polling (timeout=3) to coexist with other processes
-        (e.g. Claude Code MCP plugin) that may also poll the same bot.
-        409 Conflict responses are expected and handled gracefully.
+        Uses short polling (timeout=3) to coexist with the Claude Code MCP
+        Telegram plugin, which also polls the same bot token. On 409 Conflict
+        (another consumer has an active getUpdates), backs off exponentially
+        to avoid log spam and wasted requests.
         """
         try:
             resp = await self._client.get(
@@ -95,9 +96,14 @@ class TelegramCommandHandler:
                 params={"offset": self._offset, "timeout": 3, "allowed_updates": '["message"]'},
             )
             if resp.status_code == 409:
-                # Another process is polling — back off and retry
-                await asyncio.sleep(2)
+                # Another process is polling — exponential backoff (caps at 30s)
+                self._conflict_backoff = min(
+                    getattr(self, '_conflict_backoff', 2) * 2, 30
+                )
+                await asyncio.sleep(self._conflict_backoff)
                 return []
+            # Success — reset backoff
+            self._conflict_backoff = 2
             data = resp.json()
             if not data.get("ok"):
                 return []
@@ -109,7 +115,7 @@ class TelegramCommandHandler:
             return []
         except Exception as e:
             logger.error(f"Telegram poll error: {e}")
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             return []
 
     async def handle_message(self, message: dict):
@@ -1107,8 +1113,8 @@ class TelegramCommandHandler:
                     msg = update.get("message")
                     if msg:
                         await self.handle_message(msg)
-                # Brief pause between polls to reduce 409 conflicts
-                await asyncio.sleep(1)
+                # Pause between polls — 5s base reduces 409 conflicts with MCP plugin
+                await asyncio.sleep(5)
             except Exception as e:
                 logger.error(f"Telegram command loop error: {e}")
                 await asyncio.sleep(5)

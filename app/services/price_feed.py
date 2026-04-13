@@ -52,6 +52,9 @@ COINGECKO_ONLY = {
     "PYTH": "pyth-network",
     "RAY": "raydium",
     "WIF": "dogwifcoin",
+    "RENDER": "render-token",
+    "W": "wormhole",
+    "DOG": "dog-go-to-the-moon-rune",
 }
 
 
@@ -199,23 +202,56 @@ class PriceFeed:
             await asyncio.sleep(self._cg_poll_seconds)
 
     async def _cg_fetch(self):
-        """Fetch prices from CoinGecko for non-Binance tokens."""
-        if not self._http or not COINGECKO_ONLY:
+        """Fetch prices from CoinGecko in a single batched request.
+
+        Combines CoinGecko-only tokens with stale Binance backfills into one API
+        call to stay well within free-tier rate limits (~10-30 req/min).
+        """
+        if not self._http:
             return
 
-        cg_ids = ",".join(COINGECKO_ONLY.values())
-        resp = await self._http.get(
-            "https://api.coingecko.com/api/v3/simple/price",
-            params={
-                "ids": cg_ids,
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-            },
-        )
-        resp.raise_for_status()
-        cg_data = resp.json()
+        # Build a single ID list: CoinGecko-only tokens + stale Binance backfills
+        _BINANCE_BACKFILL_IDS = {
+            "SOL": "solana", "JTO": "jito-governance-token",
+            "BONK": "bonk", "ETH": "ethereum", "ORCA": "orca",
+        }
+        all_cg_ids = {**COINGECKO_ONLY, **_BINANCE_BACKFILL_IDS}
+        stale_threshold = time.time() - 120
+        needed = {
+            sym: cg_id for sym, cg_id in all_cg_ids.items()
+            if sym in COINGECKO_ONLY
+            or sym not in self._prices
+            or self._prices[sym].updated_at < stale_threshold
+        }
+        if not needed:
+            return
 
-        id_to_sym = {v: k for k, v in COINGECKO_ONLY.items()}
+        ids_str = ",".join(set(needed.values()))
+        try:
+            resp = await self._http.get(
+                "https://api.coingecko.com/api/v3/simple/price",
+                params={
+                    "ids": ids_str,
+                    "vs_currencies": "usd",
+                    "include_24hr_change": "true",
+                },
+            )
+            if resp.status_code == 429:
+                # Rate limited — back off, will retry next cycle
+                logger.debug("CoinGecko 429 rate limit, backing off")
+                self._cg_backoff = min(getattr(self, '_cg_backoff', 0) + 30, 120)
+                await asyncio.sleep(self._cg_backoff)
+                return
+            resp.raise_for_status()
+            self._cg_backoff = 0  # Reset backoff on success
+        except httpx.HTTPStatusError:
+            raise
+        except Exception as e:
+            logger.debug("CoinGecko fetch failed: %s", e)
+            return
+
+        cg_data = resp.json()
+        id_to_sym = {cg_id: sym for sym, cg_id in needed.items()}
         for cg_id, vals in cg_data.items():
             sym = id_to_sym.get(cg_id)
             if sym:
@@ -227,42 +263,6 @@ class PriceFeed:
                     volume_24h=None,
                     updated_at=time.time(),
                 )
-
-        # Also back-fill Binance tokens via CoinGecko if WS hasn't delivered yet
-        all_cg_ids = {
-            "SOL": "solana", "JTO": "jito-governance-token",
-            "WIF": "dogwifcoin", "BONK": "bonk",
-            "ETH": "ethereum", "ORCA": "orca",
-        }
-        stale_threshold = time.time() - 120  # backfill if no update in 2 min
-        missing = [
-            sym for sym in all_cg_ids
-            if sym not in self._prices or self._prices[sym].updated_at < stale_threshold
-        ]
-        if missing:
-            ids_str = ",".join(all_cg_ids[s] for s in missing)
-            try:
-                resp2 = await self._http.get(
-                    "https://api.coingecko.com/api/v3/simple/price",
-                    params={
-                        "ids": ids_str,
-                        "vs_currencies": "usd",
-                        "include_24hr_change": "true",
-                    },
-                )
-                resp2.raise_for_status()
-                cg2 = resp2.json()
-                id_to_sym2 = {v: k for k, v in all_cg_ids.items()}
-                for cg_id, vals in cg2.items():
-                    sym = id_to_sym2.get(cg_id)
-                    if sym and sym not in self._prices:
-                        self._prices[sym] = PriceData(
-                            price=vals.get("usd", 0),
-                            change_24h=vals.get("usd_24h_change", 0),
-                            updated_at=time.time(),
-                        )
-            except Exception as e:
-                logger.debug("CoinGecko backfill for Binance tokens failed: %s", e)
 
 
 # ------------------------------------------------------------------ #

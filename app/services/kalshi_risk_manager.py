@@ -32,6 +32,8 @@ TICKER_CATEGORY_MAP = {
     "KXVALORANT": "esports", "KXOVERWATCH": "esports", "KXMVE": "esports",
     "KXBTC": "crypto", "KXETH": "crypto", "KXSOL": "crypto",
     "KXFED": "finance", "KXCPI": "finance", "KXGDP": "finance",
+    "KXINX": "finance", "KXNDX": "finance", "KXSPY": "finance", "KXDJI": "finance",
+    "KXRUS": "finance", "KXVIX": "finance",
 }
 
 # Title keyword fallback
@@ -40,7 +42,8 @@ TITLE_CATEGORY_KEYWORDS = {
                "game", "match", "playoff", "championship", "super bowl", "world series"],
     "esports": ["cs2", "dota", "lol", "valorant", "overwatch", "esport"],
     "crypto": ["bitcoin", "btc", "ethereum", "eth", "solana", "sol", "crypto"],
-    "finance": ["fed ", "interest rate", "gdp", "cpi", "inflation", "treasury", "earnings"],
+    "finance": ["fed ", "interest rate", "gdp", "cpi", "inflation", "treasury", "earnings",
+                "s&p", "nasdaq", "dow jones", "index", "russell"],
     "politics": ["election", "trump", "biden", "president", "senate", "congress", "vote"],
     "weather": ["hurricane", "temperature", "weather", "tornado", "storm"],
 }
@@ -63,7 +66,14 @@ def detect_category(ticker: str, title: str = "") -> str:
 
 # ─── Liquidity Sizing ────────────────────────────────────────────────────────
 
+# Max order size as a fraction of total book depth (avoid moving the market)
+MAX_BOOK_FRACTION = 0.10  # Never take more than 10% of visible depth
+
+# Max order cost as a fraction of account balance
+MAX_BALANCE_FRACTION = 0.15  # Never risk more than 15% of balance on one trade
+
 # Depth thresholds: (min_total_depth_contracts, max_order_size)
+# Used as a fallback floor — proportional sizing may go lower
 LIQUIDITY_TIERS = [
     (500, None),   # Deep book: use configured max
     (200, 50),     # Moderate
@@ -440,8 +450,8 @@ class KalshiRiskManager:
         if confidence < 0.3:
             return _reject(f"Confidence {confidence:.0%} too low", ["low_confidence"])
 
-        # 4. Liquidity check — cap size to book depth
-        max_size = self.get_max_size(ticker)
+        # 4. Liquidity check — cap size to book depth + balance
+        max_size = self.get_max_size(ticker, price_cents=price_cents, side=side)
         if max_size is not None and count > max_size:
             adjustments["count"] = max_size
             flags.append(f"size_capped_{count}_to_{max_size}")
@@ -483,38 +493,96 @@ class KalshiRiskManager:
         category = detect_category(ticker, title)
         self._category_exposure[category] += cost_cents
 
-    def get_max_size(self, ticker: str) -> Optional[int]:
+    def get_max_size(self, ticker: str, price_cents: int = 0,
+                     side: str = "yes") -> Optional[int]:
         """Liquidity-based position sizing: returns max contracts for this market.
 
-        Reads orderbook depth from WS cache (or returns conservative default).
-        Thin books get smaller orders to avoid moving the market.
-        Dollar depth is converted to approximate contract count at ~$0.50 avg price.
+        Uses three constraints and returns the tightest one:
+        1. Book fraction — never take more than 10% of visible depth
+        2. Price impact — only consume liquidity at or near the target price
+        3. Balance cap — never risk more than 15% of account balance per trade
+
+        Falls back to tier-based sizing if WS data is unavailable.
         """
+        limits = []
+
+        # ── 1. Orderbook-based sizing ──
         try:
             from app.services.kalshi_ws_feed import get_kalshi_ws_feed
             ws = get_kalshi_ws_feed()
             ob = ws.get_orderbook(ticker)
             if ob and ob.last_updated:
-                # Depth values are in dollars — convert to approx contract count
-                # (1 contract ≈ $0.01–$0.99, use $0.50 avg → 2 contracts per $1)
                 yes_depth_dollars = sum(ob.yes_levels.values())
                 no_depth_dollars = sum(ob.no_levels.values())
                 total_contracts = int((yes_depth_dollars + no_depth_dollars) * 2)
 
+                # 1a. Fraction of total book depth
+                fraction_limit = max(1, int(total_contracts * MAX_BOOK_FRACTION))
+                limits.append(fraction_limit)
+
+                # 1b. Available liquidity at/near target price (price impact)
+                if price_cents > 0:
+                    available = self._depth_near_price(ob, side, price_cents)
+                    if available > 0:
+                        limits.append(available)
+
+                # 1c. Tier-based floor (legacy fallback)
                 for min_depth, max_size in LIQUIDITY_TIERS:
                     if total_contracts >= min_depth:
-                        logger.debug(
-                            f"Liquidity sizing {ticker}: depth≈{total_contracts} contracts "
-                            f"(${yes_depth_dollars+no_depth_dollars:.1f}), max_size={max_size}"
-                        )
-                        return max_size  # None means "use bot's configured max"
-                logger.debug(f"Liquidity sizing {ticker}: very thin ({total_contracts} contracts), capping at 5")
-                return 5  # Less than minimum tier
+                        if max_size is not None:
+                            limits.append(max_size)
+                        break
+
+                logger.debug(
+                    f"Liquidity sizing {ticker}: depth≈{total_contracts} contracts "
+                    f"(${yes_depth_dollars+no_depth_dollars:.1f}), "
+                    f"limits={limits}"
+                )
         except Exception:
             pass
 
-        # Fallback: no WS data, be conservative
-        return 20
+        # ── 2. Balance-based sizing ──
+        try:
+            from app.services.kalshi_client import get_async_kalshi_client
+            client = get_async_kalshi_client()
+            balance = client._sync.get_balance().get("balance", 0)
+            if balance > 0 and price_cents > 0:
+                max_cost = int(balance * MAX_BALANCE_FRACTION)
+                balance_limit = max(1, max_cost // max(price_cents, 1))
+                limits.append(balance_limit)
+                logger.debug(
+                    f"Balance sizing {ticker}: balance={balance}¢, "
+                    f"max_cost={max_cost}¢ @{price_cents}¢ → {balance_limit} contracts"
+                )
+        except Exception:
+            pass
+
+        if limits:
+            return min(limits)
+
+        # Fallback: no data at all, be conservative
+        return 5
+
+    @staticmethod
+    def _depth_near_price(ob, side: str, price_cents: int, slippage_cents: int = 3) -> int:
+        """Count contracts available within slippage_cents of the target price.
+
+        Returns the number of contracts we could fill without walking the book
+        beyond an acceptable price impact.
+        """
+        levels = ob.yes_levels if side == "yes" else ob.no_levels
+        target_dollars = price_cents / 100.0
+        slip_dollars = slippage_cents / 100.0
+        total = 0.0
+        for price_str, qty_dollars in levels.items():
+            level_price = float(price_str)
+            if side == "yes" and level_price <= target_dollars + slip_dollars:
+                total += qty_dollars
+            elif side == "no" and level_price <= target_dollars + slip_dollars:
+                total += qty_dollars
+        # Convert dollar depth to approximate contract count
+        avg_price = max(target_dollars, 0.05)
+        return max(1, int(total / avg_price))
 
     def reset(self) -> dict:
         """Manually reset the circuit breaker to resume trading."""
