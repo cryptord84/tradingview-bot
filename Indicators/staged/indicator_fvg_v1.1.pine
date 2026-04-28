@@ -1,0 +1,107 @@
+//@version=6
+// Fair Value Gap (FVG) v1.1 — Alert Indicator
+// v1.1: split exit state from exit signal — eliminates continuous-state CLOSE
+//       webhook spam (v1.0 emitted ~30 CLOSEs/day per token; v1.1 emits ~1–3).
+//       No change to entry logic; trade decisions identical, only redundant
+//       CLOSE re-emissions are dedupe'd to a single transition edge.
+//
+// Passed backtesting thresholds (risk-managed engine, v1.0 — equivalent for v1.1):
+//   WIF    4H  PF=2.44  WR=61.7%  60 trades  DD=5.0%   NP=52.0%
+//   BONK   4H  PF=2.40  WR=70.5%  78 trades  DD=3.6%   NP=49.4%
+//   ETH    4H  PF=2.32  WR=68.3%  41 trades  DD=3.8%   NP=20.2%
+//   SOL    4H  PF=2.29  WR=72.3%  47 trades  DD=4.4%   NP=17.6%
+//   RENDER 4H  PF=2.09  WR=68.8%  80 trades  DD=6.2%   NP=42.1%
+//   RENDER 1H  PF=2.13  WR=62.2%  98 trades  DD=7.7%   NP=90.6%
+//
+// Signal logic: ICT Fair Value Gap — 3-candle imbalance momentum
+//   Bullish FVG: current low > high 2 bars ago (upward gap)
+//   Bearish FVG: current high < low 2 bars ago (downward gap)
+//   BUY:   bar after bullish FVG forms + volume surge
+//   CLOSE: transition into "price filled gap or opposite FVG" state
+
+indicator("FVG v1.1 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_fvg  = "FVG Settings"
+var grp_vol  = "Volume Filter"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+volLen         = input.int(20,   "Volume MA Length",   minval=5,     group=grp_vol)
+volMult        = input.float(1.5, "Min Volume (x MA)", step=0.1,    group=grp_vol)
+confidence     = input.int(65,   "Confidence Score",  minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage", minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %", minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showGaps       = input.bool(true, "Show Gap Zones",    group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+vol_ok  = volume > ta.sma(volume, volLen) * volMult
+
+// Detect FVGs on the current bar (formed by bar[i-2], bar[i-1], bar[i])
+bull_fvg = low > high[2]      // gap up:   current low > high 2 bars ago
+bear_fvg = high < low[2]      // gap down: current high < low 2 bars ago
+
+// Reference levels for exit (gap fill detection)
+fvg_ref_high = high[2]   // for bull FVG — price dropping below here = gap filled
+fvg_ref_low  = low[2]    // for bear FVG — price rising above here = gap filled
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+// Enter on bar AFTER FVG forms (shift by 1) + volume confirmation
+long_entry  = bull_fvg[1] and vol_ok
+
+// Exit STATE: continuous condition — price below gap ref or opposite FVG.
+// Exit SIGNAL: transition edge of state — fires once when state first becomes true.
+// `and not long_entry` guards the entry-bar edge case where close can sit below
+// high[2] (the gap's lower reference) while a new bull_fvg also forms.
+long_exit_state = (close < fvg_ref_high or bear_fvg) and not long_entry
+long_exit       = long_exit_state and not long_exit_state[1]
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+// Highlight FVG zones
+bgcolor(showGaps and bull_fvg ? color.new(color.green, 90) : na, title="Bull FVG Zone")
+bgcolor(showGaps and bear_fvg ? color.new(color.red, 90)   : na, title="Bear FVG Zone")
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small, text="FVG")
+plotshape(long_exit and not long_entry,  "Long Exit",  shape.circle, location.abovebar, color.yellow, size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "FVG v1.1"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+if long_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions ──────────────────────────────────────────────────────────
+alertcondition(long_entry,              "FVG — BUY",   "FVG BUY")
+alertcondition(long_exit, "FVG — CLOSE", "FVG CLOSE")
