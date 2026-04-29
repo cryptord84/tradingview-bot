@@ -22,25 +22,23 @@ class TelegramService:
         self.api_base = f"https://api.telegram.org/bot{self.bot_token}"
         self._client = httpx.AsyncClient(timeout=15)
 
-    async def send_message(self, text: str, parse_mode: str = "HTML") -> bool:
+    async def send_message(self, text: str, parse_mode: str = "") -> bool:
         if not self.enabled or not self.bot_token:
             logger.debug("Telegram disabled or no token, skipping notification")
             return False
 
         try:
-            # Telegram has a 4096 character limit
             if len(text) > 4000:
                 text = text[:4000] + "\n...(truncated)"
 
-            resp = await self._client.post(
-                f"{self.api_base}/sendMessage",
-                json={
-                    "chat_id": self.chat_id,
-                    "text": text,
-                    "parse_mode": parse_mode,
-                    "disable_web_page_preview": True,
-                },
-            )
+            payload = {
+                "chat_id": self.chat_id,
+                "text": text,
+                "disable_web_page_preview": True,
+            }
+            if parse_mode:
+                payload["parse_mode"] = parse_mode
+            resp = await self._client.post(f"{self.api_base}/sendMessage", json=payload)
             resp.raise_for_status()
             return True
         except Exception as e:
@@ -59,7 +57,7 @@ class TelegramService:
             f"Leverage: {signal.get('suggested_leverage', 1)}x\n"
             f"Size: {signal.get('suggested_position_size_percent', 0)}%"
         )
-        await self.send_message(msg)
+        await self.send_message(msg, parse_mode="HTML")
 
     async def notify_claude_decision(self, decision: dict, signal_type: str):
         if not self.send_on.get("claude_decision", True):
@@ -79,7 +77,7 @@ class TelegramService:
             msg += f"Modified Leverage: {decision['modified_leverage']}x\n"
         if decision.get("geo_risk_note"):
             msg += f"Geo Risk: {decision['geo_risk_note']}\n"
-        await self.send_message(msg)
+        await self.send_message(msg, parse_mode="HTML")
 
     async def notify_trade_executed(
         self,
@@ -102,7 +100,7 @@ class TelegramService:
             f"Price: ${price_usd:.4f}\n"
             f"TX: <code>{tx_sig}</code>"
         )
-        await self.send_message(msg)
+        await self.send_message(msg, parse_mode="HTML")
 
     async def notify_error(self, error: str, context: Optional[str] = None):
         if not self.send_on.get("errors", True):
@@ -110,7 +108,7 @@ class TelegramService:
         msg = f"<b>⚠️ Error</b>\n\n{error}"
         if context:
             msg += f"\n\nContext: {context}"
-        await self.send_message(msg)
+        await self.send_message(msg, parse_mode="HTML")
 
     async def notify_daily_summary(self, stats: dict):
         if not self.send_on.get("daily_summary", True):
@@ -122,7 +120,7 @@ class TelegramService:
             f"P&L: ${stats.get('today_pnl_usd', 0):.2f}\n"
             f"Balance: {stats.get('wallet_balance_sol', 0):.4f} SOL"
         )
-        await self.send_message(msg)
+        await self.send_message(msg, parse_mode="HTML")
 
     async def close(self):
         await self._client.aclose()

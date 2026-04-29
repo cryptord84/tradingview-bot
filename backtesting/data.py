@@ -11,33 +11,49 @@ COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 # Binance US trading pairs
 BINANCE_TOKENS = {
-    "SOL":    "SOLUSDT",
-    "ETH":    "ETHUSDT",
-    "JTO":    "JTOUSDT",
-    "WIF":    "WIFUSDT",
-    "BONK":   "BONKUSDT",
-    "ORCA":   "ORCAUSDT",
-    "RENDER": "RENDERUSDT",
+    "SOL":      "SOLUSDT",
+    "ETH":      "ETHUSDT",
+    "JTO":      "JTOUSDT",
+    "WIF":      "WIFUSDT",
+    "BONK":     "BONKUSDT",
+    "ORCA":     "ORCAUSDT",
+    "RENDER":   "RENDERUSDT",
+    # Tier 1 additions — Solana-native, Jupiter-tradeable, Binance US data
+    "JUP":      "JUPUSDT",
+    "PENGU":    "PENGUUSDT",
+    "FARTCOIN": "FARTCOINUSDT",
+    "POPCAT":   "POPCATUSDT",
+    "MEW":      "MEWUSDT",
+    "PNUT":     "PNUTUSDT",
+    "MOODENG":  "MOODENGUSDT",
 }
 
 # CoinGecko IDs for tokens not on Binance US
 COINGECKO_TOKENS = {
-    "PYTH": "pyth-network",
-    "RAY":  "raydium",
-    "W":    "wormhole",
+    "PYTH":  "pyth-network",
+    "RAY":   "raydium",
+    "W":     "wormhole",
+    # Tier 2 additions — Jupiter-tradeable, CoinGecko data only
+    "HNT":   "helium",
+    "DRIFT": "drift-protocol",
+    "TNSR":  "tensor",
     # DOG (dog-go-to-the-moon-rune) — CoinGecko OHLC not available for Runes tokens
 }
 
 TOKENS = {**BINANCE_TOKENS, **{k: f"CG:{v}" for k, v in COINGECKO_TOKENS.items()}}
 
 TIMEFRAMES = {
+    "15m": "15m",
     "1H": "1h",
     "4H": "4h",
+    "1D": "1d",
 }
 
 _BINANCE_MS = {
+    "15m": 900_000,
     "1h": 3_600_000,
     "4h": 14_400_000,
+    "1d": 86_400_000,
 }
 
 

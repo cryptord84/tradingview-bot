@@ -57,6 +57,7 @@
             <a href="#startup">🚀 Startup Order</a>
             <a href="#signal-flow">🔄 Signal Flow</a>
             <a href="#pine">🌲 Pine Script</a>
+            <a href="#indicator-docs">📄 Indicator PDFs</a>
             <a href="#claude">🤖 Claude AI</a>
             <a href="#jupiter">⚡ Jupiter</a>
             <a href="#positions">📍 Position Monitor</a>
@@ -296,6 +297,24 @@ cloudflared tunnel --url http://localhost:8000</code>
   "timeframe": "60"
 }</code>
             </div>
+        </div>
+    </div>
+
+    <!-- Indicator PDFs -->
+    <div class="card p-5" id="indicator-docs">
+        <h2>📄 Indicator PDFs — Shareable Documentation</h2>
+        <p class="text-xs text-slate-400 mb-3">Per-indicator PDFs include purpose, market regime, entry/exit logic, alert JSON payload, backtest matrix, and full Pine source. Sensitive values (webhook URLs/secrets) are redacted. Regenerate: <code class="cmd" style="display:inline;padding:2px 6px;">python scripts/generate_indicator_docs.py</code></p>
+        <table>
+            <tr><th>Indicator</th><th>Version</th><th>Category</th><th>Purpose</th><th>Download</th></tr>
+            <tr><td>EMA Ribbon</td><td>v1.0</td><td><span class="badge badge-green">Trend</span></td><td>3/8/21/55 EMA stack — trend direction &amp; strength</td><td><a href="/static/docs/indicators/ema_ribbon_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/ema_ribbon_v1.0.pdf" download>Download</a></td></tr>
+            <tr><td>VWAP Deviation</td><td>v1.0</td><td><span class="badge badge-blue">Mean Reversion</span></td><td>VWAP ±2σ band fades — intraday extremes</td><td><a href="/static/docs/indicators/vwap_dev_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/vwap_dev_v1.0.pdf" download>Download</a></td></tr>
+            <tr><td>Fair Value Gap (FVG)</td><td>v1.0</td><td><span class="badge badge-yellow">ICT</span></td><td>3-candle imbalance zones — institutional order-flow</td><td><a href="/static/docs/indicators/fvg_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/fvg_v1.0.pdf" download>Download</a></td></tr>
+            <tr><td>Liquidity Sweep</td><td>v1.0</td><td><span class="badge badge-red">Reversal</span></td><td>Stop-hunt detection — swing-high/low liquidity grabs</td><td><a href="/static/docs/indicators/liq_sweep_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/liq_sweep_v1.0.pdf" download>Download</a></td></tr>
+            <tr><td>Stochastic RSI</td><td>v1.0</td><td><span class="badge badge-blue">Momentum</span></td><td>K/D crossover + RSI filter — OB/OS reversals</td><td><a href="/static/docs/indicators/stoch_rsi_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/stoch_rsi_v1.0.pdf" download>Download</a></td></tr>
+            <tr><td>Donchian Breakout</td><td>v1.0</td><td><span class="badge badge-green">Breakout</span></td><td>20-bar channel breach + volume confirmation</td><td><a href="/static/docs/indicators/donchian_v1.0.pdf" target="_blank">View PDF</a> · <a href="/static/docs/indicators/donchian_v1.0.pdf" download>Download</a></td></tr>
+        </table>
+        <div class="mt-4 tip">
+            📦 <strong>Combined bundle:</strong> <a href="/static/docs/indicators/all_indicators.pdf" target="_blank">View all_indicators.pdf</a> · <a href="/static/docs/indicators/all_indicators.pdf" download>Download</a> — all six indicators in a single file.
         </div>
     </div>
 

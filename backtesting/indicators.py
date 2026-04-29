@@ -152,6 +152,60 @@ def swing_highs_lows(
     )
 
 
+def adx(
+    high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14
+) -> pd.Series:
+    """Average Directional Index — measures trend strength (0-100).
+    ADX > 25 = trending, ADX < 20 = ranging/choppy.
+    """
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    prev_close = close.shift(1)
+
+    plus_dm = (high - prev_high).clip(lower=0)
+    minus_dm = (prev_low - low).clip(lower=0)
+
+    # Zero out when the other DM is larger
+    plus_dm = plus_dm.where(plus_dm > minus_dm, 0)
+    minus_dm = minus_dm.where(minus_dm > plus_dm, 0)
+
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+
+    atr_val = tr.ewm(alpha=1 / period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr_val)
+    minus_di = 100 * (minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr_val)
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+    return dx.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def bollinger_squeeze(
+    close: pd.Series, bb_period: int = 20, kc_period: int = 20, kc_mult: float = 1.5
+) -> pd.Series:
+    """Bollinger Band squeeze detector.
+    Returns True when BB is inside Keltner Channel (low volatility squeeze).
+    """
+    # Bollinger Bands
+    bb_mid = sma(close, bb_period)
+    bb_std = close.rolling(bb_period).std()
+    bb_upper = bb_mid + 2 * bb_std
+    bb_lower = bb_mid - 2 * bb_std
+
+    # Keltner Channel
+    high_low_range = close.rolling(kc_period).apply(
+        lambda x: pd.Series(x).diff().abs().mean(), raw=True
+    )
+    kc_upper = bb_mid + kc_mult * high_low_range
+    kc_lower = bb_mid - kc_mult * high_low_range
+
+    # Squeeze = BB inside KC
+    return (bb_lower > kc_lower) & (bb_upper < kc_upper)
+
+
 def rolling_vwap(
     high: pd.Series,
     low: pd.Series,

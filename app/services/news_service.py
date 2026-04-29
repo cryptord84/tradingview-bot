@@ -24,6 +24,9 @@ class NewsService:
         self._cache: list[str] = []
         self._cache_time: Optional[datetime] = None
         self._cache_ttl = timedelta(minutes=cfg.get("check_interval_minutes", 15))
+        self._backoff_until: Optional[datetime] = None
+        self._backoff_minutes = cfg.get("failure_backoff_minutes", 60)
+        self._failure_logged = False
 
     async def get_headlines(self, force_refresh: bool = False) -> list[str]:
         """Get recent headlines relevant to crypto/geopolitics."""
@@ -36,7 +39,9 @@ class NewsService:
         ):
             return self._cache
 
-        # Build ordered provider list: preferred first, then fallback
+        if not force_refresh and self._backoff_until and now < self._backoff_until:
+            return self._cache
+
         providers = []
         if self.provider == "newsapi":
             if self.newsapi_key:
@@ -58,13 +63,20 @@ class NewsService:
                 headlines = await fetch_fn()
                 self._cache = headlines
                 self._cache_time = now
+                self._backoff_until = None
+                self._failure_logged = False
                 logger.info(f"News fetched via {name} ({len(headlines)} headlines)")
                 return headlines
             except Exception as e:
                 logger.warning(f"{name} failed: {e}, trying next provider")
 
-        logger.error("All news providers failed")
-        return self._cache  # Return stale cache as last resort
+        self._backoff_until = now + timedelta(minutes=self._backoff_minutes)
+        if not self._failure_logged:
+            logger.warning(
+                f"All news providers failed; pausing fetches for {self._backoff_minutes}m"
+            )
+            self._failure_logged = True
+        return self._cache
 
     async def _fetch_newsapi(self) -> list[str]:
         query = " OR ".join(self.keywords[:5])

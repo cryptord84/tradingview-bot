@@ -4,12 +4,29 @@ import csv
 import sqlite3
 from datetime import datetime, date
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from app.config import get
 
 DB_PATH = Path(get("database", "path", "data/trades.db"))
 CSV_DIR = Path(get("database", "csv_backup_dir", "data/csv_backups"))
+
+
+class TradeReason:
+    """Reason tags for trade log rows — drives the dashboard Reason column and
+    enables filtering by cause (e.g. 'show me all trail_sl exits')."""
+    WEBHOOK = "webhook"                      # BUY/SELL executed from TV alert
+    SIGNAL_CLOSE = "signal_close"            # CLOSE alert matched open position
+    TP_HIT = "tp_hit"                        # position_monitor: take-profit
+    SL_HIT = "sl_hit"                        # position_monitor: stop-loss
+    TRAIL_SL = "trail_sl"                    # position_monitor: trailing stop
+    MANUAL_CLOSE = "manual_close"            # position_monitor: manual trigger
+    CLAUDE_REJECT = "claude_reject"          # Claude said REJECT
+    RISK_REJECT = "risk_reject"              # SOL risk manager blocked
+    CORRELATION_REJECT = "correlation_reject"  # Correlation cap hit
+    LOW_BALANCE = "low_balance"              # Auto-shutdown threshold
+    DRY_RUN = "dry_run"                      # Per-alert dry-run simulation
+    PAPER = "paper"                          # Paper-trading mode
 
 
 def get_db() -> sqlite3.Connection:
@@ -37,7 +54,8 @@ def init_db():
             confidence_score INTEGER DEFAULT 0,
             claude_reasoning TEXT,
             pnl_usd REAL,
-            notes TEXT
+            notes TEXT,
+            strategy TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS signals_log (
@@ -82,6 +100,7 @@ def init_db():
             closed_at TEXT,
             symbol TEXT NOT NULL,
             direction TEXT NOT NULL DEFAULT 'long',
+            strategy TEXT NOT NULL DEFAULT '',
             entry_price REAL NOT NULL,
             exit_price REAL,
             amount_sol REAL NOT NULL DEFAULT 0,
@@ -201,6 +220,27 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades(status);
         CREATE INDEX IF NOT EXISTS idx_paper_trades_ts ON paper_trades(timestamp);
 
+        CREATE TABLE IF NOT EXISTS kamino_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            deposited_usdc REAL NOT NULL DEFAULT 0,
+            supply_apy REAL,
+            source TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_kamino_snap_ts ON kamino_snapshots(timestamp);
+
+        CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            sol_usd REAL NOT NULL DEFAULT 0,
+            usdc_usd REAL NOT NULL DEFAULT 0,
+            tokens_usd REAL NOT NULL DEFAULT 0,
+            kamino_usd REAL NOT NULL DEFAULT 0,
+            kalshi_usd REAL NOT NULL DEFAULT 0,
+            total_usd REAL NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_portfolio_snap_ts ON portfolio_snapshots(timestamp);
+
         """)
     # Migration: add trail_sl_price column if not exists
     try:
@@ -212,6 +252,36 @@ def init_db():
         conn.execute("SELECT amount_usd FROM trades LIMIT 1")
     except Exception:
         conn.execute("ALTER TABLE trades ADD COLUMN amount_usd REAL DEFAULT 0")
+    # Migration: add strategy column to positions if not exists
+    try:
+        conn.execute("SELECT strategy FROM positions LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE positions ADD COLUMN strategy TEXT NOT NULL DEFAULT ''")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_positions_strategy ON positions(strategy)")
+    # Migration: add strategy column to trades if not exists
+    try:
+        conn.execute("SELECT strategy FROM trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE trades ADD COLUMN strategy TEXT NOT NULL DEFAULT ''")
+    # Migration: add reason column to trades if not exists
+    try:
+        conn.execute("SELECT reason FROM trades LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE trades ADD COLUMN reason TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_reason ON trades(reason)")
+    # Migration: add suggested_leverage and run_id columns to backtests
+    try:
+        conn.execute("SELECT suggested_leverage FROM backtests LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE backtests ADD COLUMN suggested_leverage REAL DEFAULT 1.0")
+    try:
+        conn.execute("SELECT run_id FROM backtests LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE backtests ADD COLUMN run_id TEXT")
+    try:
+        conn.execute("SELECT avg_rr FROM backtests LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE backtests ADD COLUMN avg_rr REAL DEFAULT 0.0")
     conn.commit()
     conn.close()
 
@@ -221,8 +291,8 @@ def insert_trade(trade: dict) -> int:
     cur = conn.execute(
         """INSERT INTO trades
         (timestamp, tx_id, signal_type, symbol, action, amount_sol, amount_usd, price_usd,
-         fees_sol, leverage, wallet_address, confidence_score, claude_reasoning, pnl_usd, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+         fees_sol, leverage, wallet_address, confidence_score, claude_reasoning, pnl_usd, notes, strategy, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             trade.get("timestamp", datetime.utcnow().isoformat()),
             trade.get("tx_id"),
@@ -239,6 +309,8 @@ def insert_trade(trade: dict) -> int:
             trade.get("claude_reasoning", ""),
             trade.get("pnl_usd"),
             trade.get("notes", ""),
+            trade.get("strategy", ""),
+            trade.get("reason"),
         ),
     )
     conn.commit()
@@ -279,6 +351,10 @@ def get_today_trades() -> list[dict]:
 
 
 def get_stats() -> dict:
+    """Aggregate trade stats. Excludes pre-Apr-24 untagged trades (empty
+    strategy field) — those were the 'unknown' bucket whose -$10 JTO outlier
+    skewed dashboard P&L. The underlying rows are preserved in the DB for
+    audit; only the aggregated views ignore them."""
     conn = get_db()
     row = conn.execute(
         """SELECT
@@ -288,12 +364,18 @@ def get_stats() -> dict:
             COALESCE(SUM(pnl_usd), 0) as total_pnl_usd,
             COALESCE(AVG(amount_sol), 0) as avg_trade_size_sol,
             MAX(timestamp) as last_trade_time
-        FROM trades WHERE action = 'EXECUTE'"""
+        FROM trades
+        WHERE action = 'EXECUTE'
+          AND NULLIF(strategy, '') IS NOT NULL"""
     ).fetchone()
 
     today = date.today().isoformat()
     today_row = conn.execute(
-        "SELECT COALESCE(SUM(pnl_usd), 0) as today_pnl FROM trades WHERE timestamp >= ? AND action = 'EXECUTE'",
+        """SELECT COALESCE(SUM(pnl_usd), 0) as today_pnl
+           FROM trades
+           WHERE timestamp >= ?
+             AND action = 'EXECUTE'
+             AND NULLIF(strategy, '') IS NOT NULL""",
         (today,),
     ).fetchone()
 
@@ -376,6 +458,154 @@ def get_wallet_transactions(limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def insert_kamino_snapshot(deposited_usdc: float, supply_apy: float = None, source: str = "auto") -> int:
+    """Record a Kamino balance snapshot for earnings tracking."""
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO kamino_snapshots (timestamp, deposited_usdc, supply_apy, source) VALUES (?, ?, ?, ?)",
+        (datetime.utcnow().isoformat(), deposited_usdc, supply_apy, source),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_kamino_snapshots(limit: int = 500) -> list[dict]:
+    """Return Kamino balance snapshots, newest first."""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM kamino_snapshots ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_latest_kamino_snapshot() -> Optional[dict]:
+    """Return the most recent Kamino snapshot, or None."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM kamino_snapshots ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def compute_kamino_earnings(current_balance: Optional[float] = None) -> dict:
+    """Compute Kamino yield since the first snapshot (tracking baseline).
+
+    Identity: earnings_since_T0 = current_balance - baseline_balance
+                                  - (deposits_since_T0 - withdrawals_since_T0)
+    where T0 is the oldest kamino_snapshots row. Wiping kamino_snapshots and
+    taking a fresh snapshot establishes a clean baseline — only flows AFTER
+    that baseline count toward earnings, so prior wallet_transactions drift
+    does not contaminate the number.
+
+    Floored at 0 because Kamino is supply-only — principal can't decline from
+    yield alone. A meaningfully negative raw value means wallet_transactions
+    drifted from on-chain reality (retry double-counting or missed tx).
+    """
+    conn = get_db()
+    baseline_row = conn.execute(
+        "SELECT timestamp, deposited_usdc FROM kamino_snapshots ORDER BY timestamp ASC LIMIT 1"
+    ).fetchone()
+    if not baseline_row:
+        conn.close()
+        return {
+            "earnings_total": 0.0,
+            "raw_earnings": 0.0,
+            "total_deposited": 0.0,
+            "total_withdrawn": 0.0,
+            "current_balance": round(current_balance or 0.0, 4),
+            "baseline_balance": 0.0,
+            "data_quality": "no_baseline",
+            "first": None,
+            "last": None,
+        }
+
+    baseline_ts = baseline_row["timestamp"]
+    baseline_balance = baseline_row["deposited_usdc"] or 0.0
+
+    row = conn.execute(
+        """SELECT
+            COALESCE(SUM(CASE WHEN tx_type = 'kamino_deposit' AND status = 'success' THEN amount ELSE 0 END), 0) AS deposited,
+            COALESCE(SUM(CASE WHEN tx_type = 'kamino_withdraw' AND status = 'success' THEN amount ELSE 0 END), 0) AS withdrawn
+           FROM wallet_transactions WHERE timestamp >= ?""",
+        (baseline_ts,),
+    ).fetchone()
+    last_row = conn.execute(
+        "SELECT MAX(timestamp) AS last FROM kamino_snapshots"
+    ).fetchone()
+    conn.close()
+
+    total_deposited = row["deposited"] or 0.0
+    total_withdrawn = row["withdrawn"] or 0.0
+
+    if current_balance is None:
+        latest = get_latest_kamino_snapshot()
+        current_balance = (latest or {}).get("deposited_usdc", 0.0) or 0.0
+
+    raw = current_balance - baseline_balance + total_withdrawn - total_deposited
+    earnings = max(0.0, raw)
+    return {
+        "earnings_total": round(earnings, 4),
+        "raw_earnings": round(raw, 4),
+        "total_deposited": round(total_deposited, 4),
+        "total_withdrawn": round(total_withdrawn, 4),
+        "current_balance": round(current_balance, 4),
+        "baseline_balance": round(baseline_balance, 4),
+        "data_quality": "ok" if raw >= -1.0 else "drift_detected",
+        "first": baseline_ts,
+        "last": last_row["last"] if last_row else None,
+    }
+
+
+def insert_portfolio_snapshot(snap: dict) -> int:
+    """Record a portfolio-wide snapshot for the equity curve."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO portfolio_snapshots
+            (timestamp, sol_usd, usdc_usd, tokens_usd, kamino_usd, kalshi_usd, total_usd)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            snap.get("timestamp", datetime.utcnow().isoformat()),
+            snap.get("sol_usd", 0.0),
+            snap.get("usdc_usd", 0.0),
+            snap.get("tokens_usd", 0.0),
+            snap.get("kamino_usd", 0.0),
+            snap.get("kalshi_usd", 0.0),
+            snap.get("total_usd", 0.0),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_portfolio_snapshots(days: int = 30) -> list[dict]:
+    """Return portfolio snapshots for the last N days, oldest first."""
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT * FROM portfolio_snapshots
+           WHERE timestamp >= datetime('now', ?)
+           ORDER BY timestamp ASC""",
+        (f"-{int(days)} days",),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_latest_portfolio_snapshot() -> Optional[dict]:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM portfolio_snapshots ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_kamino_net_deposited() -> float:
     """Get net USDC deposited into Kamino (deposits - withdrawals)."""
     conn = get_db()
@@ -395,13 +625,14 @@ def insert_position(pos: dict) -> int:
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO positions
-        (created_at, symbol, direction, entry_price, amount_sol, amount_usdc,
+        (created_at, symbol, direction, strategy, entry_price, amount_sol, amount_usdc,
          tp_price, sl_price, status, entry_tx, timeframe, confidence, atr, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             pos.get("created_at", datetime.utcnow().isoformat()),
             pos["symbol"],
             pos.get("direction", "long"),
+            pos.get("strategy", ""),
             pos["entry_price"],
             pos.get("amount_sol", 0),
             pos.get("amount_usdc", 0),
@@ -429,6 +660,23 @@ def get_open_positions() -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_open_position_for_signal(symbol: str, strategy: str) -> Optional[dict]:
+    """Get the open position matching a specific symbol and strategy.
+
+    Used by the trade engine to find which position a CLOSE signal should target.
+    Returns the most recent matching open position, or None.
+    """
+    conn = get_db()
+    row = conn.execute(
+        """SELECT * FROM positions
+        WHERE status = 'open' AND symbol = ? AND strategy = ?
+        ORDER BY created_at DESC LIMIT 1""",
+        (symbol, strategy),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def get_all_positions(limit: int = 50) -> list[dict]:
@@ -587,6 +835,163 @@ def get_position_analytics() -> dict:
     }
 
 
+def get_indicator_performance() -> dict:
+    """Per-indicator/strategy performance breakdown.
+
+    Groups positions by ``strategy`` column and returns:
+    - closed trade counts (wins/losses/manual)
+    - open position count and current unrealized exposure
+    - realized P&L (total, avg, best/worst)
+    - win rate, win/loss ratio, avg hold hours
+    - recent closed-trade timeline per strategy for sparkline/chart
+    """
+    conn = get_db()
+
+    # NOTE: pre-Apr-24 positions with empty `strategy` are filtered out here
+    # (5 closed positions, -$9.82 total — the -$10 JTO loss was from this era).
+    # Underlying rows preserved in DB for audit; only the dashboard aggregates ignore them.
+    closed_rows = conn.execute(
+        """
+        SELECT
+            strategy,
+            COUNT(*) AS trades,
+            SUM(CASE WHEN status = 'closed_tp' THEN 1 ELSE 0 END) AS tp_wins,
+            SUM(CASE WHEN status = 'closed_sl' THEN 1 ELSE 0 END) AS sl_losses,
+            SUM(CASE WHEN status = 'closed_manual' THEN 1 ELSE 0 END) AS manual_closes,
+            SUM(CASE WHEN pnl_usdc > 0 THEN 1 ELSE 0 END) AS wins,
+            SUM(CASE WHEN pnl_usdc <= 0 THEN 1 ELSE 0 END) AS losses,
+            COALESCE(SUM(pnl_usdc), 0) AS total_pnl,
+            COALESCE(AVG(pnl_usdc), 0) AS avg_pnl,
+            COALESCE(AVG(pnl_percent), 0) AS avg_pnl_pct,
+            COALESCE(AVG(CASE WHEN pnl_usdc > 0 THEN pnl_usdc END), 0) AS avg_win,
+            COALESCE(AVG(CASE WHEN pnl_usdc < 0 THEN pnl_usdc END), 0) AS avg_loss,
+            COALESCE(MAX(pnl_usdc), 0) AS best_trade,
+            COALESCE(MIN(pnl_usdc), 0) AS worst_trade,
+            COALESCE(AVG(
+                CASE WHEN closed_at IS NOT NULL AND created_at IS NOT NULL
+                THEN (julianday(closed_at) - julianday(created_at)) * 24
+                END
+            ), 0) AS avg_hold_hours
+        FROM positions
+        WHERE status != 'open'
+          AND NULLIF(strategy, '') IS NOT NULL
+        GROUP BY strategy
+        """
+    ).fetchall()
+
+    open_rows = conn.execute(
+        """
+        SELECT
+            strategy,
+            COUNT(*) AS open_count,
+            COALESCE(SUM(amount_usdc), 0) AS open_notional
+        FROM positions
+        WHERE status = 'open'
+          AND NULLIF(strategy, '') IS NOT NULL
+        GROUP BY strategy
+        """
+    ).fetchall()
+
+    timeline = conn.execute(
+        """
+        SELECT
+            strategy,
+            closed_at AS ts,
+            pnl_usdc,
+            symbol,
+            status
+        FROM positions
+        WHERE status != 'open'
+          AND closed_at IS NOT NULL
+          AND NULLIF(strategy, '') IS NOT NULL
+        ORDER BY closed_at ASC
+        """
+    ).fetchall()
+
+    conn.close()
+
+    open_map: Dict[str, dict] = {
+        r["strategy"]: {
+            "open_count": r["open_count"] or 0,
+            "open_notional_usdc": round(r["open_notional"] or 0, 2),
+        }
+        for r in open_rows
+    }
+
+    timeline_map: Dict[str, list] = {}
+    cum_map: Dict[str, float] = {}
+    for r in timeline:
+        strat = r["strategy"]
+        cum = cum_map.get(strat, 0.0) + (r["pnl_usdc"] or 0.0)
+        cum_map[strat] = cum
+        timeline_map.setdefault(strat, []).append({
+            "ts": r["ts"],
+            "pnl": round(r["pnl_usdc"] or 0.0, 2),
+            "cumulative": round(cum, 2),
+            "symbol": r["symbol"],
+            "status": r["status"],
+        })
+
+    indicators = []
+    seen = set()
+    for r in closed_rows:
+        strat = r["strategy"]
+        seen.add(strat)
+        trades = r["trades"] or 0
+        wins = r["wins"] or 0
+        avg_win = abs(r["avg_win"] or 0)
+        avg_loss = abs(r["avg_loss"] or 0)
+        wl = round(avg_win / avg_loss, 2) if avg_loss > 0 else (avg_win if avg_win > 0 else 0)
+        o = open_map.get(strat, {"open_count": 0, "open_notional_usdc": 0.0})
+        indicators.append({
+            "strategy": strat,
+            "trades": trades,
+            "wins": wins,
+            "losses": r["losses"] or 0,
+            "tp_wins": r["tp_wins"] or 0,
+            "sl_losses": r["sl_losses"] or 0,
+            "manual_closes": r["manual_closes"] or 0,
+            "win_rate": round((wins / trades) * 100, 1) if trades > 0 else 0.0,
+            "total_pnl_usdc": round(r["total_pnl"] or 0, 2),
+            "avg_pnl_usdc": round(r["avg_pnl"] or 0, 2),
+            "avg_pnl_pct": round(r["avg_pnl_pct"] or 0, 2),
+            "avg_win_usdc": round(avg_win, 2),
+            "avg_loss_usdc": round(-avg_loss, 2),
+            "win_loss_ratio": wl,
+            "best_trade_usdc": round(r["best_trade"] or 0, 2),
+            "worst_trade_usdc": round(r["worst_trade"] or 0, 2),
+            "avg_hold_hours": round(r["avg_hold_hours"] or 0, 1),
+            "open_count": o["open_count"],
+            "open_notional_usdc": o["open_notional_usdc"],
+            "timeline": timeline_map.get(strat, []),
+        })
+
+    # Strategies that only have open positions (no closed history yet)
+    for strat, o in open_map.items():
+        if strat in seen:
+            continue
+        indicators.append({
+            "strategy": strat,
+            "trades": 0, "wins": 0, "losses": 0,
+            "tp_wins": 0, "sl_losses": 0, "manual_closes": 0,
+            "win_rate": 0.0,
+            "total_pnl_usdc": 0.0, "avg_pnl_usdc": 0.0, "avg_pnl_pct": 0.0,
+            "avg_win_usdc": 0.0, "avg_loss_usdc": 0.0, "win_loss_ratio": 0.0,
+            "best_trade_usdc": 0.0, "worst_trade_usdc": 0.0,
+            "avg_hold_hours": 0.0,
+            "open_count": o["open_count"],
+            "open_notional_usdc": o["open_notional_usdc"],
+            "timeline": [],
+        })
+
+    indicators.sort(key=lambda x: x["total_pnl_usdc"], reverse=True)
+
+    return {
+        "indicators": indicators,
+        "strategy_count": len(indicators),
+    }
+
+
 def update_trail_sl(position_id: int, trail_sl_price: float) -> None:
     """Update the trailing stop-loss price for a position."""
     conn = get_db()
@@ -622,8 +1027,9 @@ def insert_backtest(bt: dict) -> int:
          max_drawdown, sharpe_ratio, sortino_ratio,
          long_trades, long_win_rate, long_pnl,
          short_trades, short_win_rate, short_pnl,
-         source_file, notes, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+         source_file, notes, status,
+         suggested_leverage, run_id, avg_rr)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             bt.get("created_at", datetime.utcnow().isoformat()),
             bt["strategy_name"],
@@ -659,6 +1065,9 @@ def insert_backtest(bt: dict) -> int:
             bt.get("source_file"),
             bt.get("notes"),
             bt.get("status", "tested"),
+            bt.get("suggested_leverage", 1.0),
+            bt.get("run_id"),
+            bt.get("avg_rr", 0.0),
         ),
     )
     conn.commit()
@@ -800,6 +1209,53 @@ def close_kalshi_position(
     )
     conn.commit()
     conn.close()
+
+
+def sync_kalshi_positions(positions: list[dict]) -> dict:
+    """Replace kalshi_positions rows with the live API snapshot.
+
+    positions: list of dicts from KalshiTradingClient.get_positions().
+    Returns counts of inserted / skipped rows.
+    """
+    conn = get_db()
+    conn.execute("DELETE FROM kalshi_positions")
+    inserted = 0
+    for p in positions:
+        try:
+            pos_count = int(p.get("position", 0) or 0)
+            if pos_count == 0:
+                continue  # Skip closed-out rows
+            side = "yes" if pos_count > 0 else "no"
+            abs_count = abs(pos_count)
+            invested_cents = int(p.get("market_exposure", 0) or 0)
+            traded = float(p.get("total_traded_dollars", 0) or 0)
+            avg_price_cents = int(round(traded * 100 / abs_count)) if abs_count > 0 else 0
+            realized_cents = int(round(float(p.get("realized_pnl_dollars", 0) or 0) * 100))
+            conn.execute(
+                """INSERT INTO kalshi_positions
+                (opened_at, ticker, event_ticker, title, side, count,
+                 avg_price_cents, invested_cents, pnl_cents, status, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    p.get("last_updated_ts", datetime.utcnow().isoformat()),
+                    p.get("ticker", ""),
+                    p.get("event_ticker", ""),
+                    p.get("title", ""),
+                    side,
+                    abs_count,
+                    avg_price_cents,
+                    invested_cents,
+                    realized_cents,
+                    "open",
+                    "synced",
+                ),
+            )
+            inserted += 1
+        except Exception:
+            continue
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "total": len(positions)}
 
 
 def get_kalshi_stats() -> dict:

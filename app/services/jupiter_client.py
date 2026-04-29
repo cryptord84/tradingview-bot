@@ -70,28 +70,35 @@ class JupiterClient:
         data = resp.json()
         return data["swapTransaction"]
 
-    async def execute_swap(
+    def _is_slippage_error(self, error: dict) -> bool:
+        """Check if an RPC error is a Jupiter slippage tolerance exceeded (0x1771 / 6001)."""
+        err_data = error.get("data", {})
+        if isinstance(err_data, dict):
+            instr_err = err_data.get("err", {})
+            if isinstance(instr_err, dict):
+                ie = instr_err.get("InstructionError", [])
+                if len(ie) == 2 and isinstance(ie[1], dict):
+                    custom = ie[1].get("Custom", 0)
+                    return custom == 6001  # SlippageToleranceExceeded
+        return False
+
+    async def _send_swap(
         self,
         keypair: Keypair,
         input_mint: str,
         output_mint: str,
         amount_lamports: int,
-        slippage_bps: Optional[int] = None,
+        slippage_bps: int,
     ) -> dict:
-        """Full swap flow: quote -> transaction -> sign -> send."""
-        # 1. Get quote
+        """Internal: quote → build tx → sign → send. Returns (result_dict, quote)."""
         quote = await self.get_quote(input_mint, output_mint, amount_lamports, slippage_bps)
-
-        # 2. Get swap transaction
         pub_key = str(keypair.pubkey())
         swap_tx_b64 = await self.get_swap_transaction(quote, pub_key)
 
-        # 3. Deserialize and sign
         raw_tx = base64.b64decode(swap_tx_b64)
         tx = VersionedTransaction.from_bytes(raw_tx)
         signed_tx = VersionedTransaction(tx.message, [keypair])
 
-        # 4. Send to RPC
         rpc_url = get("wallet", "rpc_url", "https://api.mainnet-beta.solana.com")
         signed_bytes = bytes(signed_tx)
         tx_b64 = base64.b64encode(signed_bytes).decode()
@@ -108,6 +115,37 @@ class JupiterClient:
         resp = await self._client.post(rpc_url, json=rpc_body)
         resp.raise_for_status()
         result = resp.json()
+        return result, quote
+
+    async def execute_swap(
+        self,
+        keypair: Keypair,
+        input_mint: str,
+        output_mint: str,
+        amount_lamports: int,
+        slippage_bps: Optional[int] = None,
+    ) -> dict:
+        """Full swap flow: quote -> transaction -> sign -> send.
+
+        Retries once with 2x slippage on SlippageToleranceExceeded (0x1771),
+        capped at 300 bps (3%).
+        """
+        initial_slippage = slippage_bps or self.slippage_bps
+        max_slippage = get("jupiter", "max_slippage_bps", 300)
+
+        result, quote = await self._send_swap(
+            keypair, input_mint, output_mint, amount_lamports, initial_slippage,
+        )
+
+        if "error" in result and self._is_slippage_error(result["error"]):
+            retry_slippage = min(initial_slippage * 2, max_slippage)
+            if retry_slippage > initial_slippage:
+                logger.warning(
+                    f"Slippage exceeded at {initial_slippage} bps, retrying with {retry_slippage} bps"
+                )
+                result, quote = await self._send_swap(
+                    keypair, input_mint, output_mint, amount_lamports, retry_slippage,
+                )
 
         if "error" in result:
             logger.error(f"RPC error: {result['error']}")
@@ -142,25 +180,42 @@ class JupiterClient:
 
     # Binance trading pair symbols for tracked tokens
     # Only tokens actually listed on Binance.us (RAY, PYTH not available)
+    # Must stay aligned with app/services/price_feed.py (BINANCE_TOKENS + COINGECKO_ONLY).
     BINANCE_SYMBOLS = {
         "SOL": "SOLUSDT",
         "JTO": "JTOUSDT",
-        "WIF": "WIFUSDT",
         "BONK": "BONKUSDT",
         "ETH": "ETHUSDT",
         "ORCA": "ORCAUSDT",
+        "JUP": "JUPUSDT",
+        "PENGU": "PENGUUSDT",
+        "FARTCOIN": "FARTCOINUSDT",
+        "POPCAT": "POPCATUSDT",
+        "MEW": "MEWUSDT",
+        "PNUT": "PNUTUSDT",
+        "MOODENG": "MOODENGUSDT",
     }
 
-    # CoinGecko IDs as fallback
+    # CoinGecko IDs as fallback (also covers tokens not on Binance.us)
     COINGECKO_IDS = {
         "SOL": "solana",
         "JTO": "jito-governance-token",
-        "WIF": "dogwifcoin",
         "BONK": "bonk",
-        "PYTH": "pyth-network",
-        "RAY": "raydium",
         "ETH": "ethereum-wormhole",
         "ORCA": "orca",
+        "JUP": "jupiter-exchange-solana",
+        "PENGU": "pudgy-penguins",
+        "FARTCOIN": "fartcoin",
+        "POPCAT": "popcat",
+        "MEW": "cat-in-a-dogs-world",
+        "PNUT": "peanut-the-squirrel",
+        "MOODENG": "moo-deng",
+        "PYTH": "pyth-network",
+        "RAY": "raydium",
+        "WIF": "dogwifcoin",
+        "RENDER": "render-token",
+        "W": "wormhole",
+        "DOG": "dog-go-to-the-moon-rune",
     }
 
     async def get_sol_price(self) -> float:

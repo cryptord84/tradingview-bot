@@ -6,6 +6,7 @@ markets on Kalshi. Tracks odds, detects value, and alerts on opportunities.
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -15,11 +16,11 @@ logger = logging.getLogger("bot.kalshi.esports")
 
 # Esports games and their Kalshi search terms
 ESPORTS_GAMES = {
-    "CS2": {"keywords": ["counter-strike", "cs2", "csgo", "cs:go", "counter strike", "blast premier", "esl pro", "iem "], "emoji": "\ud83d\udd2b"},
+    "CS2": {"keywords": ["counter-strike", "cs2", "csgo", "cs:go", "counter strike", "blast premier", "esl pro", "iem "], "emoji": "\U0001F52B"},
     "DotA2": {"keywords": ["dota", "dota 2", "dota2", "the international", "ti1", "esl dota"], "emoji": "\u2694\ufe0f"},
-    "LoL": {"keywords": ["league of legends", "lol ", "lol:", "lck", "lec", "lcs", "worlds 202", "msi 202"], "emoji": "\ud83c\udfae"},
-    "Valorant": {"keywords": ["valorant", "vct", "champions tour"], "emoji": "\ud83c\udfaf"},
-    "Overwatch": {"keywords": ["overwatch", "owl ", "overwatch league"], "emoji": "\ud83c\udf1f"},
+    "LoL": {"keywords": ["league of legends", "lol ", "lol:", "lck", "lec", "lcs", "worlds 202", "msi 202"], "emoji": "\U0001F3AE"},
+    "Valorant": {"keywords": ["valorant", "vct", "champions tour"], "emoji": "\U0001F3AF"},
+    "Overwatch": {"keywords": ["overwatch", "owl ", "overwatch league"], "emoji": "\U0001F31F"},
 }
 
 
@@ -100,6 +101,7 @@ class KalshiEsportsScanner:
         self._markets: dict[str, EsportsMarket] = {}
         self._value_bets: list[EsportsValueBet] = []
         self._game_counts: dict[str, int] = {game: 0 for game in ESPORTS_GAMES}
+        self._owned_tickers: set[str] = set()  # Tickers this scanner opened
         self._running = False
         self._task: Optional[asyncio.Task] = None
         self._scan_count = 0
@@ -128,8 +130,24 @@ class KalshiEsportsScanner:
                 logger.error(f"Esports scan error: {e}")
             await asyncio.sleep(self.scan_interval)
 
-    def _classify_game(self, title: str) -> Optional[str]:
-        """Match a market title to an esports game."""
+    # Series ticker → game mapping for reliable classification
+    SERIES_TO_GAME = {
+        "KXLOLGAME": "LoL",
+        "KXCS2GAME": "CS2", "KXCS2MATCH": "CS2",
+        "KXDOTAGAME": "DotA2",
+        "KXVALGAME": "Valorant", "KXVALMATCH": "Valorant",
+        "KXOWGAME": "Overwatch",
+    }
+
+    def _classify_game(self, title: str, series_ticker: str = "") -> Optional[str]:
+        """Match a market to an esports game via series ticker or title keywords."""
+        # Fast path: series ticker gives definitive game
+        if series_ticker:
+            game = self.SERIES_TO_GAME.get(series_ticker)
+            if game and game in self.games:
+                return game
+
+        # Fallback: keyword matching on title
         title_lower = title.lower()
         for game, info in ESPORTS_GAMES.items():
             if game not in self.games:
@@ -157,7 +175,8 @@ class KalshiEsportsScanner:
 
             for m in all_markets:
                 title = m.get("title", "") + " " + m.get("subtitle", "")
-                game = self._classify_game(title)
+                series_ticker = m.get("_series", m.get("series_ticker", ""))
+                game = self._classify_game(title, series_ticker)
                 if not game:
                     continue
 
@@ -217,9 +236,6 @@ class KalshiEsportsScanner:
                 self._value_bets = new_value_bets + self._value_bets
                 self._value_bets = self._value_bets[:100]
 
-                if self.telegram_alerts:
-                    await self._send_alert(new_value_bets)
-
                 if self.auto_trade:
                     await self._auto_execute(new_value_bets)
 
@@ -237,9 +253,9 @@ class KalshiEsportsScanner:
         from app.services.telegram_service import TelegramService
         tg = TelegramService()
 
-        lines = ["<b>\ud83c\udfae Esports Scanner ({} signals)</b>\n".format(len(value_bets))]
+        lines = ["<b>\U0001F3AE Esports Scanner ({} signals)</b>\n".format(len(value_bets))]
         for vb in value_bets[:5]:
-            emoji = ESPORTS_GAMES.get(vb.market.game, {}).get("emoji", "\ud83c\udfae")
+            emoji = ESPORTS_GAMES.get(vb.market.game, {}).get("emoji", "\U0001F3AE")
             lines.append(
                 f"{emoji} <b>{vb.market.game}</b> \u2014 {vb.market.title[:50]}\n"
                 f"   {vb.reason} | Vol: {vb.market.volume}\n"
@@ -258,14 +274,24 @@ class KalshiEsportsScanner:
         if best.edge_cents < self.value_threshold_cents:
             return
 
+        # Count only positions this scanner opened (not other bots holding esports markets).
+        # Reconcile self._owned_tickers against live positions: drop tickers that closed.
         try:
             positions = await client.get_positions()
-            open_count = len([p for p in positions if p.get("count", 0) > 0])
-            if open_count >= self.max_positions:
-                logger.info(f"Esports auto-trade skipped: {open_count}/{self.max_positions} positions")
+            live_open = {
+                p.get("ticker", "").upper()
+                for p in positions
+                if abs(p.get("count", 0) or 0) > 0
+            }
+            self._owned_tickers = {t for t in self._owned_tickers if t.upper() in live_open}
+            owned_count = len(self._owned_tickers)
+            if owned_count >= self.max_positions:
+                logger.info(
+                    f"Esports auto-trade skipped: {owned_count}/{self.max_positions} scanner-owned positions"
+                )
                 return
-        except Exception:
-            return
+        except Exception as e:
+            logger.warning(f"Esports position reconcile failed (allowing trade): {e}")
 
         side = "yes" if best.market.yes_price < 50 else "no"
         price = best.market.yes_price if side == "yes" else best.market.no_price
@@ -294,6 +320,7 @@ class KalshiEsportsScanner:
             logger.warning(f"Esports risk audit failed (allowing trade): {e}")
 
         try:
+            client_order_id = f"esports-{uuid.uuid4().hex[:8]}"
             await client.place_order(
                 ticker=best.market.ticker,
                 side=side,
@@ -302,8 +329,10 @@ class KalshiEsportsScanner:
                 yes_price=price if side == "yes" else None,
                 no_price=price if side == "no" else None,
                 order_type="limit",
+                client_order_id=client_order_id,
             )
             self._trades_executed += 1
+            self._owned_tickers.add(best.market.ticker)
             logger.info(f"Esports auto-trade: {side.upper()} {count}x @{price}¢ on {best.market.ticker}")
         except Exception as e:
             logger.error(f"Esports auto-trade failed: {e}")
@@ -331,6 +360,7 @@ class KalshiEsportsScanner:
             "auto_trade": self.auto_trade,
             "games": self.games,
             "max_positions": self.max_positions,
+            "owned_tickers": sorted(self._owned_tickers),
         }
 
 

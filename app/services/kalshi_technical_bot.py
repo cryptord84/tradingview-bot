@@ -467,16 +467,18 @@ class KalshiTechnicalBot:
 
     # Finance/economics markets are nearly efficient (0.17pp maker-taker gap)
     # Focus on high-bias categories where technical signals have edge
-    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi",
-                         "inflation", "treasury", "earnings"]
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "federal reserve", "interest rate",
+                         "gdp", "cpi", "inflation", "treasury", "earnings"]
+    LOW_EDGE_PREFIXES = ("KXFED", "KXCPI", "KXGDP", "KXINX", "KXINXD",
+                         "KXNDX", "KXSPY", "KXDJI")
 
     async def _get_target_markets(self, client) -> list[dict]:
         """Get markets to analyze — either configured tickers or auto-selected.
 
-        Research-informed filtering:
-        - Skip finance/economics (near-efficient, no technical edge)
-        - Skip 40-60¢ range (no directional edge near fair value)
-        - Prefer tail prices where behavioral bias creates alpha
+        Empirical filtering (Becker dataset 2026-04-28):
+        - Skip finance/economics (0.17pp gap, near-efficient)
+        - Skip 41-50¢ true dead zone (+0.16pp). Note 51-60¢ is +2.40pp — best band.
+        - Drop the old "tails always best" heuristic: 1-15¢ is weak (+0.06–0.48pp)
         """
         if self.target_tickers:
             markets = []
@@ -497,10 +499,14 @@ class KalshiTechnicalBot:
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
             if vol < 10 or yes_ask < self.min_yes_price or yes_ask > self.max_yes_price:
                 continue
-            # Skip dead zone — near-zero edge at 48-52¢
-            if 48 <= yes_ask <= 52:
+            # Skip true dead zone (Becker 2026-04-28: 41-50¢ avg +0.16pp).
+            # Asymmetric — 51-60¢ is +2.40pp (best band) and stays IN the candidate set.
+            if 41 <= yes_ask <= 50:
                 continue
-            # Skip low-edge finance/economics markets
+            # Skip low-edge finance/economics markets (ticker prefix + title keyword)
+            ticker = m.get("ticker", "")
+            if ticker.startswith(self.LOW_EDGE_PREFIXES):
+                continue
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
             if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
                 continue
@@ -559,8 +565,6 @@ class KalshiTechnicalBot:
 
         if new_signals:
             logger.info(f"Tech bot: {len(new_signals)} signals generated")
-            if self.telegram_alerts:
-                await self._send_alerts(new_signals)
             if self.auto_trade:
                 await self._execute_signals(new_signals, client)
 
@@ -725,6 +729,26 @@ class KalshiTechnicalBot:
                     continue
             except Exception as e:
                 logger.warning(f"DB dedup check failed: {e}")
+
+            # Whale sentiment: boost or penalize based on whale flow direction
+            try:
+                from app.services.kalshi_whale_tracker import get_whale_tracker
+                whale = get_whale_tracker().get_whale_sentiment(sig.ticker)
+                if whale["whale_count"] > 0:
+                    # Whales agree with our signal → confidence boost
+                    if (sig.side == "yes" and whale["signal"] == "bullish") or \
+                       (sig.side == "no" and whale["signal"] == "bearish"):
+                        sig.confidence = min(1.0, sig.confidence + 0.15)
+                        logger.info(f"Whale boost on {sig.ticker}: {whale['signal']} "
+                                    f"({whale['whale_count']} whales, sentiment={whale['net_sentiment']})")
+                    # Whales disagree with our signal → skip trade
+                    elif (sig.side == "yes" and whale["signal"] == "bearish") or \
+                         (sig.side == "no" and whale["signal"] == "bullish"):
+                        logger.info(f"Whale conflict on {sig.ticker}: signal={sig.side} but whales are "
+                                    f"{whale['signal']} ({whale['whale_count']} whales), skipping")
+                        continue
+            except Exception:
+                pass
 
             # Price range filter: skip near-certainty markets (poor risk/reward)
             # For YES orders: only trade if YES is between min_yes_price and max_yes_price

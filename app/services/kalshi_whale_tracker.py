@@ -170,6 +170,57 @@ class KalshiWhaleTracker:
     def get_whales(self, limit: int = 50) -> list[dict]:
         return [w.to_dict() for w in self._whales[:limit]]
 
+    def get_whale_sentiment(self, ticker: str, lookback_minutes: int = 60) -> dict:
+        """
+        Summarize whale activity on a specific ticker.
+        Returns dict with yes_volume, no_volume, net_sentiment, whale_count.
+        Useful for other bots to incorporate whale flow as a signal.
+        """
+        from datetime import timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+
+        yes_volume = 0
+        no_volume = 0
+        whale_count = 0
+
+        for w in self._whales:
+            if w.ticker != ticker:
+                continue
+            try:
+                # Parse whale timestamp
+                wt = datetime.fromisoformat(w.ts.replace("Z", "+00:00"))
+                if wt < cutoff:
+                    continue
+            except (ValueError, AttributeError):
+                continue
+
+            whale_count += 1
+            if w.side == "yes":
+                yes_volume += w.count
+            else:
+                no_volume += w.count
+
+        total = yes_volume + no_volume
+        if total == 0:
+            return {"yes_volume": 0, "no_volume": 0, "net_sentiment": 0.0,
+                    "whale_count": 0, "signal": "neutral"}
+
+        # Net sentiment: +1.0 = all YES, -1.0 = all NO
+        net_sentiment = (yes_volume - no_volume) / total
+        signal = "neutral"
+        if net_sentiment >= 0.3:
+            signal = "bullish"
+        elif net_sentiment <= -0.3:
+            signal = "bearish"
+
+        return {
+            "yes_volume": yes_volume,
+            "no_volume": no_volume,
+            "net_sentiment": round(net_sentiment, 2),
+            "whale_count": whale_count,
+            "signal": signal,
+        }
+
     def get_status(self) -> dict:
         return {
             "enabled": self.enabled,

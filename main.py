@@ -78,12 +78,59 @@ logger = logging.getLogger("bot")
 _tg_handler = None
 
 
+async def _kalshi_positions_sync_loop():
+    """Periodically sync live Kalshi positions into the kalshi_positions table."""
+    from app.services.kalshi_client import get_async_kalshi_client
+    from app.database import sync_kalshi_positions
+
+    client = get_async_kalshi_client()
+    if not (client.enabled and client.api_key_id):
+        logger.info("Kalshi positions sync loop not started (client disabled)")
+        return
+
+    await asyncio.sleep(15)
+    while True:
+        try:
+            positions = await client.get_positions()
+            result = sync_kalshi_positions(positions or [])
+            logger.debug(
+                f"Kalshi positions sync: {result.get('inserted', 0)}/"
+                f"{result.get('total', 0)} rows"
+            )
+        except Exception as e:
+            logger.warning(f"Kalshi positions sync failed: {e}")
+        await asyncio.sleep(120)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     global _tg_handler
     logger.info("Starting TradingView SOL Trading Bot")
     load_config()
+
+    # Confirm close-guard config is live so we can verify fee-only fix on restart
+    from app.config import get as _cfg_get
+    _cg = _cfg_get("close_guards") or {}
+    if _cg:
+        logger.info(
+            f"CLOSE GUARDS ACTIVE — min_hold={_cg.get('min_hold_seconds', 120)}s, "
+            f"min_move={_cg.get('min_move_pct_to_close', 0.005)*100:.2f}%"
+        )
+    else:
+        logger.warning("CLOSE GUARDS DISABLED — close_guards block missing from config.yaml")
+
+    # Confirm correlation filter config is live
+    _cc = _cfg_get("correlation") or {}
+    if _cc.get("enabled"):
+        _summary = ", ".join(
+            f"{g}={gc.get('max_concurrent', '?')}"
+            for g, gc in (_cc.get("groups") or {}).items()
+        )
+        logger.info(f"CORRELATION FILTER ACTIVE — caps: {_summary}")
+    else:
+        logger.info("CORRELATION FILTER off — correlation.enabled=false or missing")
+
     init_db()
     run_daily_backup()
 
@@ -172,6 +219,13 @@ async def lifespan(app: FastAPI):
         ai_bot.start()
         logger.info("Kalshi AI agent bot started")
 
+    # Start Kalshi crypto-strikes bot (probabilistic pricing model for KXBTCD)
+    from app.services.kalshi_crypto_strikes_bot import get_crypto_strikes_bot
+    strikes_bot = get_crypto_strikes_bot()
+    if strikes_bot.enabled:
+        strikes_bot.start()
+        logger.info("Kalshi crypto-strikes bot started")
+
     # Start Kalshi risk manager (global circuit breaker)
     from app.services.kalshi_risk_manager import get_risk_manager
     risk_manager = get_risk_manager()
@@ -188,6 +242,9 @@ async def lifespan(app: FastAPI):
     if rebalancer.enabled and rebalancer.auto_rebalance:
         rebalancer.start()
         logger.info("Portfolio rebalancer auto-loop started")
+
+    # Start Kalshi positions sync loop (snapshot live positions into DB every 2 min)
+    kalshi_sync_task = asyncio.create_task(_kalshi_positions_sync_loop())
 
     # Auto-deposit idle USDC into Kamino on startup
     kamino = KaminoClient()
@@ -246,6 +303,8 @@ async def lifespan(app: FastAPI):
         esports_scanner.stop()
     if ai_bot.enabled:
         ai_bot.stop()
+    if strikes_bot.enabled:
+        strikes_bot.stop()
     if risk_manager.enabled:
         await risk_manager.stop()
     if rebalancer.enabled and rebalancer.auto_rebalance:

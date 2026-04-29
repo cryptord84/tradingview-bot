@@ -246,6 +246,11 @@ kalshi:
     fee_per_contract_cents: 2                  # Kalshi settlement fee
     telegram_alerts: true
     target_tickers: []                         # Empty = auto-select best markets
+    # Hour-of-day gating — maker edge is ~50% larger overnight/evening (16-7 ET)
+    # vs US business hours (8-15 ET) per Becker microstructure analysis.
+    max_markets: 3                             # Top-N markets to quote in active windows
+    quiet_hours_et: [8, 9, 10, 11, 12, 13, 14, 15]  # US business hours; set to [] to disable
+    quiet_hours_max_markets: 1                 # Top-N during quiet windows (lower = more selective)
   # Whale Tracker
   whale_tracker:
     enabled: false                             # Monitor large trades across markets

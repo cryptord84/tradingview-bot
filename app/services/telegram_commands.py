@@ -236,11 +236,15 @@ class TelegramCommandHandler:
             f"Active: <b>{'YES' if active else 'NO'}</b>\n"
             f"API Health: <b>{'OK' if api_ok else 'DOWN'}</b>\n"
             f"Uptime: <code>{uptime}</code>\n\n"
-            f"<b>📊 CRYPTO INDICATORS</b>\n"
-            f"  Confluence Pro v3.5.3 — 1H\n"
-            f"  Mean Reversion v1.3.2 — 4H\n"
-            f"  BB Squeeze v1.0/v2.0 — 4H\n"
-            f"  OB+FVG Alert v1.0 — 1H\n\n"
+            f"<b>📊 CRYPTO INDICATORS (TV Alerts)</b>\n"
+            f"  EMA Ribbon v1.0 — 1H/4H\n"
+            f"  Stoch RSI v1.0 — 1H/4H\n"
+            f"  VWAP Deviation v1.0 — 4H\n"
+            f"  FVG v1.0 — 1H/4H\n"
+            f"  Liquidity Sweep v1.0 — 1H/4H\n"
+            f"  Donchian Breakout v1.0 — 1H/4H\n"
+            f"  Mean Reversion v1.3.3 — 1H/4H\n"
+            f"  RSI Divergence v1.1 — 1H\n\n"
             f"<b>🎰 KALSHI PREDICTION MARKETS</b>\n"
             + "\n".join(kalshi_lines) + "\n\n"
             f"<b>📈 TRADING STATS</b>\n"
@@ -262,15 +266,15 @@ class TelegramCommandHandler:
             jupiter = JupiterClient()
             kamino = KaminoClient()
 
-            sol_balance = await wallet.get_balance_sol()
             sol_price = await jupiter.get_sol_price()
-            sol_usd = sol_balance * sol_price
+            token_prices = await jupiter.get_multi_token_prices()
+            balances = await wallet.get_total_usd_balance(sol_price, token_prices)
 
-            usdc_balance = 0.0
-            try:
-                usdc_balance = await wallet.get_usdc_balance()
-            except Exception:
-                pass
+            sol_balance = balances["sol"]
+            sol_usd = sol_balance * sol_price
+            usdc_balance = balances["usdc"]
+            token_holdings = balances.get("token_holdings", {})
+            tokens_usd = balances.get("tokens_usd", 0.0)
 
             kamino_usdc = 0.0
             try:
@@ -280,18 +284,36 @@ class TelegramCommandHandler:
             except Exception:
                 pass
 
-            total_usd = sol_usd + usdc_balance + kamino_usdc
+            total_usd = sol_usd + usdc_balance + tokens_usd + kamino_usdc
             addr = wallet.public_key
 
-            msg = (
-                f"<b>💰 WALLET BALANCES</b>\n\n"
-                f"SOL: <b>{sol_balance:.4f}</b> (${sol_usd:.2f})\n"
-                f"USDC: <b>${usdc_balance:.2f}</b>\n"
-                f"Kamino Vault: <b>${kamino_usdc:.2f}</b>\n\n"
-                f"Total: <b>${total_usd:.2f} USD</b>\n"
-                f"SOL Price: ${sol_price:.2f}\n\n"
-                f"<a href='https://solscan.io/account/{addr}'>View on Solscan ↗</a>"
-            )
+            lines = [
+                "<b>💰 WALLET BALANCES</b>",
+                "",
+                f"SOL: <b>{sol_balance:.4f}</b> (${sol_usd:.2f})",
+                f"USDC: <b>${usdc_balance:.2f}</b>",
+                f"Kamino Vault: <b>${kamino_usdc:.2f}</b>",
+            ]
+
+            # Only list tokens with non-zero holdings, sorted by USD value
+            held = [(s, h) for s, h in token_holdings.items() if (h.get("usd_value") or 0) > 0.01]
+            held.sort(key=lambda x: -x[1]["usd_value"])
+            if held:
+                lines.append("")
+                lines.append(f"<b>Tokens (${tokens_usd:.2f})</b>")
+                for sym, h in held:
+                    amt = h["amount"]
+                    amt_str = f"{amt:,.0f}" if amt >= 1000 else f"{amt:.4f}" if amt >= 1 else f"{amt:.6f}"
+                    lines.append(f"  {sym}: {amt_str} (${h['usd_value']:.2f})")
+
+            lines += [
+                "",
+                f"Total: <b>${total_usd:.2f} USD</b>",
+                f"SOL Price: ${sol_price:.2f}",
+                "",
+                f"<a href='https://solscan.io/account/{addr}'>View on Solscan ↗</a>",
+            ]
+            msg = "\n".join(lines)
 
             await jupiter.close()
             await wallet.close()
@@ -353,15 +375,31 @@ class TelegramCommandHandler:
             "kamino_deposit": "Kamino Deposit",
             "kamino_withdraw": "Kamino Withdraw",
             "swap": "Swap",
+            "jupiter_swap": "Auto-Close",
+            "rebalance": "Rebalance",
         }
 
         lines = ["<b>📒 RECENT TRANSACTIONS</b>\n"]
         for tx in txs:
             ts = tx.get("timestamp", "")[:16]
-            tx_type = type_labels.get(tx["tx_type"], tx["tx_type"])
+            raw_type = tx["tx_type"]
+            tx_type = type_labels.get(raw_type, raw_type)
             direction = "→ IN" if tx["direction"] == "in" else "← OUT"
             token = tx["token"]
-            amount = f"{tx['amount']:.4f}" if token == "SOL" else f"${tx['amount']:.2f}"
+            # amount semantics: kamino/rebalance/swap+USDC = USD value;
+            # jupiter_swap + swap+SOL = native SOL amount
+            is_sol_amount = raw_type == "jupiter_swap" or (raw_type == "swap" and token == "SOL")
+            amt = tx["amount"]
+            if is_sol_amount:
+                amt_display = f"{amt:.4f} SOL"
+            elif token == "USDC" or raw_type in ("kamino_deposit", "kamino_withdraw", "rebalance"):
+                amt_display = f"${amt:,.2f} {token}"
+            elif amt >= 1:
+                amt_display = f"{amt:,.4f} {token}"
+            elif amt >= 0.01:
+                amt_display = f"{amt:.5f} {token}"
+            else:
+                amt_display = f"{amt:.8f}".rstrip("0").rstrip(".") + f" {token}"
             fee = tx.get("fee_sol", 0)
             status = "✅" if tx["status"] == "success" else "❌"
             sig = tx.get("tx_signature", "")
@@ -369,7 +407,7 @@ class TelegramCommandHandler:
 
             lines.append(
                 f"{status} <b>{tx_type}</b> {direction}\n"
-                f"    {amount} {token} | Fee: {fee:.6f} SOL\n"
+                f"    {amt_display} | Fee: {fee:.6f} SOL\n"
                 f"    {ts} | {sig_link}"
             )
 
@@ -463,16 +501,36 @@ class TelegramCommandHandler:
             ts = t.get("timestamp", "")[:16]
             sig = t.get("signal_type", "?")
             action = t.get("action", "?")
-            amount = t.get("amount_sol", 0)
-            price = t.get("price_usd", 0)
+            symbol = (t.get("symbol") or "").replace("USDT", "") or "?"
+            amount_sol = t.get("amount_sol", 0) or 0
+            amount_usd = t.get("amount_usd", 0) or 0
+            price = t.get("price_usd", 0) or 0
             pnl = t.get("pnl_usd")
             conf = t.get("confidence_score", 0)
 
             icon = {"BUY": "🟢", "SELL": "🔴", "CLOSE": "🟡"}.get(sig, "⚪")
-            pnl_str = f"  P&L: ${pnl:.2f}" if pnl is not None else ""
+            pnl_str = f"  P&L: ${pnl:+.2f}" if pnl is not None else ""
+
+            # Adaptive price precision — sub-cent tokens like BONK/MEW
+            if price >= 1:
+                price_str = f"${price:,.2f}"
+            elif price >= 0.01:
+                price_str = f"${price:.4f}"
+            elif price > 0:
+                price_str = f"${price:.8f}".rstrip("0").rstrip(".")
+            else:
+                price_str = "$--"
+
+            # Size: prefer USD; fall back to SOL for legacy rows
+            if amount_usd:
+                size_str = f"${amount_usd:.2f}"
+            elif amount_sol:
+                size_str = f"{amount_sol:.4f} SOL"
+            else:
+                size_str = action  # REJECT etc have amount=0
 
             lines.append(
-                f"{icon} <b>{sig}</b> {action} | {amount:.4f} SOL @ ${price:.2f}\n"
+                f"{icon} <b>{sig}</b> {symbol} {action} | {size_str} @ {price_str}\n"
                 f"    {ts} | Conf: {conf}%{pnl_str}"
             )
 
@@ -496,10 +554,19 @@ class TelegramCommandHandler:
             for t in trades[:10]:
                 sig = t.get("signal_type", "?")
                 action = t.get("action", "?")
-                amount = t.get("amount_sol", 0)
-                price = t.get("price_usd", 0)
+                symbol = (t.get("symbol") or "").replace("USDT", "") or "?"
+                amount_usd = t.get("amount_usd", 0) or 0
+                amount_sol = t.get("amount_sol", 0) or 0
+                price = t.get("price_usd", 0) or 0
                 icon = {"BUY": "🟢", "SELL": "🔴", "CLOSE": "🟡"}.get(sig, "⚪")
-                lines.append(f"  {icon} {sig} {action} | {amount:.4f} SOL @ ${price:.2f}")
+                if price >= 1:
+                    price_str = f"${price:,.2f}"
+                elif price > 0:
+                    price_str = f"${price:.6f}".rstrip("0").rstrip(".")
+                else:
+                    price_str = "$--"
+                size = f"${amount_usd:.2f}" if amount_usd else (f"{amount_sol:.4f} SOL" if amount_sol else action)
+                lines.append(f"  {icon} {sig} {symbol} {action} | {size} @ {price_str}")
 
         await self.send("\n".join(lines))
 
@@ -511,18 +578,51 @@ class TelegramCommandHandler:
         total_pnl = stats.get("total_pnl_usd", 0)
         today_pnl = stats.get("today_pnl_usd", 0)
 
-        pnl_icon = "📈" if total_pnl >= 0 else "📉"
+        # Fetch Kalshi P&L alongside crypto
+        kalshi_total_usd = 0.0
+        kalshi_bots = {}
+        try:
+            async with httpx.AsyncClient(timeout=5) as c:
+                resp = await c.get(f"{self._api_base_url}/api/kalshi/unified-pnl")
+                if resp.status_code == 200:
+                    kdata = resp.json()
+                    kalshi_total_usd = kdata.get("total_pnl_usd", 0.0)
+                    kalshi_bots = kdata.get("bots", {})
+        except Exception:
+            pass
 
-        msg = (
-            f"<b>{pnl_icon} P&L SUMMARY</b>\n\n"
-            f"Total P&L: <b>${total_pnl:+.2f}</b>\n"
-            f"Today P&L: <b>${today_pnl:+.2f}</b>\n"
-            f"Total Trades: {total_trades}\n"
-            f"Win Rate: {win_rate:.1f}%\n\n"
-            f"Monthly Costs: $133.95\n"
-            f"Break-even: ~$134/mo profit needed"
-        )
-        await self.send(msg)
+        combined = total_pnl + kalshi_total_usd
+        pnl_icon = "📈" if combined >= 0 else "📉"
+
+        lines = [
+            f"<b>{pnl_icon} P&L SUMMARY</b>",
+            "",
+            f"<b>Crypto</b>",
+            f"  Total: <b>${total_pnl:+.2f}</b>",
+            f"  Today: <b>${today_pnl:+.2f}</b>",
+            f"  Trades: {total_trades} · Win Rate: {win_rate:.1f}%",
+            "",
+            f"<b>Kalshi</b>",
+            f"  Total: <b>${kalshi_total_usd:+.2f}</b>",
+        ]
+        bot_labels = {
+            "market_maker": "MM", "spread_bot": "Spread",
+            "technical": "Tech", "ai_agent": "AI",
+        }
+        for key, label in bot_labels.items():
+            info = kalshi_bots.get(key) or {}
+            bot_pnl = info.get("pnl_usd", 0.0)
+            if bot_pnl or info.get("running"):
+                icon = "🟢" if info.get("running") else "⚫"
+                lines.append(f"  {icon} {label}: ${bot_pnl:+.2f}")
+        lines += [
+            "",
+            f"<b>Combined: ${combined:+.2f}</b>",
+            "",
+            f"Monthly Costs: $133.95",
+            f"Break-even: ~$134/mo profit needed",
+        ]
+        await self.send("\n".join(lines))
 
     async def cmd_kalshi(self):
         """Kalshi portfolio summary — positions, P&L, per-bot breakdown."""
@@ -571,11 +671,15 @@ class TelegramCommandHandler:
                     lines.append(f"\n  <b>Total P&L: ${total/100:+.2f}</b>")
 
                     db = data.get("db_stats", {})
-                    if db:
+                    if db and db.get("total_positions"):
                         lines.append(f"\n<b>DB Stats</b>")
                         lines.append(f"  Trades: {db.get('total_positions', 0)}")
-                        lines.append(f"  Open: {db.get('open_positions', 0)}")
-                        lines.append(f"  Win Rate: {db.get('win_rate', 0):.0f}%")
+                        open_pos = db.get("open_positions") or 0
+                        lines.append(f"  Open: {open_pos}")
+                        won = db.get("winning") or 0
+                        lost = db.get("losing") or 0
+                        if won + lost > 0:
+                            lines.append(f"  Win Rate: {won / (won + lost) * 100:.0f}% ({won}W/{lost}L)")
                 else:
                     lines.append("  ⚠️ API returned error")
         except Exception as e:
@@ -587,15 +691,24 @@ class TelegramCommandHandler:
                 resp = await c.get(f"{self._api_base_url}/api/kalshi/positions")
                 if resp.status_code == 200:
                     data = resp.json()
-                    positions = data.get("live_positions") or data.get("db_positions", [])
+                    raw = data.get("live_positions") or data.get("db_positions", [])
+                    # Filter out closed positions (count=0) — Kalshi returns closed tickers in live_positions
+                    positions = [p for p in raw if abs(p.get("count") or p.get("position") or 0) > 0]
                     if positions:
                         lines.append(f"\n<b>Open Positions ({len(positions)})</b>")
                         for p in positions[:10]:
                             ticker = p.get("ticker", "?")
-                            side = p.get("side", "?").upper()
-                            count = abs(p.get("count") or p.get("position", 0))
-                            pnl = p.get("pnl_cents") or p.get("unrealized_pnl_cents", 0)
-                            lines.append(f"  {ticker}: {count} {side} (${pnl/100:+.2f})")
+                            pos = p.get("position") or 0
+                            count = abs(p.get("count") or pos)
+                            side = "YES" if pos > 0 else ("NO" if pos < 0 else p.get("side", "?").upper())
+                            # live_positions uses realized_pnl_dollars; db uses pnl_cents
+                            pnl_dollars = p.get("realized_pnl_dollars")
+                            if pnl_dollars is not None:
+                                pnl_str = f"${float(pnl_dollars):+.2f}"
+                            else:
+                                pnl_c = p.get("pnl_cents") or p.get("unrealized_pnl_cents", 0)
+                                pnl_str = f"${pnl_c/100:+.2f}"
+                            lines.append(f"  {ticker}: {count} {side} ({pnl_str})")
         except Exception:
             pass
 
@@ -622,22 +735,36 @@ class TelegramCommandHandler:
         """Live multi-token price snapshot."""
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                resp = await c.get(f"{self._api_base_url}/api/price")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    prices = data.get("prices", {})
-                    lines = ["<b>💰 LIVE PRICES</b>\n"]
-                    for token, info in prices.items():
-                        if isinstance(info, dict):
-                            price = info.get("price", info.get("usd", 0))
-                            change = info.get("change_24h", 0)
-                            arrow = "▲" if change >= 0 else "▼"
-                            lines.append(f"  {token.upper()}: ${price:.4f} {arrow} {change:+.1f}%")
-                        else:
-                            lines.append(f"  {token.upper()}: ${info:.4f}")
-                    await self.send("\n".join(lines))
-                else:
+                # /api/price is SOL-only; /api/prices returns all tracked tokens
+                resp = await c.get(f"{self._api_base_url}/api/prices")
+                if resp.status_code != 200:
                     await self.send("⚠️ Price API error")
+                    return
+                prices = resp.json().get("prices", {})
+                if not prices:
+                    await self.send("⚠️ No prices available")
+                    return
+                lines = ["<b>💰 LIVE PRICES</b>\n"]
+                # Sort by symbol for predictable output
+                for token in sorted(prices.keys()):
+                    info = prices[token]
+                    if isinstance(info, dict):
+                        price = info.get("price", info.get("usd", 0)) or 0
+                        change = info.get("change_24h", 0) or 0
+                    else:
+                        price, change = float(info or 0), 0
+                    # Adaptive precision — sub-cent tokens like BONK need more digits
+                    if price >= 1:
+                        price_str = f"${price:,.4f}"
+                    elif price >= 0.01:
+                        price_str = f"${price:.5f}"
+                    elif price > 0:
+                        price_str = f"${price:.8f}".rstrip("0").rstrip(".")
+                    else:
+                        price_str = "$--"
+                    arrow = "▲" if change >= 0 else "▼"
+                    lines.append(f"  <b>{token}</b>: {price_str} {arrow} {change:+.2f}%")
+                await self.send("\n".join(lines))
         except Exception as e:
             await self.send(f"⚠️ {str(e)[:50]}")
 
@@ -918,25 +1045,43 @@ class TelegramCommandHandler:
         from app.services.jupiter_client import JupiterClient
         jupiter = JupiterClient()
         try:
-            price = await jupiter.get_sol_price()
+            token_prices = await jupiter.get_multi_token_prices()
         finally:
             await jupiter.close()
 
-        lines = [f"<b>📊 OPEN POSITIONS</b> (SOL=${price:.2f})\n"]
+        def _fmt_price(v):
+            if v >= 1: return f"${v:,.2f}"
+            if v >= 0.01: return f"${v:.4f}"
+            if v > 0: return f"${v:.8f}".rstrip("0").rstrip(".")
+            return "$--"
+
+        lines = ["<b>📊 OPEN POSITIONS</b>\n"]
         for p in positions:
-            pnl = (price - p["entry_price"]) * p["amount_sol"]
-            pnl_pct = ((price - p["entry_price"]) / p["entry_price"]) * 100
+            symbol = (p.get("symbol") or "").replace("USDT", "")
+            info = token_prices.get(symbol) or {}
+            cur = info.get("price") or 0
+            entry = p.get("entry_price") or 0
+            size = p.get("amount_sol") or 0  # legacy field name; holds base-token amount
+            if cur and entry:
+                pnl = (cur - entry) * size
+                pnl_pct = ((cur - entry) / entry) * 100
+            else:
+                pnl, pnl_pct = 0.0, 0.0
             icon = "📈" if pnl >= 0 else "📉"
 
-            tp_dist = ((p["tp_price"] - price) / price) * 100
-            sl_dist = ((price - p["sl_price"]) / price) * 100
+            tp, sl = p.get("tp_price") or 0, p.get("sl_price") or 0
+            if cur:
+                tp_dist = ((tp - cur) / cur) * 100 if tp else 0
+                sl_dist = ((cur - sl) / cur) * 100 if sl else 0
+            else:
+                tp_dist = sl_dist = 0
 
             lines.append(
-                f"{icon} <b>{p['symbol']}</b> LONG\n"
-                f"  Entry: ${p['entry_price']:.2f} | Size: {p['amount_sol']:.4f} SOL\n"
-                f"  TP: ${p['tp_price']:.2f} ({tp_dist:+.1f}%) | SL: ${p['sl_price']:.2f} (-{sl_dist:.1f}%)\n"
+                f"{icon} <b>{symbol}</b> LONG (now {_fmt_price(cur)})\n"
+                f"  Entry: {_fmt_price(entry)} | Size: {size:.4f} {symbol}\n"
+                f"  TP: {_fmt_price(tp)} ({tp_dist:+.1f}%) | SL: {_fmt_price(sl)} (-{sl_dist:.1f}%)\n"
                 f"  P&L: <b>${pnl:+.2f}</b> ({pnl_pct:+.1f}%)\n"
-                f"  Opened: {p['created_at'][:16]}"
+                f"  Opened: {p.get('created_at','')[:16]}"
             )
 
         await self.send("\n".join(lines))

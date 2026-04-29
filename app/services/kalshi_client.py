@@ -104,6 +104,11 @@ class KalshiTradingClient:
         self._order_success_count = 0
         self._order_failure_count = 0
 
+        # Per-series market cache — 7 bots call discover_active_markets, each hitting 22 series.
+        # Shared cache cuts ~75% of API calls (main source of 429s).
+        self._series_cache: dict[tuple, tuple[float, list]] = {}
+        self._series_cache_ttl = cfg.get("discovery_cache_ttl_seconds", 25)
+
     def _ensure_client(self):
         """Lazily initialize the API client with RSA auth."""
         if self._client is not None:
@@ -184,13 +189,31 @@ class KalshiTradingClient:
         markets = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return markets.get("markets", [])
 
+    @staticmethod
+    def _normalize_market(raw: dict) -> dict:
+        """Normalize API v2 market data — dollar strings to cent ints."""
+        m = dict(raw)
+        for field in ("yes_bid", "yes_ask", "no_bid", "no_ask", "last_price"):
+            dollar_key = f"{field}_dollars"
+            if dollar_key in m and m[dollar_key] is not None:
+                m[field] = int(round(float(m[dollar_key]) * 100))
+            elif m.get(field) is None:
+                m[field] = 0
+        return m
+
     def get_market(self, ticker: str) -> dict:
-        """Get details for a specific market."""
+        """Get details for a specific market.
+
+        Uses direct REST (_api_get) instead of the SDK's get_market_with_http_info,
+        which validates through a Pydantic Market model whose `status` enum rejects
+        values Kalshi actually returns (e.g. 'inactive' on MLB totals between
+        game-end and settlement — observed 2026-04-24). Same workaround applied to
+        get_positions and get_market_full; see project_kalshi_positions_bug memory.
+        """
         self._ensure_client()
-        self._rate_limit()
-        resp = self._markets.get_market(ticker=ticker)
-        data = resp.to_dict() if hasattr(resp, "to_dict") else resp
-        return data.get("market", data)
+        data = self._api_get(f"/markets/{ticker}")
+        raw_market = data.get("market", data)
+        return self._normalize_market(raw_market)
 
     def get_orderbook(self, ticker: str) -> dict:
         """Get order book for a market."""
@@ -208,34 +231,45 @@ class KalshiTradingClient:
         data = resp.to_dict() if hasattr(resp, "to_dict") else resp
         return data.get("trades", [])
 
-    def _api_get(self, path: str) -> dict:
-        """Direct authenticated GET to the Kalshi API (bypasses SDK)."""
-        self._rate_limit()
+    def _api_get(self, path: str, max_retries: int = 3) -> dict:
+        """Direct authenticated GET to the Kalshi API (bypasses SDK).
+
+        On HTTP 429, retries with exponential backoff honoring Retry-After.
+        """
         host = KALSHI_HOSTS.get(self.mode, KALSHI_HOSTS["demo"]).replace("/trade-api/v2", "")
         full_path = "/trade-api/v2" + path
 
         with open(self.private_key_path, "rb") as f:
             private_key = serialization.load_pem_private_key(f.read(), password=None)
 
-        ts = str(int(time.time() * 1000))
-        msg = (ts + "GET" + full_path).encode()
-        sig = private_key.sign(
-            msg,
-            padding.PSS(
-                mgf=padding.MGF1(hashes.SHA256()),
-                salt_length=padding.PSS.MAX_LENGTH,
-            ),
-            hashes.SHA256(),
-        )
-
-        headers = {
-            "KALSHI-ACCESS-KEY": self.api_key_id,
-            "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
-            "KALSHI-ACCESS-TIMESTAMP": ts,
-        }
-        resp = requests.get(host + full_path, headers=headers, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        for attempt in range(max_retries + 1):
+            self._rate_limit()
+            ts = str(int(time.time() * 1000))
+            msg = (ts + "GET" + full_path).encode()
+            sig = private_key.sign(
+                msg,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH,
+                ),
+                hashes.SHA256(),
+            )
+            headers = {
+                "KALSHI-ACCESS-KEY": self.api_key_id,
+                "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
+                "KALSHI-ACCESS-TIMESTAMP": ts,
+            }
+            resp = requests.get(host + full_path, headers=headers, timeout=10)
+            if resp.status_code == 429 and attempt < max_retries:
+                retry_after = resp.headers.get("Retry-After")
+                try:
+                    wait = float(retry_after) if retry_after else 2 ** attempt
+                except ValueError:
+                    wait = 2 ** attempt
+                time.sleep(min(wait, 10.0))
+                continue
+            resp.raise_for_status()
+            return resp.json()
 
     def get_recent_trades(self, limit: int = 100, ticker: Optional[str] = None) -> list:
         """Get recent trades with full data (count, price) via direct API.
@@ -267,11 +301,23 @@ class KalshiTradingClient:
         return data.get("markets", [])
 
     # Known active series with real liquidity (updated Apr 2026)
+    # Disabled 2026-04-20: KXFED/KXCPI/KXGDP/KXINX/KXINXD — excessive churn,
+    # wide spreads, net -$12 realized over April. See kalshi_audit.py findings.
+    # Season-winner futures (KXNBA, KXNHL, KXMLB) removed 2026-04-21:
+    # structural long-shots — 30 NBA-futures trades resolved 0W/30L, -$29 realized.
+    # No probabilistic model exists to price these; re-enable only when one does.
+    # Existing holds (e.g. KXNBA-26-BOS) are unaffected — this gates discovery only.
+    SEASON_FUTURES_BLOCKLIST = {"KXNBA", "KXNHL", "KXMLB", "KXNFL", "KXMLS", "KXNCAA"}
+
     ACTIVE_SERIES = [
-        "KXNBA", "KXNHL", "KXMLB",  # Sports — highest volume
-        "KXFED", "KXCPI", "KXGDP",  # Economics
+        "KXNBAGAME", "KXNBATOTAL",   # NBA daily games + totals
+        "KXMLBGAME", "KXMLBTOTAL",   # MLB daily games + totals
+        "KXNHLGAME",                  # NHL daily games
+        "KXUCLGAME",                  # UEFA Champions League
+        "KXUFCFIGHT",                 # UFC fights
+        "KXATPMATCH", "KXWTAMATCH",  # Tennis (ATP/WTA)
+        "KXLOLGAME",                  # LoL esports
         "KXBTC", "KXBTCD", "KXETH", "KXETHD",  # Crypto daily
-        "KXINX", "KXINXD",  # S&P 500
     ]
 
     def discover_active_markets(self, min_volume: int = 10,
@@ -295,12 +341,22 @@ class KalshiTradingClient:
             cutoff = datetime.now(timezone.utc) + timedelta(days=max_days_to_close)
 
         all_markets = []
+        now = time.monotonic()
         for series in self.ACTIVE_SERIES:
+            if series in self.SEASON_FUTURES_BLOCKLIST:
+                logger.warning(f"Skipping blocklisted series {series} (season-winner futures)")
+                continue
             try:
-                markets = self.get_markets_full(
-                    status="open", limit=limit_per_series,
-                    series_ticker=series,
-                )
+                cache_key = (series, limit_per_series)
+                cached = self._series_cache.get(cache_key)
+                if cached and (now - cached[0]) < self._series_cache_ttl:
+                    markets = cached[1]
+                else:
+                    markets = self.get_markets_full(
+                        status="open", limit=limit_per_series,
+                        series_ticker=series,
+                    )
+                    self._series_cache[cache_key] = (now, markets)
                 for m in markets:
                     vol = float(m.get("volume_fp", "0") or "0")
                     if vol < min_volume:
@@ -499,7 +555,7 @@ class KalshiTradingClient:
             try:
                 positions = self.get_positions()
                 total_exposure = sum(
-                    abs(p.get("total_cost", 0) or 0) for p in positions
+                    abs(p.get("market_exposure", 0) or 0) for p in positions
                 )
                 if (total_exposure + order_cost) > self.max_total_exposure:
                     raise ValueError(
@@ -583,16 +639,48 @@ class KalshiTradingClient:
     # POSITIONS
     # =========================================================================
 
+    @staticmethod
+    def _normalize_position(raw: dict) -> dict:
+        """Normalize raw API v2 position into backwards-compatible format.
+
+        API v2 returns dollar strings (market_exposure_dollars, position_fp)
+        while older code expects cents ints (market_exposure, position, count).
+        """
+        pos_fp = raw.get("position_fp", raw.get("position", 0))
+        position = int(float(pos_fp)) if isinstance(pos_fp, str) else int(pos_fp)
+
+        exposure_dollars = raw.get("market_exposure_dollars", "0")
+        exposure_cents = int(round(float(exposure_dollars) * 100)) if isinstance(
+            exposure_dollars, str) else exposure_dollars
+
+        total_cost_dollars = raw.get("total_traded_dollars", "0")
+        total_cost_cents = int(round(float(total_cost_dollars) * 100)) if isinstance(
+            total_cost_dollars, str) else total_cost_dollars
+
+        normalized = dict(raw)
+        normalized["position"] = position
+        normalized["count"] = abs(position)
+        normalized["market_exposure"] = exposure_cents
+        normalized["total_cost"] = total_cost_cents
+        return normalized
+
     def get_positions(self, ticker: Optional[str] = None) -> list:
-        """Get current positions, optionally filtered by ticker."""
+        """Get current positions, optionally filtered by ticker.
+
+        Note: kalshi_python SDK v2.1.0 has a model mismatch — GetPositionsResponse
+        only declares 'positions' and 'cursor', but the API returns 'market_positions'
+        and 'event_positions'. We parse the raw response and normalize field names.
+        """
         self._ensure_client()
         self._rate_limit()
-        kwargs = {}
+        kwargs = {"limit": 200}
         if ticker:
             kwargs["ticker"] = ticker
-        resp = self._portfolio.get_positions(**kwargs)
-        data = resp.to_dict() if hasattr(resp, "to_dict") else resp
-        return data.get("market_positions", [])
+        resp = self._portfolio.get_positions_with_http_info(**kwargs)
+        import json as _json
+        data = _json.loads(resp.raw_data)
+        raw_positions = data.get("market_positions", [])
+        return [self._normalize_position(p) for p in raw_positions]
 
     def get_open_orders(self) -> list:
         """Get all open/resting orders."""
@@ -603,12 +691,41 @@ class KalshiTradingClient:
         return data.get("orders", [])
 
     def get_fills(self, limit: int = 50) -> list:
-        """Get recent fills (executed trades)."""
+        """Get recent fills (executed trades).
+
+        Returns normalized dicts preserving raw SDK fields plus:
+        - ``count``  (int)              — from ``count_fp`` (string) if present
+        - ``price_cents`` (int)         — side-aware (yes_price_dollars or no_price_dollars)
+        - ``total_cost`` (int, cents)   — count × price_cents
+        - ``fee_cents`` (int)           — from ``fee_cost`` (dollars string)
+        - ``timestamp`` (str)           — from ``created_time``
+        """
         self._ensure_client()
         self._rate_limit()
-        resp = self._portfolio.get_fills(limit=limit)
-        data = resp.to_dict() if hasattr(resp, "to_dict") else resp
-        return data.get("fills", [])
+        import json as _json
+        resp = self._portfolio.get_fills_with_http_info(limit=limit)
+        data = _json.loads(resp.raw_data)
+        fills = data.get("fills", [])
+
+        for f in fills:
+            try:
+                count = int(float(f.get("count_fp", f.get("count", 0)) or 0))
+                side = f.get("side", "yes")
+                if side == "no":
+                    price_cents = int(round(float(f.get("no_price_dollars", 0) or 0) * 100))
+                else:
+                    price_cents = int(round(float(f.get("yes_price_dollars", 0) or 0) * 100))
+                fee_cents = int(round(float(f.get("fee_cost", 0) or 0) * 100))
+                f.setdefault("count", count)
+                f.setdefault("price_cents", price_cents)
+                f.setdefault("total_cost", count * price_cents)
+                f.setdefault("fee_cents", fee_cents)
+                f.setdefault("ticker", f.get("market_ticker", f.get("ticker", "")))
+                f.setdefault("timestamp", f.get("created_time", ""))
+            except Exception as e:
+                logger.debug(f"Fill normalize skipped for {f.get('fill_id')}: {e}")
+
+        return fills
 
     def get_settlements(self, limit: int = 50) -> list:
         """Get settled positions and payouts."""
@@ -642,14 +759,32 @@ class KalshiTradingClient:
 
             try:
                 market = self.get_market(ticker)
-                yes_price = market.get("yes_ask", 0) or market.get("last_price", 50)
-                no_price = 100 - yes_price
+                yes_bid = market.get("yes_bid", 0) or 0
+                yes_ask = market.get("yes_ask", 0) or 0
+                last_price = market.get("last_price", 0) or 0
+                status = (market.get("status") or "").lower()
+                result = (market.get("result") or "").lower()
 
                 side = "yes" if count > 0 else "no"
                 abs_count = abs(count)
-                avg_cost = pos.get("market_exposure", 0) / abs_count if abs_count > 0 else 0
-                current_value = (yes_price if side == "yes" else no_price) * abs_count
                 invested = abs(pos.get("market_exposure", 0))
+                avg_cost = invested / abs_count if abs_count > 0 else 0
+
+                # Mark-to-liquidation:
+                # - Settled markets: use result (yes=100, no=0)
+                # - Long YES: yes_bid (what you'd realize selling), fallback to last
+                # - Long NO:  no_bid = 100 - yes_ask, fallback to 100 - last
+                if result == "yes":
+                    mark_price = 100 if side == "yes" else 0
+                elif result == "no":
+                    mark_price = 0 if side == "yes" else 100
+                elif side == "yes":
+                    mark_price = yes_bid if yes_bid > 0 else last_price
+                else:
+                    no_bid = 100 - yes_ask if yes_ask > 0 else 0
+                    mark_price = no_bid if no_bid > 0 else (100 - last_price if last_price > 0 else 0)
+
+                current_value = mark_price * abs_count
                 unrealized_pnl = current_value - invested
 
                 position_details.append({
@@ -658,12 +793,13 @@ class KalshiTradingClient:
                     "side": side,
                     "count": abs_count,
                     "avg_cost_cents": round(avg_cost),
-                    "current_price_cents": yes_price if side == "yes" else no_price,
+                    "current_price_cents": mark_price,
                     "invested_cents": invested,
                     "market_value_cents": current_value,
                     "unrealized_pnl_cents": unrealized_pnl,
                     "close_date": market.get("close_time", ""),
                     "status": market.get("status", ""),
+                    "result": market.get("result", ""),
                 })
 
                 total_invested += invested

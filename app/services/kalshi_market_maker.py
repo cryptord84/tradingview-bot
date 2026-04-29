@@ -178,6 +178,36 @@ STRATEGIES = {
 }
 
 
+# Empirical maker-edge curve from Becker dataset (mispricing_by_price.csv,
+# 2026-04-28 analysis). Maps each 10¢ band to its avg maker mispricing in pp.
+# Higher = more edge. Used by _select_markets to score candidates beyond
+# the legacy "linear distance from 50¢" rule, which the data doesn't support.
+_EDGE_BANDS_PP = {
+    (1, 5):   0.48,
+    (6, 10):  0.12,
+    (11, 15): 0.06,
+    (16, 20): 0.53,
+    (21, 25): -0.29,  # avoid: negative maker edge
+    (26, 30): 1.02,
+    (31, 40): 2.14,
+    (41, 50): 0.16,   # dead zone (already filtered upstream)
+    (51, 60): 2.40,   # peak
+    (61, 70): 0.44,
+    (71, 80): 1.39,
+    (81, 90): 1.93,
+    (91, 99): 1.61,
+}
+_EDGE_MAX_PP = max(_EDGE_BANDS_PP.values())
+
+
+def _empirical_edge_score(mid: float) -> float:
+    """Empirical maker-edge score (0.0–1.0) based on Becker mispricing curve."""
+    for (lo, hi), pp in _EDGE_BANDS_PP.items():
+        if lo <= mid <= hi:
+            return max(0.0, pp / _EDGE_MAX_PP)
+    return 0.0
+
+
 # =========================================================================
 # MARKET MAKER
 # =========================================================================
@@ -366,23 +396,54 @@ class KalshiMarketMaker:
     # =========================================================================
 
     # Categories with low maker edge (research: jbecker.dev/prediction-market-microstructure)
-    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi", "inflation",
-                         "treasury", "earnings"]
-    # Categories with high maker edge (behavioral bias drives taker losses)
-    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
-                          "award", "oscar", "grammy", "super bowl", "world series",
-                          "playoff", "championship", "election", "trump", "biden",
-                          "war", "conflict", "weather", "hurricane"]
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "federal reserve", "interest rate",
+                         "gdp", "cpi", "inflation", "treasury", "earnings"]
+    LOW_EDGE_PREFIXES = ("KXFED", "KXCPI", "KXGDP", "KXINX", "KXINXD",
+                         "KXNDX", "KXSPY", "KXDJI")
+    # Maker-edge keywords ranked by Becker 2026-04-28 per-category gap.
+    # Top tier (4-7pp): world events, media, entertainment, science/tech
+    # Mid tier (2-3pp): crypto, weather, sports
+    # Politics (1pp) intentionally NOT here — modest edge.
+    HIGH_EDGE_KEYWORDS = ["world", "war", "conflict", "geopolit",
+                          "media", "press", "news",
+                          "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy",
+                          "science", "tech", "ai ", "space",
+                          "weather", "hurricane", "tornado",
+                          "sports", "super bowl", "world series",
+                          "playoff", "championship",
+                          "crypto", "bitcoin", "ethereum"]
+    # Ticker-prefix matching for high-edge series (catches markets whose
+    # titles wouldn't match the keyword list above — e.g., KXNOBELPEACE,
+    # KXEPSTEIN). Aligned with Becker classifier's World Events / Media /
+    # Entertainment / Sci-Tech / Weather groups.
+    HIGH_EDGE_PREFIXES = (
+        # World Events (4-7pp)
+        "KXNOBEL", "KXNEXTPOPE", "KXPOPE", "KXEPSTEIN", "KXOTEEPSTEIN",
+        "KXZELENSKYYPUTINMEET", "KXBOLIVIAPRES", "KXSKPRES",
+        "KXLAGODAYS", "KXARREST",
+        # Media (7pp)
+        "KXMENTION", "KXHEADLINE", "KXGOOGLESEARCH", "KX538APPROVE", "KXAPRPOTUS",
+        # Entertainment (4-5pp)
+        "KXOSCAR", "KXGRAMMY", "KXEMMY", "KXBAFTA", "KXGAMEAWARDS",
+        "KXSPOTIFY", "KXNETFLIX", "KXRT", "KXTOPSONG", "KXTOPALBUM", "KXTOPARTIST",
+        "KXBILLBOARD",
+        # Science/Tech (4pp)
+        "KXLLM", "KXAI", "KXSPACEX", "KXALIENS", "KXAPPLE",
+        # Weather (2.5pp)
+        "KXHIGH", "KXRAIN", "KXSNOW", "KXTORNADO", "KXHURCAT", "KXARCTICICE", "KXWEATHER",
+        # Crypto non-daily strikes (2.7pp; KXBTCD/KXETHD already in own category)
+        "KXBTCMAX", "KXBTCMIN", "KXETHMAX", "KXETHMIN", "KXBTCRESERVE",
+    )
 
     async def _select_markets(self, client) -> list[str]:
         """Score and select the best markets for market-making.
 
-        Research-informed scoring:
-        - Avoid 40-60¢ mid range (near-zero maker edge)
-        - Prefer tail prices (1-20¢, 80-99¢) where longshot bias is strongest
-        - Prefer high-bias categories (sports, entertainment, politics)
-        - Avoid finance/economics (nearly efficient, 0.17pp gap)
-        - Require higher volume minimums (thin markets hurt makers)
+        Empirical scoring (Becker dataset 2026-04-28, mispricing_by_price.csv):
+        - True dead zone is 41-50¢ (+0.16pp), NOT 40-60¢ as previously assumed
+        - Best maker bands: 51-60¢ (+2.40pp), 31-40¢ (+2.14pp), 81-90¢ (+1.93pp)
+        - 1-15¢ tails are WEAK (+0.06 to +0.48pp) — old "longshot bias" rule overstated this
+        - Avoid finance (0.17pp gap, nearly efficient) and 21-25¢ (negative maker edge)
         """
         markets = await client.discover_active_markets(min_volume=10, max_days_to_close=self.max_days_to_close)
         scored = []
@@ -403,28 +464,34 @@ class KalshiMarketMaker:
 
             mid = (yes_bid + yes_ask) / 2
 
-            # Skip the dead zone: 40-60¢ has near-zero maker edge
-            if 40 <= mid <= 60:
+            # True dead zone: 41-50¢ has near-zero maker edge (+0.16pp avg).
+            # 51-60¢ is the BEST band (+2.40pp), so don't lump them together.
+            if 41 <= mid <= 50:
                 continue
 
             # Skip extreme illiquid tails
             if mid < 5 or mid > 95:
                 continue
 
-            # Category scoring based on title keywords
+            # Skip low-edge prefix before scoring (hard exclude for finance)
+            ticker = m.get("ticker", "")
+            if ticker.startswith(self.LOW_EDGE_PREFIXES):
+                continue
+            # Category scoring: ticker-prefix match first (catches series whose
+            # titles don't contain the keyword), then title keyword fallback.
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
             category_bonus = 0.0
             is_low_edge = any(kw in title for kw in self.LOW_EDGE_KEYWORDS)
-            is_high_edge = any(kw in title for kw in self.HIGH_EDGE_KEYWORDS)
+            is_high_edge = ticker.startswith(self.HIGH_EDGE_PREFIXES) or \
+                           any(kw in title for kw in self.HIGH_EDGE_KEYWORDS)
             if is_low_edge:
                 category_bonus = -0.3  # Penalize efficient markets
             elif is_high_edge:
                 category_bonus = 0.2   # Reward high-bias categories
 
-            # Tail preference: best edge at 5-20¢ and 80-95¢ (longshot bias)
-            # Worst edge at 40-60¢ (already filtered out above)
-            tail_distance = abs(mid - 50) / 50  # 0.0 at mid=50, 1.0 at extremes
-            tail_score = tail_distance  # Higher = further from 50 = more edge
+            # Empirical maker-edge score by price band (Becker mispricing curve).
+            # Range 0.0 (no edge) → 1.0 (best band).
+            tail_score = _empirical_edge_score(mid)
 
             spread_score = min(spread, 15) / 15
             volume_score = min(volume, 5000) / 5000
@@ -874,7 +941,7 @@ class KalshiMarketMaker:
         try:
             from app.services.telegram_service import TelegramService
             tg = TelegramService()
-            await tg.send_message(f"<b>\ud83c\udfed Market Maker</b>\n{message}")
+            await tg.send_message(f"<b>\U0001F3ED Market Maker</b>\n{message}")
         except Exception:
             pass
 

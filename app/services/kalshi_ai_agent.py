@@ -87,10 +87,10 @@ You will receive:
 
 Apply these risk rules:
 1. REJECT if all agents have low confidence (<0.4) even if they agree on direction
-2. REJECT if the proposed entry price is in the 45-55 cent range (true dead zone only)
+2. REJECT if the proposed entry price is in the 41-50 cent range (empirical dead zone, +0.16pp avg edge)
 3. REJECT if market volume is very low (<5) — illiquid, hard to exit
 4. REJECT if agent reasoning is contradictory or based on speculation without data
-5. APPROVE if at least 2 agents agree with confidence >0.5 and price is outside 45-55 range
+5. APPROVE if at least 2 agents agree with confidence >0.5 and price is outside 41-50 range
 
 Be balanced. Allow trades with reasonable consensus. Only REJECT when there are clear risk flags.
 
@@ -362,8 +362,6 @@ class KalshiAIAgentBot:
         # Alert and trade
         actionable = [r for r in results if r["action"] != "HOLD"]
         if actionable:
-            if self.telegram_alerts:
-                await self._send_alerts(actionable)
             if self.auto_trade:
                 await self._execute_trades(actionable, client)
 
@@ -371,21 +369,48 @@ class KalshiAIAgentBot:
 
     # Finance/economics markets are nearly efficient — AI edge is minimal there
     # Focus on politics, sports, entertainment, world events where behavioral bias is high
-    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi",
-                         "inflation", "treasury", "earnings"]
-    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
-                          "award", "oscar", "grammy", "super bowl", "world series",
-                          "playoff", "championship", "election", "trump", "biden",
-                          "war", "conflict", "weather", "hurricane"]
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "federal reserve", "interest rate",
+                         "gdp", "cpi", "inflation", "treasury", "earnings"]
+    LOW_EDGE_PREFIXES = ("KXFED", "KXCPI", "KXGDP", "KXINX", "KXINXD",
+                         "KXNDX", "KXSPY", "KXDJI")
+    # Maker-edge keywords ranked by Becker 2026-04-28 per-category gap.
+    # Top tier (4-7pp): world events, media, entertainment, science/tech
+    # Mid tier (2-3pp): crypto, weather, sports
+    # Politics (1pp) intentionally NOT here — modest edge.
+    HIGH_EDGE_KEYWORDS = ["world", "war", "conflict", "geopolit",
+                          "media", "press", "news",
+                          "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy",
+                          "science", "tech", "ai ", "space",
+                          "weather", "hurricane", "tornado",
+                          "sports", "super bowl", "world series",
+                          "playoff", "championship",
+                          "crypto", "bitcoin", "ethereum"]
+    # Ticker-prefix matching for high-edge series (catches markets whose
+    # titles wouldn't match the keyword list above — e.g., KXNOBELPEACE,
+    # KXEPSTEIN). Aligned with Becker classifier.
+    HIGH_EDGE_PREFIXES = (
+        "KXNOBEL", "KXNEXTPOPE", "KXPOPE", "KXEPSTEIN", "KXOTEEPSTEIN",
+        "KXZELENSKYYPUTINMEET", "KXBOLIVIAPRES", "KXSKPRES",
+        "KXLAGODAYS", "KXARREST",
+        "KXMENTION", "KXHEADLINE", "KXGOOGLESEARCH", "KX538APPROVE", "KXAPRPOTUS",
+        "KXOSCAR", "KXGRAMMY", "KXEMMY", "KXBAFTA", "KXGAMEAWARDS",
+        "KXSPOTIFY", "KXNETFLIX", "KXRT", "KXTOPSONG", "KXTOPALBUM", "KXTOPARTIST",
+        "KXBILLBOARD",
+        "KXLLM", "KXAI", "KXSPACEX", "KXALIENS", "KXAPPLE",
+        "KXHIGH", "KXRAIN", "KXSNOW", "KXTORNADO", "KXHURCAT", "KXARCTICICE", "KXWEATHER",
+        "KXBTCMAX", "KXBTCMIN", "KXETHMAX", "KXETHMIN", "KXBTCRESERVE",
+    )
 
     async def _select_markets(self, client) -> list[dict]:
         """Select markets for AI analysis.
 
-        Research-informed filtering:
-        - Skip finance/economics (0.17pp gap — nearly efficient)
-        - Prefer high-bias categories (sports 2.23pp, entertainment 7.32pp)
-        - Skip 40-60¢ range (no edge near fair value)
-        - Boost scoring for tail prices and high-bias categories
+        Empirical filtering (Becker dataset 2026-04-28):
+        - Skip finance (0.17pp gap, near-efficient)
+        - Prefer high-bias categories: sports 2.23pp, world events 7.32pp,
+          media 7.28pp, entertainment 4.79pp, science/tech 4.28pp
+        - Skip true dead zone 41-50¢ (+0.16pp). 51-60¢ is +2.40pp — kept in.
+        - Drop "always prefer 1-20¢ tails": 1-15¢ is weak (+0.06–0.48pp).
         """
         if self.target_tickers:
             markets = []
@@ -405,16 +430,23 @@ class KalshiAIAgentBot:
             yes_ask = int(round(float(m.get("yes_ask_dollars", "0") or "0") * 100))
             if vol < 10 or yes_ask < 5 or yes_ask > 95:
                 continue
-            # Skip dead zone — near-zero edge at 48-52¢
-            if 48 <= yes_ask <= 52:
+            # Skip true dead zone (Becker: 41-50¢ avg +0.16pp).
+            # Asymmetric — 51-60¢ is +2.40pp (best band) and stays IN.
+            if 41 <= yes_ask <= 50:
                 continue
-            # Skip low-edge finance/economics markets
+            # Skip low-edge finance/economics markets (ticker prefix + title keyword)
+            ticker = m.get("ticker", "")
+            if ticker.startswith(self.LOW_EDGE_PREFIXES):
+                continue
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
             if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
                 continue
-            # Score: volume + category edge bonus
+            # Score: volume + category edge bonus (ticker-prefix match first,
+            # title keyword fallback — catches series like KXNOBELPEACE/KXEPSTEIN
+            # whose titles don't include "world"/"war"/etc.)
             score = vol
-            if any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
+            if ticker.startswith(self.HIGH_EDGE_PREFIXES) or \
+               any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
                 score *= 1.5  # Boost high-bias categories
             m["_volume"] = vol
             m["_yes_ask"] = yes_ask
@@ -483,6 +515,19 @@ class KalshiAIAgentBot:
                 if len(prices) >= 2:
                     change = prices[-1] - prices[0]
                     lines.append(f"24H CHANGE: {change:+}c")
+
+        # Whale flow data — large trades as smart money signal
+        try:
+            from app.services.kalshi_whale_tracker import get_whale_tracker
+            whale = get_whale_tracker().get_whale_sentiment(ticker)
+            if whale["whale_count"] > 0:
+                lines.append(f"\nWHALE FLOW (last 60min):")
+                lines.append(f"  Whale trades: {whale['whale_count']}")
+                lines.append(f"  YES volume: {whale['yes_volume']} contracts")
+                lines.append(f"  NO volume: {whale['no_volume']} contracts")
+                lines.append(f"  Net sentiment: {whale['net_sentiment']:+.2f} ({whale['signal']})")
+        except Exception:
+            pass
 
         return "\n".join(lines)
 

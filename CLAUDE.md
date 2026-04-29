@@ -50,6 +50,7 @@ Dashboard: http://localhost:8000  · API docs: `/docs`  · Webhook: `POST /webho
 7. **Don't `pine_save` during a backtest.** Use the compile-only pipeline (`backtesting/run.py`). Saving mid-backtest can corrupt live alerts bound to that slot.
 
 ## Finding live state
+- **Indicator/alert deployment** → `Indicators/DEPLOYMENT.md` (which scripts, which slots, which alerts on which tokens). Update this file after any rebind / create / delete / version bump — it is the project's source of truth for "what is deployed right now."
 - **Strategy metrics, token lists, alert rollout status** → live in `.claude/memory/` (project memories), not here. Those change frequently; this file does not.
 - **Recent nightly results** → `backtesting/results/nightly_*.txt`
 - **Open positions / recent fills** → dashboard at `/` or `app/trades.db`

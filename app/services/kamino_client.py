@@ -172,7 +172,7 @@ class KaminoClient:
     async def _execute_kamino_tx(
         self, keypair: Keypair, action: str, url: str, body: dict, amount_usdc: float, max_retries: int = 3,
     ) -> dict:
-        """Get transaction from Kamino API, sign, and send with retry logic."""
+        """Get transaction from Kamino API, sign, send, and confirm on-chain."""
         import asyncio
 
         last_error = None
@@ -188,7 +188,28 @@ class KaminoClient:
 
                 # Sign and send immediately (minimize blockhash staleness)
                 tx_sig = await self._sign_and_send(keypair, tx_b64)
-                logger.info(f"Kamino {action} sent: {tx_sig}")
+                logger.info(f"Kamino {action} sent: {tx_sig}, awaiting confirmation...")
+
+                # Confirm on-chain before logging as success — skipPreflight lets bad txs
+                # through, so we must verify. Poll getSignatureStatuses up to 45s.
+                confirmed = await self._confirm_signature(tx_sig, timeout_s=45)
+                if not confirmed["ok"]:
+                    last_error = RuntimeError(confirmed.get("error", "tx not confirmed"))
+                    if attempt < max_retries:
+                        logger.warning(f"Kamino {action} tx {tx_sig} unconfirmed: {last_error}, retrying...")
+                        await asyncio.sleep(attempt)
+                        continue
+                    # Log as failed so DB stays accurate
+                    log_wallet_tx(
+                        tx_type=f"kamino_{action}",
+                        direction=("out" if action == "deposit" else "in"),
+                        amount=amount_usdc,
+                        token="USDC",
+                        tx_signature=tx_sig,
+                        status="failed",
+                        notes=f"unconfirmed: {last_error}",
+                    )
+                    return {"success": False, "error": str(last_error), "tx_signature": tx_sig}
 
                 direction = "out" if action == "deposit" else "in"
                 log_wallet_tx(
@@ -259,6 +280,42 @@ class KaminoClient:
             raise RuntimeError(f"Transaction failed: {result['error']}")
 
         return result.get("result", "")
+
+    async def _confirm_signature(self, tx_sig: str, timeout_s: int = 45) -> dict:
+        """Poll getSignatureStatuses until confirmed/finalized or timeout.
+
+        Returns {"ok": True, "status": "..."} on success,
+        {"ok": False, "error": "..."} on failure/timeout.
+        """
+        import asyncio
+
+        rpc_url = get("wallet", "rpc_url", "https://api.mainnet-beta.solana.com")
+        deadline = time.time() + timeout_s
+        poll = 0
+        while time.time() < deadline:
+            try:
+                resp = await self._client.post(
+                    rpc_url,
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "getSignatureStatuses",
+                        "params": [[tx_sig], {"searchTransactionHistory": True}],
+                    },
+                )
+                resp.raise_for_status()
+                result = resp.json().get("result", {}).get("value", [None])[0]
+                if result:
+                    if result.get("err"):
+                        return {"ok": False, "error": f"on-chain error: {result['err']}"}
+                    conf = result.get("confirmationStatus")
+                    if conf in ("confirmed", "finalized"):
+                        return {"ok": True, "status": conf}
+            except Exception as e:
+                logger.debug(f"confirm poll {poll}: {e}")
+            poll += 1
+            await asyncio.sleep(min(2 + poll * 0.5, 5))
+        return {"ok": False, "error": "timeout"}
 
     async def close(self):
         await self._client.aclose()

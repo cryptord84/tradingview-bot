@@ -6,7 +6,8 @@ Tracks odds movement, identifies value bets, and sends Telegram alerts.
 
 import asyncio
 import logging
-from datetime import datetime
+import re
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from app.config import get
@@ -16,12 +17,12 @@ logger = logging.getLogger("bot.kalshi.sports")
 # Sports categories and their Kalshi event prefixes / search terms
 SPORTS_LEAGUES = {
     "MLB": {"keywords": ["mlb", "baseball", "yankees", "dodgers", "mets", "astros", "braves", "phillies", "cubs", "red sox"], "emoji": "\u26be"},
-    "NBA": {"keywords": ["nba", "basketball", "lakers", "celtics", "nuggets", "warriors", "bucks", "76ers", "knicks", "heat"], "emoji": "\ud83c\udfc0"},
-    "NFL": {"keywords": ["nfl", "football", "super bowl", "chiefs", "eagles", "49ers", "ravens", "cowboys", "bills", "lions"], "emoji": "\ud83c\udfc8"},
-    "NHL": {"keywords": ["nhl", "hockey", "stanley cup", "bruins", "rangers", "oilers", "panthers", "avalanche", "maple leafs"], "emoji": "\ud83c\udfd2"},
+    "NBA": {"keywords": ["nba", "basketball", "lakers", "celtics", "nuggets", "warriors", "bucks", "76ers", "knicks", "heat"], "emoji": "\U0001F3C0"},
+    "NFL": {"keywords": ["nfl", "football", "super bowl", "chiefs", "eagles", "49ers", "ravens", "cowboys", "bills", "lions"], "emoji": "\U0001F3C8"},
+    "NHL": {"keywords": ["nhl", "hockey", "stanley cup", "bruins", "rangers", "oilers", "panthers", "avalanche", "maple leafs"], "emoji": "\U0001F3D2"},
     "Soccer": {"keywords": ["soccer", "mls", "premier league", "world cup", "champions league", "la liga", "epl", "fifa"], "emoji": "\u26bd"},
-    "UFC": {"keywords": ["ufc", "mma", "fight", "boxing", "ppv", "bellator"], "emoji": "\ud83e\udd4a"},
-    "WNBA": {"keywords": ["wnba", "women's basketball", "aces", "liberty", "storm", "lynx", "sparks", "mercury"], "emoji": "\ud83c\udfc0"},
+    "UFC": {"keywords": ["ufc", "mma", "fight", "boxing", "ppv", "bellator"], "emoji": "\U0001F94A"},
+    "WNBA": {"keywords": ["wnba", "women's basketball", "aces", "liberty", "storm", "lynx", "sparks", "mercury"], "emoji": "\U0001F3C0"},
 }
 
 
@@ -107,6 +108,9 @@ class KalshiSportsScanner:
         self._scan_count = 0
         self._last_scan: Optional[str] = None
         self._trades_executed = 0
+        # Tickers this scanner has opened — prevents counting positions from other bots
+        # (e.g., spread bot holding KXMLBTOTAL would otherwise block sports trades)
+        self._owned_tickers: set[str] = set()
 
     def start(self) -> asyncio.Task:
         if self._task and not self._task.done():
@@ -130,8 +134,26 @@ class KalshiSportsScanner:
                 logger.error(f"Sports scan error: {e}")
             await asyncio.sleep(self.scan_interval)
 
-    def _classify_league(self, title: str) -> Optional[str]:
-        """Match a market title to a sports league."""
+    # Series ticker → league mapping for reliable classification
+    SERIES_TO_LEAGUE = {
+        "KXNBA": "NBA", "KXNBAGAME": "NBA", "KXNBATOTAL": "NBA",
+        "KXMLB": "MLB", "KXMLBGAME": "MLB", "KXMLBTOTAL": "MLB",
+        "KXNHL": "NHL", "KXNHLGAME": "NHL",
+        "KXNFL": "NFL", "KXNFLGAME": "NFL",
+        "KXUCLGAME": "Soccer",
+        "KXUFCFIGHT": "UFC",
+        "KXWNBA": "WNBA", "KXWNBAGAME": "WNBA",
+    }
+
+    def _classify_league(self, title: str, series_ticker: str = "") -> Optional[str]:
+        """Match a market to a sports league via series ticker or title keywords."""
+        # Fast path: series ticker gives definitive league
+        if series_ticker:
+            league = self.SERIES_TO_LEAGUE.get(series_ticker)
+            if league and league in self.leagues:
+                return league
+
+        # Fallback: keyword matching on title
         title_lower = title.lower()
         for league, info in SPORTS_LEAGUES.items():
             if league not in self.leagues:
@@ -139,6 +161,28 @@ class KalshiSportsScanner:
             for kw in info["keywords"]:
                 if kw in title_lower:
                     return league
+        return None
+
+    # Month abbreviations for parsing event ticker dates
+    _MONTHS = {"JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
+               "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12}
+
+    @staticmethod
+    def _parse_game_date(event_ticker: str) -> Optional[datetime]:
+        """Extract game date from event ticker like KXNBAGAME-26APR14MIACHA.
+
+        Kalshi sports close_time is the settlement deadline (~14d after game),
+        not the actual game date. The game date is in the ticker: YY+MON+DD.
+        """
+        match = re.search(r'-(\d{2})([A-Z]{3})(\d{2})', event_ticker)
+        if match:
+            yr, mon_str, day = match.groups()
+            mon = KalshiSportsScanner._MONTHS.get(mon_str)
+            if mon:
+                try:
+                    return datetime(2000 + int(yr), mon, int(day), tzinfo=timezone.utc)
+                except ValueError:
+                    pass
         return None
 
     async def scan(self) -> dict:
@@ -154,18 +198,28 @@ class KalshiSportsScanner:
         new_value_bets = []
 
         try:
-            # Fetch all open markets and filter for sports
-            all_markets = await client.discover_active_markets(min_volume=0, max_days_to_close=self.max_days_to_close)
+            # Fetch with large settlement window — sports close_time is ~14d after game
+            # We'll filter by actual game date (from ticker) below
+            all_markets = await client.discover_active_markets(min_volume=0, max_days_to_close=30)
+            game_date_cutoff = datetime.now(timezone.utc) + timedelta(days=self.max_days_to_close)
+            logger.info(f"Sports scan #{self._scan_count}: {len(all_markets)} markets from discover (filtering games within {self.max_days_to_close}d)")
             league_counts = {league: 0 for league in SPORTS_LEAGUES}
 
             for m in all_markets:
                 title = m.get("title", "") + " " + m.get("subtitle", "")
-                league = self._classify_league(title)
+                series_ticker = m.get("_series", m.get("series_ticker", ""))
+                league = self._classify_league(title, series_ticker)
                 if not league:
                     continue
 
                 ticker = m.get("ticker", "")
                 event_ticker = m.get("event_ticker", "")
+
+                # Filter by game date (from ticker), not settlement close_time
+                game_date = self._parse_game_date(event_ticker)
+                if game_date and game_date > game_date_cutoff:
+                    continue
+
                 yes_price = int(round(float(m.get("yes_bid_dollars", "0") or m.get("last_price_dollars", "0") or "0") * 100))
                 no_price = int(round(float(m.get("no_bid_dollars", "0") or "0") * 100)) or (100 - yes_price if yes_price else 0)
                 volume = int(float(m.get("volume_fp", "0") or "0"))
@@ -216,14 +270,13 @@ class KalshiSportsScanner:
                 self._markets[ticker] = sport_market
 
             self._league_counts = league_counts
+            active_leagues = {k: v for k, v in league_counts.items() if v > 0}
+            logger.info(f"Sports scan #{self._scan_count}: {len(self._markets)} tracked markets, leagues: {active_leagues}")
 
             # Store value bets
             if new_value_bets:
                 self._value_bets = new_value_bets + self._value_bets
                 self._value_bets = self._value_bets[:100]  # Keep last 100
-
-                if self.telegram_alerts:
-                    await self._send_alert(new_value_bets)
 
                 if self.auto_trade:
                     await self._auto_execute(new_value_bets)
@@ -242,9 +295,9 @@ class KalshiSportsScanner:
         from app.services.telegram_service import TelegramService
         tg = TelegramService()
 
-        lines = [f"<b>\ud83c\udfc6 Sports Scanner ({len(value_bets)} signals)</b>\n"]
+        lines = [f"<b>\U0001F3C6 Sports Scanner ({len(value_bets)} signals)</b>\n"]
         for vb in value_bets[:5]:
-            emoji = SPORTS_LEAGUES.get(vb.market.league, {}).get("emoji", "\ud83c\udfc6")
+            emoji = SPORTS_LEAGUES.get(vb.market.league, {}).get("emoji", "\U0001F3C6")
             lines.append(
                 f"{emoji} <b>{vb.market.league}</b> — {vb.market.title[:50]}\n"
                 f"   {vb.reason} | Vol: {vb.market.volume}\n"
@@ -264,15 +317,24 @@ class KalshiSportsScanner:
         if best.edge_cents < self.value_threshold_cents:
             return
 
-        # Check position limits
+        # Count only positions this scanner opened (not other bots holding sports markets).
+        # Reconcile self._owned_tickers against live positions: drop tickers that closed.
         try:
             positions = await client.get_positions()
-            open_count = len([p for p in positions if p.get("count", 0) > 0])
-            if open_count >= self.max_positions:
-                logger.info(f"Sports auto-trade skipped: {open_count}/{self.max_positions} positions")
+            live_open = {
+                p.get("ticker", "").upper()
+                for p in positions
+                if abs(p.get("count", 0) or 0) > 0
+            }
+            self._owned_tickers = {t for t in self._owned_tickers if t.upper() in live_open}
+            owned_count = len(self._owned_tickers)
+            if owned_count >= self.max_positions:
+                logger.info(
+                    f"Sports auto-trade skipped: {owned_count}/{self.max_positions} scanner-owned positions"
+                )
                 return
-        except Exception:
-            return
+        except Exception as e:
+            logger.warning(f"Sports position reconcile failed (allowing trade): {e}")
 
         # Buy YES if underpriced (price < 50), NO otherwise
         side = "yes" if best.market.yes_price < 50 else "no"
@@ -302,6 +364,8 @@ class KalshiSportsScanner:
             logger.warning(f"Sports risk audit failed (allowing trade): {e}")
 
         try:
+            import uuid
+            client_order_id = f"sports-{uuid.uuid4().hex[:8]}"
             result = await client.place_order(
                 ticker=best.market.ticker,
                 side=side,
@@ -310,8 +374,10 @@ class KalshiSportsScanner:
                 yes_price=price if side == "yes" else None,
                 no_price=price if side == "no" else None,
                 order_type="limit",
+                client_order_id=client_order_id,
             )
             self._trades_executed += 1
+            self._owned_tickers.add(best.market.ticker)
             logger.info(f"Sports auto-trade: {side.upper()} {count}x @{price}¢ on {best.market.ticker}")
         except Exception as e:
             logger.error(f"Sports auto-trade failed: {e}")

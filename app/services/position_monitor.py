@@ -12,7 +12,16 @@ from app.database import (
     insert_trade,
     log_wallet_tx,
     update_trail_sl,
+    TradeReason,
 )
+
+TRIGGER_TO_REASON = {
+    "tp": TradeReason.TP_HIT,
+    "sl": TradeReason.SL_HIT,
+    "trail_sl": TradeReason.TRAIL_SL,
+    "signal": TradeReason.SIGNAL_CLOSE,
+    "manual": TradeReason.MANUAL_CLOSE,
+}
 
 logger = logging.getLogger("bot.positions")
 
@@ -310,6 +319,8 @@ class PositionMonitor:
                 "pnl_usd": pnl_usdc,
                 "notes": f"Position #{pos['id']} {status} | "
                          f"Entry=${pos['entry_price']:.2f} Exit=${current_price:.2f}",
+                "strategy": pos.get("strategy", ""),
+                "reason": TRIGGER_TO_REASON.get(trigger, TradeReason.MANUAL_CLOSE),
             })
 
             # Log wallet transaction

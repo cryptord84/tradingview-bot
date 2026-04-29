@@ -23,18 +23,22 @@ logger = logging.getLogger("bot.kalshi.risk")
 
 # ─── Category Detection ──────────────────────────────────────────────────────
 
-# Ticker prefix → category mapping
+# Ticker prefix → category mapping. Longer prefixes win (see detect_category).
 TICKER_CATEGORY_MAP = {
     "KXMLB": "sports", "KXNBA": "sports", "KXNFL": "sports", "KXNHL": "sports",
     "KXWNBA": "sports", "KXUFC": "sports", "KXNCAA": "sports", "KXATP": "sports",
     "KXWTA": "sports", "KXSOCCER": "sports", "KXARG": "sports",
     "KXCS2": "esports", "KXDOTA": "esports", "KXLOL": "esports",
     "KXVALORANT": "esports", "KXOVERWATCH": "esports", "KXMVE": "esports",
+    "KXBTCD": "crypto_strikes", "KXETHD": "crypto_strikes", "KXSOLD": "crypto_strikes",
     "KXBTC": "crypto", "KXETH": "crypto", "KXSOL": "crypto",
     "KXFED": "finance", "KXCPI": "finance", "KXGDP": "finance",
     "KXINX": "finance", "KXNDX": "finance", "KXSPY": "finance", "KXDJI": "finance",
     "KXRUS": "finance", "KXVIX": "finance",
 }
+
+# Sorted longest-first so KXBTCD matches before KXBTC.
+_TICKER_PREFIXES_SORTED = sorted(TICKER_CATEGORY_MAP.items(), key=lambda kv: -len(kv[0]))
 
 # Title keyword fallback
 TITLE_CATEGORY_KEYWORDS = {
@@ -52,7 +56,7 @@ TITLE_CATEGORY_KEYWORDS = {
 def detect_category(ticker: str, title: str = "") -> str:
     """Detect market category from ticker prefix or title keywords."""
     ticker_upper = ticker.upper()
-    for prefix, cat in TICKER_CATEGORY_MAP.items():
+    for prefix, cat in _TICKER_PREFIXES_SORTED:
         if ticker_upper.startswith(prefix):
             return cat
 
@@ -101,6 +105,7 @@ class KalshiRiskManager:
             "sports": cat_limits.get("sports_cents", 2000),
             "esports": cat_limits.get("esports_cents", 1500),
             "crypto": cat_limits.get("crypto_cents", 2000),
+            "crypto_strikes": cat_limits.get("crypto_strikes_cents", 1500),
             "finance": cat_limits.get("finance_cents", 1500),
             "politics": cat_limits.get("politics_cents", 1500),
             "weather": cat_limits.get("weather_cents", 1000),
@@ -109,6 +114,20 @@ class KalshiRiskManager:
 
         # Category exposure tracking (reset daily)
         self._category_exposure: dict[str, int] = defaultdict(int)
+
+        # Daily buy-notional cap (hard cap on churn)
+        self.max_daily_volume_cents = risk_cfg.get("max_daily_volume_cents", 20000)  # $200
+        self._daily_volume_cents: int = 0
+
+        # Ticker-prefix allow-list — if non-empty, orders against other prefixes are blocked
+        allowed = risk_cfg.get("allowed_ticker_prefixes", [
+            "KXNBA", "KXNHL", "KXMLB", "KXUCL", "KXUFC", "KXATP", "KXWTA",
+            "KXLOL", "KXNBAGAME", "KXNBATOTAL", "KXMLBGAME", "KXMLBTOTAL",
+            "KXNHLGAME", "KXUCLGAME", "KXUFCFIGHT", "KXATPMATCH", "KXWTAMATCH",
+            "KXLOLGAME",
+            "KXBTC", "KXBTCD", "KXETH", "KXETHD",
+        ])
+        self.allowed_ticker_prefixes = tuple(allowed) if allowed else ()
 
         # State
         self._tripped = False
@@ -160,12 +179,19 @@ class KalshiRiskManager:
         if today != self._day_start:
             self._day_start = today
             self._category_exposure.clear()
+            self._daily_volume_cents = 0
             if self._tripped:
                 logger.info("New day — auto-resetting circuit breaker")
                 self._tripped = False
                 self._tripped_at = None
                 self._trip_reason = None
                 self._trip_pnl_cents = 0
+
+        # Reconcile category exposure from live Kalshi positions every cycle.
+        # Without this, _category_exposure drifts: record_order increments on placement
+        # but never decrements on cancel/close/fill, so the counter saturates over a
+        # session of spread-bot quoting and starts blocking otherwise-valid orders.
+        await self._reconcile_category_exposure()
 
         if self._tripped:
             return  # Already halted, waiting for reset
@@ -174,6 +200,48 @@ class KalshiRiskManager:
 
         if total_pnl <= -self.max_daily_loss_cents:
             await self._trip(total_pnl)
+
+    async def _reconcile_category_exposure(self):
+        """Replace `_category_exposure` with the cost-basis sum of live Kalshi positions.
+
+        Source of truth is Kalshi's portfolio summary (open positions only). Resting
+        orders that haven't filled aren't counted as exposure — they reserve cash on
+        Kalshi's side but represent no at-risk principal here.
+        """
+        try:
+            from app.services.kalshi_client import get_kalshi_client, AsyncKalshiClient
+            kcli = get_kalshi_client()
+            if not kcli or not getattr(kcli, "enabled", False):
+                return
+            akc = AsyncKalshiClient(kcli)
+            summary = await akc.get_portfolio_summary()
+        except Exception as e:
+            logger.debug(f"Risk manager reconcile: portfolio fetch failed ({e})")
+            return
+
+        positions = (summary or {}).get("positions", []) or []
+        new_exposure: dict[str, int] = defaultdict(int)
+        for p in positions:
+            count = int(p.get("position", 0) or 0)
+            if count == 0:
+                continue
+            cost_cents = abs(int(p.get("total_traded_cost_cents", 0) or 0))
+            if cost_cents == 0:
+                continue
+            cat = detect_category(p.get("ticker", "") or "", p.get("title", "") or "")
+            new_exposure[cat] += cost_cents
+
+        # Atomic replace, then log only meaningful drift (>$1) so this is auditable.
+        old = dict(self._category_exposure)
+        self._category_exposure = new_exposure
+        for cat in set(old.keys()) | set(new_exposure.keys()):
+            old_val = old.get(cat, 0)
+            new_val = new_exposure.get(cat, 0)
+            if abs(old_val - new_val) >= 100:
+                logger.info(
+                    f"Category '{cat}' exposure reconciled: "
+                    f"${old_val/100:.2f} → ${new_val/100:.2f} (live positions)"
+                )
 
     def _get_aggregate_pnl(self) -> int:
         """Sum P&L cents across all trading bots + DB-recorded positions."""
@@ -389,6 +457,23 @@ class KalshiRiskManager:
                 "reason": f"Circuit breaker tripped: {self._trip_reason}",
             }
 
+        # Ticker allow-list gate (strategy scope)
+        if ticker and self.allowed_ticker_prefixes:
+            if not ticker.upper().startswith(self.allowed_ticker_prefixes):
+                reason = f"Ticker '{ticker}' not in allow-list"
+                logger.warning(f"[{bot_name}] {reason}")
+                return {"allowed": False, "reason": reason}
+
+        # Daily volume cap (anti-churn)
+        if self._daily_volume_cents + order_cost_cents > self.max_daily_volume_cents:
+            reason = (
+                f"Daily volume cap: ${(self._daily_volume_cents + order_cost_cents)/100:.2f} "
+                f"would exceed ${self.max_daily_volume_cents/100:.2f} "
+                f"(used: ${self._daily_volume_cents/100:.2f}, order: ${order_cost_cents/100:.2f})"
+            )
+            logger.warning(f"[{bot_name}] {reason}")
+            return {"allowed": False, "reason": reason}
+
         # Global daily loss check
         current_pnl = self._get_aggregate_pnl()
         projected_loss = current_pnl - order_cost_cents
@@ -489,9 +574,10 @@ class KalshiRiskManager:
         }
 
     def record_order(self, ticker: str, cost_cents: int, title: str = ""):
-        """Record an executed order's cost against its category budget."""
+        """Record an executed order's cost against its category budget and daily volume."""
         category = detect_category(ticker, title)
         self._category_exposure[category] += cost_cents
+        self._daily_volume_cents += cost_cents
 
     def get_max_size(self, ticker: str, price_cents: int = 0,
                      side: str = "yes") -> Optional[int]:
@@ -627,6 +713,10 @@ class KalshiRiskManager:
             "trip_pnl_cents": self._trip_pnl_cents,
             "max_daily_loss_cents": self.max_daily_loss_cents,
             "max_daily_loss_usd": round(self.max_daily_loss_cents / 100, 2),
+            "max_daily_volume_cents": self.max_daily_volume_cents,
+            "daily_volume_cents": self._daily_volume_cents,
+            "daily_volume_remaining_cents": max(0, self.max_daily_volume_cents - self._daily_volume_cents),
+            "allowed_ticker_prefixes": list(self.allowed_ticker_prefixes),
             "current_pnl_cents": self._get_aggregate_pnl(),
             "check_count": self._check_count,
             "last_checked": self._last_checked,

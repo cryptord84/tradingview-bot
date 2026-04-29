@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
@@ -96,6 +96,383 @@ async def get_dashboard_stats():
             today_pnl_usd=db_stats["today_pnl_usd"],
             bot_status="error",
         )
+
+
+@router.get("/portfolio")
+async def get_unified_portfolio():
+    """Unified portfolio view: crypto wallet + Kamino + Kalshi totals with P&L.
+
+    Also records a portfolio snapshot (rate-limited to 1/10min) for the equity curve.
+    """
+    import asyncio as _a
+    from datetime import datetime as _dt
+
+    out: dict = {
+        "timestamp": _dt.utcnow().isoformat(),
+        "crypto": {"sol": 0.0, "usdc": 0.0, "tokens_usd": 0.0, "subtotal_usd": 0.0},
+        "kamino": {"deposited_usd": 0.0, "earnings_usd": 0.0, "supply_apy": 0.0, "daily_yield_est": 0.0},
+        "kalshi": {"balance_usd": 0.0, "invested_usd": 0.0, "pnl_usd": 0.0, "open_positions": 0},
+        "totals": {"total_usd": 0.0, "today_pnl_usd": 0.0, "all_time_pnl_usd": 0.0, "delta_24h_usd": 0.0, "delta_24h_pct": 0.0},
+        "errors": {},
+    }
+
+    # --- Crypto wallet via existing stats pathway ---
+    try:
+        wallet = _get_wallet()
+        feed = get_price_feed()
+        token_prices, sol_price = {}, 0.0
+        if feed.is_running:
+            all_prices = feed.get_all_prices()
+            sol_price = all_prices.get("SOL", {}).get("price", 0.0)
+            token_prices = all_prices
+        if sol_price <= 0:
+            jupiter = JupiterClient()
+            try:
+                sol_price = await jupiter.get_sol_price()
+                if not token_prices:
+                    token_prices = await jupiter.get_multi_token_prices()
+            finally:
+                await jupiter.close()
+
+        balances = await wallet.get_total_usd_balance(sol_price, token_prices)
+        out["crypto"] = {
+            "sol": balances["sol"],
+            "sol_usd": balances["sol_usd_value"],
+            "usdc": balances["usdc"],
+            "tokens_usd": balances["tokens_usd"],
+            "token_holdings": balances.get("token_holdings", {}),
+            "subtotal_usd": balances["total_usd"],
+            "sol_price_usd": sol_price,
+        }
+    except Exception as e:
+        logger.warning(f"/portfolio crypto error: {e}")
+        out["errors"]["crypto"] = str(e)[:160]
+
+    # --- Kamino ---
+    kamino_usd = 0.0
+    try:
+        kamino = KaminoClient()
+        wallet_for_kamino = _get_wallet()
+        try:
+            metrics = await kamino.get_reserve_metrics()
+            position = await kamino.get_user_position(wallet_for_kamino.public_key)
+        finally:
+            await kamino.close()
+        deposited = position.get("deposited_usdc", 0)
+        kamino_usd = deposited
+        earnings = compute_kamino_earnings(current_balance=deposited)
+        supply_apy = metrics.get("supply_apy", 0)
+        out["kamino"] = {
+            "deposited_usd": deposited,
+            "earnings_usd": earnings["earnings_total"],
+            "supply_apy": supply_apy,
+            "daily_yield_est": deposited * supply_apy / 100 / 365,
+            "monthly_yield_est": deposited * supply_apy / 100 / 12,
+            "stale": position.get("stale", False),
+        }
+    except Exception as e:
+        logger.warning(f"/portfolio kamino error: {e}")
+        out["errors"]["kamino"] = str(e)[:160]
+
+    # --- Kalshi (balance + live open-position market value via API; realized P&L via DB) ---
+    kalshi_cash_usd = 0.0
+    kalshi_open_value_usd = 0.0
+    kalshi_unrealized_pnl_usd = 0.0
+    kalshi_live_open = 0
+    try:
+        from app.services.kalshi_client import get_kalshi_client, AsyncKalshiClient
+        kcli = get_kalshi_client()
+        akc = AsyncKalshiClient(kcli)
+
+        # Cash balance
+        try:
+            bal = await akc.get_balance()
+            kalshi_cash_usd = int((bal or {}).get("balance", 0) or 0) / 100
+        except Exception as e:
+            out["errors"]["kalshi_balance"] = str(e)[:160]
+
+        # Live open positions (market value + unrealized P&L)
+        try:
+            summ = await akc.get_portfolio_summary()
+            kalshi_open_value_usd = (summ.get("total_market_value_cents", 0) or 0) / 100
+            invested_open_usd = (summ.get("total_invested_cents", 0) or 0) / 100
+            kalshi_unrealized_pnl_usd = (summ.get("unrealized_pnl_cents", 0) or 0) / 100
+            # Count positions with non-zero count
+            kalshi_live_open = sum(
+                1 for p in (summ.get("positions", []) or [])
+                if (p.get("count") or 0) > 0
+            )
+        except Exception as e:
+            out["errors"]["kalshi_positions"] = str(e)[:160]
+            invested_open_usd = 0.0
+
+        # Realized P&L from local DB (closed Kalshi trades — captures only positions
+        # opened after we started recording; misses pre-bot settlement history).
+        kstats = get_kalshi_stats()
+        realized_pnl_usd = (kstats.get("total_pnl_cents", 0) or 0) / 100
+
+        # All-time Kalshi P&L = current_value - starting_capital. Kalshi's settlement
+        # endpoint isn't pulled into the local DB, so we anchor against config-recorded
+        # cumulative deposits (kalshi.starting_capital_usd, set 2026-04-29).
+        kalshi_current_total = kalshi_cash_usd + kalshi_open_value_usd
+        starting_capital_usd = float(get("kalshi", "starting_capital_usd", 0.0) or 0.0)
+        kalshi_alltime_pnl_usd = (
+            kalshi_current_total - starting_capital_usd
+            if starting_capital_usd > 0
+            else realized_pnl_usd + kalshi_unrealized_pnl_usd
+        )
+
+        out["kalshi"] = {
+            "balance_usd": kalshi_cash_usd,
+            "open_value_usd": kalshi_open_value_usd,
+            "invested_usd": invested_open_usd,
+            "unrealized_pnl_usd": kalshi_unrealized_pnl_usd,
+            "realized_pnl_usd": realized_pnl_usd,
+            # `pnl_usd` now reflects all-time P&L vs deposits, not just recent DB rows.
+            "pnl_usd": kalshi_alltime_pnl_usd,
+            "starting_capital_usd": starting_capital_usd,
+            "total_value_usd": kalshi_current_total,
+            "open_positions": kalshi_live_open or (kstats.get("open_positions", 0) or 0),
+            "total_positions": kstats.get("total_positions", 0) or 0,
+            "winning": kstats.get("winning", 0) or 0,
+            "losing": kstats.get("losing", 0) or 0,
+        }
+    except Exception as e:
+        logger.warning(f"/portfolio kalshi error: {e}")
+        out["errors"]["kalshi"] = str(e)[:160]
+
+    # --- Totals ---
+    crypto_usd = out["crypto"]["subtotal_usd"]
+    # Kalshi contribution = cash + live market value of open contracts
+    kalshi_usd = kalshi_cash_usd + kalshi_open_value_usd
+    total_usd = crypto_usd + kamino_usd + kalshi_usd
+    db_stats = get_stats()
+    all_time_pnl = db_stats.get("total_pnl_usd", 0.0) + out["kalshi"].get("pnl_usd", 0.0)
+    today_pnl = db_stats.get("today_pnl_usd", 0.0)
+
+    # 24h delta vs snapshot from ~24h ago
+    delta_24h_usd, delta_24h_pct = 0.0, 0.0
+    try:
+        import sqlite3
+        from app.database import DB_PATH
+        c = sqlite3.connect(DB_PATH)
+        c.row_factory = sqlite3.Row
+        row = c.execute(
+            """SELECT total_usd FROM portfolio_snapshots
+               WHERE timestamp <= datetime('now','-23 hours')
+               ORDER BY timestamp DESC LIMIT 1"""
+        ).fetchone()
+        c.close()
+        if row and row["total_usd"]:
+            delta_24h_usd = total_usd - row["total_usd"]
+            delta_24h_pct = (delta_24h_usd / row["total_usd"]) * 100 if row["total_usd"] > 0 else 0.0
+    except Exception as e:
+        logger.debug(f"24h delta lookup failed: {e}")
+
+    out["totals"] = {
+        "total_usd": total_usd,
+        "crypto_usd": crypto_usd,
+        "kamino_usd": kamino_usd,
+        "kalshi_usd": kalshi_usd,
+        "today_pnl_usd": today_pnl,
+        "all_time_pnl_usd": all_time_pnl,
+        "delta_24h_usd": delta_24h_usd,
+        "delta_24h_pct": delta_24h_pct,
+    }
+
+    # Snapshot (rate-limited): max one every 5 min
+    try:
+        latest = get_latest_portfolio_snapshot()
+        write_snap = True
+        if latest:
+            last_ts = _dt.fromisoformat(latest["timestamp"]).timestamp()
+            import time as _t
+            if _t.time() - last_ts < 300:
+                write_snap = False
+        if write_snap and total_usd > 0:
+            insert_portfolio_snapshot({
+                "sol_usd": out["crypto"].get("sol_usd", 0.0),
+                "usdc_usd": out["crypto"].get("usdc", 0.0),
+                "tokens_usd": out["crypto"].get("tokens_usd", 0.0),
+                "kamino_usd": kamino_usd,
+                "kalshi_usd": kalshi_usd,
+                "total_usd": total_usd,
+            })
+    except Exception as e:
+        logger.debug(f"portfolio snapshot write failed: {e}")
+
+    return out
+
+
+@router.get("/wallet/tokens")
+async def get_wallet_tokens():
+    """Per-token list with target/current/drift %, holding, avg entry, unrealized P&L.
+
+    Used by the dashboard wallet token list (replaces the legacy tile grid).
+    """
+    out: dict = {"tokens": [], "total_portfolio_usd": 0.0, "errors": {}}
+
+    # --- Resolve prices + holdings (same pattern as /stats) ---
+    try:
+        wallet = _get_wallet()
+        feed = get_price_feed()
+        token_prices: dict = {}
+        sol_price = 0.0
+        if feed.is_running:
+            all_prices = feed.get_all_prices()
+            sol_price = all_prices.get("SOL", {}).get("price", 0.0)
+            token_prices = all_prices
+        if sol_price <= 0:
+            jupiter = JupiterClient()
+            try:
+                sol_price = await jupiter.get_sol_price()
+                if not token_prices:
+                    token_prices = await jupiter.get_multi_token_prices()
+            finally:
+                await jupiter.close()
+        balances = await wallet.get_total_usd_balance(sol_price, token_prices)
+    except Exception as e:
+        logger.error(f"/wallet/tokens balances error: {e}")
+        out["errors"]["balances"] = str(e)[:160]
+        return out
+
+    total_usd = float(balances.get("total_usd") or 0.0)
+    out["total_portfolio_usd"] = total_usd
+    token_holdings = balances.get("token_holdings") or {}
+
+    # --- Targets from rebalancer config ---
+    targets = get("rebalancer", "targets", {}) or {}
+
+    # --- Cost basis from open positions (per symbol, weighted avg entry) ---
+    cost_basis: dict = {}
+    try:
+        for p in get_open_positions():
+            sym = p.get("symbol")
+            amt_usdc = float(p.get("amount_usdc") or 0)
+            entry = float(p.get("entry_price") or 0)
+            if sym and amt_usdc > 0 and entry > 0:
+                tokens = amt_usdc / entry
+                cb = cost_basis.setdefault(sym, {"total_usd": 0.0, "total_tokens": 0.0})
+                cb["total_usd"] += amt_usdc
+                cb["total_tokens"] += tokens
+    except Exception as e:
+        logger.debug(f"/wallet/tokens cost-basis error: {e}")
+
+    # --- Universe: held + targeted + priced (skip USDC; shown separately on dashboard) ---
+    sol_holding = {
+        "amount": float(balances.get("sol") or 0.0),
+        "price": sol_price,
+        "usd_value": float(balances.get("sol_usd_value") or 0.0),
+    }
+    all_holdings = {"SOL": sol_holding, **token_holdings}
+    universe = set(all_holdings.keys()) | set(targets.keys()) | set(token_prices.keys())
+    universe.discard("USDC")
+
+    rows = []
+    for sym in universe:
+        holding = all_holdings.get(sym, {"amount": 0.0, "price": 0.0, "usd_value": 0.0})
+        amount = float(holding.get("amount") or 0.0)
+        pinfo = token_prices.get(sym, {}) or {}
+        price = float(pinfo.get("price") or holding.get("price") or 0.0)
+        change_24h = float(pinfo.get("change_24h") or 0.0)
+        usd_value = amount * price if price > 0 else float(holding.get("usd_value") or 0.0)
+
+        target_pct = targets.get(sym)
+        current_pct = (usd_value / total_usd * 100) if total_usd > 0 else 0.0
+        drift_pct = (current_pct - float(target_pct)) if target_pct is not None else None
+
+        cb = cost_basis.get(sym)
+        avg_entry = (cb["total_usd"] / cb["total_tokens"]) if cb and cb["total_tokens"] > 0 else None
+        if avg_entry and amount > 0 and price > 0:
+            tokens_in_position = min(amount, cb["total_tokens"])
+            unrealized_pnl_usd = (price - avg_entry) * tokens_in_position
+            unrealized_pnl_pct = ((price / avg_entry) - 1) * 100
+        else:
+            unrealized_pnl_usd = None
+            unrealized_pnl_pct = None
+
+        rows.append({
+            "symbol": sym,
+            "price": price,
+            "change_24h": change_24h,
+            "amount": amount,
+            "usd_value": usd_value,
+            "target_pct": float(target_pct) if target_pct is not None else None,
+            "current_pct": current_pct,
+            "drift_pct": drift_pct,
+            "avg_entry": avg_entry,
+            "unrealized_pnl_usd": unrealized_pnl_usd,
+            "unrealized_pnl_pct": unrealized_pnl_pct,
+            "has_position": amount > 0 and usd_value > 0.01,
+        })
+
+    # Sort: targeted first by target desc, then untargeted by current % desc
+    rows.sort(key=lambda r: (
+        0 if r["target_pct"] is not None else 1,
+        -(r["target_pct"] or 0),
+        -r["current_pct"],
+    ))
+    out["tokens"] = rows
+    return out
+
+
+@router.get("/portfolio/equity")
+async def get_portfolio_equity(days: int = 30):
+    """Portfolio equity curve for the last N days (from portfolio_snapshots)."""
+    days = max(1, min(int(days), 365))
+    rows = get_portfolio_snapshots(days=days)
+    return {
+        "days": days,
+        "points": [
+            {
+                "t": r["timestamp"],
+                "total": r["total_usd"],
+                "crypto": r["sol_usd"] + r["usdc_usd"] + r["tokens_usd"],
+                "kamino": r["kamino_usd"],
+                "kalshi": r["kalshi_usd"],
+            }
+            for r in rows
+        ],
+    }
+
+
+@router.get("/strategy/pnl")
+async def get_strategy_pnl(days: int = 30):
+    """Per-strategy P&L for the last N days (crypto trades + Kalshi).
+
+    Crypto side: sum of `pnl_usd` on closed trades grouped by strategy.
+    Kalshi side: rolled up under a single 'kalshi' bar.
+    """
+    days = max(1, min(int(days), 365))
+    import sqlite3
+    from app.database import DB_PATH
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    rows = c.execute(
+        """SELECT COALESCE(NULLIF(strategy, ''), 'manual') AS strategy,
+                  COALESCE(SUM(pnl_usd), 0) AS pnl,
+                  COUNT(*) AS trades
+           FROM trades
+           WHERE pnl_usd IS NOT NULL AND timestamp >= datetime('now', ?)
+           GROUP BY COALESCE(NULLIF(strategy, ''), 'manual')
+           ORDER BY pnl DESC""",
+        (f"-{days} days",),
+    ).fetchall()
+    kalshi_pnl_cents = c.execute(
+        """SELECT COALESCE(SUM(pnl_cents), 0) AS p, COUNT(*) AS n
+           FROM kalshi_positions
+           WHERE status != 'open' AND COALESCE(closed_at, opened_at) >= datetime('now', ?)""",
+        (f"-{days} days",),
+    ).fetchone()
+    c.close()
+
+    bars = [{"strategy": r["strategy"], "pnl_usd": float(r["pnl"] or 0), "trades": int(r["trades"] or 0)} for r in rows]
+    kpnl = (kalshi_pnl_cents["p"] or 0) / 100
+    knt = kalshi_pnl_cents["n"] or 0
+    if knt > 0:
+        bars.append({"strategy": "kalshi", "pnl_usd": kpnl, "trades": knt})
+    bars.sort(key=lambda x: x["pnl_usd"], reverse=True)
+    return {"days": days, "bars": bars}
 
 
 @router.get("/trades")
@@ -209,6 +586,51 @@ async def export_trades_csv():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "tradingview-bot"}
+
+
+@router.get("/monitor/alerts")
+async def monitor_alerts():
+    """Return latest monitor alert and log tail for the dashboard."""
+    import json
+    bot_dir = Path(__file__).resolve().parent.parent.parent
+    alert_file = bot_dir / "logs" / "monitor_alert.json"
+    monitor_log = bot_dir / "logs" / "monitor.log"
+    bot_log = bot_dir / "logs" / "bot.log"
+
+    result = {"has_alerts": False, "issues": [], "timestamp": None, "recent_errors": [], "monitor_log": []}
+
+    # Read alert file if present
+    if alert_file.exists():
+        try:
+            data = json.loads(alert_file.read_text())
+            result["has_alerts"] = True
+            result["issues"] = data.get("issues", [])
+            result["timestamp"] = data.get("timestamp")
+        except Exception:
+            pass
+
+    # Tail monitor log (last 10 lines)
+    if monitor_log.exists():
+        try:
+            lines = monitor_log.read_text().strip().splitlines()
+            result["monitor_log"] = lines[-10:]
+        except Exception:
+            pass
+
+    # Recent errors from bot.log (last 20 ERROR lines)
+    if bot_log.exists():
+        try:
+            errors = []
+            for line in reversed(bot_log.read_text().splitlines()):
+                if "[ERROR]" in line:
+                    errors.append(line.strip()[:200])
+                    if len(errors) >= 20:
+                        break
+            result["recent_errors"] = errors
+        except Exception:
+            pass
+
+    return result
 
 
 @router.get("/bot/status")
@@ -411,6 +833,7 @@ async def get_ngrok_status():
 @router.get("/kamino")
 async def get_kamino_status():
     """Get Kamino Lend yield status and position info."""
+    import time as _t
     kamino = KaminoClient()
     wallet = WalletService()
 
@@ -420,9 +843,24 @@ async def get_kamino_status():
         usdc_balance = await wallet.get_usdc_balance()
 
         deposited = position.get("deposited_usdc", 0)
+        position_error = position.get("error")
+        position_stale = position.get("stale", False)
         total_usdc = deposited + usdc_balance
-        net_deposited = get_kamino_net_deposited()
-        earnings = deposited - net_deposited if deposited > 0 else 0.0
+        supply_apy = metrics.get("supply_apy", 0)
+
+        # Snapshot-based earnings tracking: rate limit to 1/5min to avoid DB churn.
+        latest_snap = get_latest_kamino_snapshot()
+        now = _t.time()
+        should_snap = True
+        if latest_snap:
+            from datetime import datetime as _dt
+            last_ts = _dt.fromisoformat(latest_snap["timestamp"]).timestamp()
+            if now - last_ts < 300:
+                should_snap = False
+        if should_snap and not position_error:
+            insert_kamino_snapshot(deposited, supply_apy=supply_apy, source="dashboard")
+
+        earnings_info = compute_kamino_earnings(current_balance=deposited)
 
         return {
             "enabled": kamino.enabled,
@@ -433,12 +871,17 @@ async def get_kamino_status():
             "wallet_usdc": usdc_balance,
             "total_usdc": total_usdc,
             "yield_pct_deposited": (deposited / total_usdc * 100) if total_usdc > 0 else 0,
-            "supply_apy": metrics.get("supply_apy", 0),
+            "supply_apy": supply_apy,
             "borrow_apy": metrics.get("borrow_apy", 0),
             "utilization": metrics.get("utilization", 0),
-            "daily_yield_est": deposited * metrics.get("supply_apy", 0) / 100 / 365,
-            "monthly_yield_est": deposited * metrics.get("supply_apy", 0) / 100 / 12,
-            "earnings_usdc": earnings,
+            "daily_yield_est": deposited * supply_apy / 100 / 365,
+            "monthly_yield_est": deposited * supply_apy / 100 / 12,
+            "earnings_usdc": earnings_info["earnings_total"],
+            "earnings_raw_usdc": earnings_info["raw_earnings"],
+            "earnings_data_quality": earnings_info["data_quality"],
+            "earnings_tracked_since": earnings_info["first"],
+            "position_stale": position_stale,
+            "position_error": position_error,
         }
     finally:
         await kamino.close()
@@ -619,6 +1062,12 @@ async def manual_close_position(position_id: int):
 async def position_analytics():
     """Get aggregated position analytics: win rate by strategy, equity curve, monthly P&L."""
     return get_position_analytics()
+
+
+@router.get("/indicators/performance")
+async def indicator_performance():
+    """Per-indicator performance: trades, open positions, P&L, timeline."""
+    return get_indicator_performance()
 
 
 # ── Backtest Tracker ──────────────────────────────────────────────
@@ -1643,6 +2092,26 @@ async def kalshi_risk_reset():
     """Manually reset the circuit breaker to resume trading."""
     from app.services.kalshi_risk_manager import get_risk_manager
     return get_risk_manager().reset()
+
+
+@router.post("/kalshi/risk/reconcile")
+async def kalshi_risk_reconcile():
+    """Force an immediate reconcile of category exposure from live Kalshi positions.
+
+    Use when the in-memory `_category_exposure` counter has drifted from reality
+    (e.g., resting orders that never filled left phantom exposure on the books).
+    The periodic `_check` loop also reconciles every ~30s automatically.
+    """
+    from app.services.kalshi_risk_manager import get_risk_manager
+    rm = get_risk_manager()
+    before = {k: v for k, v in rm._category_exposure.items()}
+    await rm._reconcile_category_exposure()
+    after = {k: v for k, v in rm._category_exposure.items()}
+    return {
+        "reconciled": True,
+        "before_cents": before,
+        "after_cents": after,
+    }
 
 
 def _parse_report_txt(text: str, filename: str) -> dict:

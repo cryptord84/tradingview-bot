@@ -42,6 +42,13 @@ BINANCE_TOKENS = {
     "BONK": "bonkusdt",
     "ETH": "ethusdt",
     "ORCA": "orcausdt",
+    "JUP": "jupusdt",
+    "PENGU": "penguusdt",
+    "FARTCOIN": "fartcoinusdt",
+    "POPCAT": "popcatusdt",
+    "MEW": "mewusdt",
+    "PNUT": "pnutusdt",
+    "MOODENG": "moodengusdt",
 }
 
 # Reverse lookup: Binance uppercase symbol -> our token symbol
@@ -214,6 +221,10 @@ class PriceFeed:
         _BINANCE_BACKFILL_IDS = {
             "SOL": "solana", "JTO": "jito-governance-token",
             "BONK": "bonk", "ETH": "ethereum", "ORCA": "orca",
+            "JUP": "jupiter-exchange-solana", "PENGU": "pudgy-penguins",
+            "FARTCOIN": "fartcoin", "POPCAT": "popcat",
+            "MEW": "cat-in-a-dogs-world", "PNUT": "peanut-the-squirrel",
+            "MOODENG": "moo-deng",
         }
         all_cg_ids = {**COINGECKO_ONLY, **_BINANCE_BACKFILL_IDS}
         stale_threshold = time.time() - 120

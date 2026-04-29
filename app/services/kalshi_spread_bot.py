@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.config import get
+from app.services.kalshi_market_maker import _empirical_edge_score
 
 logger = logging.getLogger("bot.kalshi.spread")
 
@@ -43,9 +44,11 @@ class MarketState:
         self.no_bid: int = 0
         self.no_ask: int = 0
         self.mid_price: float = 50.0
-        # Inventory
+        # Inventory (unpaired only after _check_spread_capture nets matched legs)
         self.yes_position: int = 0  # net YES contracts held
         self.no_position: int = 0   # net NO contracts held
+        self.yes_avg_entry: float = 0.0  # avg cost basis of unpaired YES
+        self.no_avg_entry: float = 0.0   # avg cost basis of unpaired NO
         # Active orders
         self.yes_order_id: Optional[str] = None
         self.no_order_id: Optional[str] = None
@@ -55,8 +58,10 @@ class MarketState:
         self.fills_yes: int = 0
         self.fills_no: int = 0
         self.total_spread_captured_cents: int = 0
+        self.realized_pnl_cents: int = 0  # actual exits (TP/SL) — not the virtual spread counter
         self.last_updated: Optional[str] = None
         self.errors: int = 0
+        self.rejection_cooldown: int = 0  # Skip N cycles after 422 rejection
 
     def net_inventory(self) -> int:
         """Positive = long YES, negative = long NO."""
@@ -78,6 +83,8 @@ class MarketState:
             "mid_price": self.mid_price,
             "yes_position": self.yes_position,
             "no_position": self.no_position,
+            "yes_avg_entry": round(self.yes_avg_entry, 2),
+            "no_avg_entry": round(self.no_avg_entry, 2),
             "net_inventory": self.net_inventory(),
             "yes_order_id": self.yes_order_id,
             "no_order_id": self.no_order_id,
@@ -86,6 +93,7 @@ class MarketState:
             "fills_yes": self.fills_yes,
             "fills_no": self.fills_no,
             "spread_captured_cents": self.total_spread_captured_cents,
+            "realized_pnl_cents": self.realized_pnl_cents,
             "last_updated": self.last_updated,
             "errors": self.errors,
         }
@@ -112,6 +120,16 @@ class KalshiSpreadBot:
         self.max_days_to_close = spread_cfg.get("max_days_to_close", 0)
         self.telegram_alerts = spread_cfg.get("telegram_alerts", True)
         self.target_tickers = spread_cfg.get("target_tickers", [])
+        # Exit rules for unpaired inventory (added 2026-04-27)
+        self.take_profit_cents = spread_cfg.get("take_profit_cents", 88)
+        self.stop_loss_cents = spread_cfg.get("stop_loss_cents", 15)
+        self.exit_telegram_alerts = spread_cfg.get("exit_telegram_alerts", True)
+        # Hour-of-day gating (Becker 2026-04-28: maker edge ~50% larger overnight/evening
+        # vs US business hours). Default: quote top-3 in active windows, top-1 during the
+        # 8-15 ET efficient window. Set quiet_hours_et=[] to disable gating.
+        self.active_max_markets = spread_cfg.get("max_markets", 3)
+        self.quiet_hours_et = set(spread_cfg.get("quiet_hours_et", [8, 9, 10, 11, 12, 13, 14, 15]))
+        self.quiet_max_markets = spread_cfg.get("quiet_hours_max_markets", 1)
 
         # Runtime state
         self._markets: dict[str, MarketState] = {}
@@ -224,6 +242,7 @@ class KalshiSpreadBot:
                 state = self._markets[ticker]
                 await self._update_market_state(client, state)
                 await self._check_fills(client, state)
+                await self._check_exits(client, state)
 
                 # Check total exposure
                 total_exposure = sum(
@@ -247,23 +266,48 @@ class KalshiSpreadBot:
     # MARKET SELECTION
     # =========================================================================
 
-    # Categories with low maker edge (research: jbecker.dev/prediction-market-microstructure)
-    LOW_EDGE_KEYWORDS = ["finance", "fed ", "interest rate", "gdp", "cpi", "inflation",
-                         "treasury", "earnings"]
-    # Categories with high maker edge (behavioral bias drives taker losses)
-    HIGH_EDGE_KEYWORDS = ["sports", "entertainment", "celebrity", "movie", "tv ",
-                          "award", "oscar", "grammy", "super bowl", "world series",
-                          "playoff", "championship", "election", "trump", "biden",
-                          "war", "conflict", "weather", "hurricane"]
+    # Categories with low maker edge (Becker dataset 2026-04-28: 0.17pp gap)
+    LOW_EDGE_KEYWORDS = ["finance", "fed ", "federal reserve", "interest rate",
+                         "gdp", "cpi", "inflation", "treasury", "earnings"]
+    LOW_EDGE_PREFIXES = ("KXFED", "KXCPI", "KXGDP", "KXINX", "KXINXD",
+                         "KXNDX", "KXSPY", "KXDJI")
+    # Maker-edge keywords ranked by Becker 2026-04-28 per-category gap.
+    # Top tier (4-7pp): world events, media, entertainment, science/tech
+    # Mid tier (2-3pp): crypto, weather, sports
+    # Politics (1pp) intentionally NOT here — modest edge.
+    HIGH_EDGE_KEYWORDS = ["world", "war", "conflict", "geopolit",
+                          "media", "press", "news",
+                          "entertainment", "celebrity", "movie", "tv ",
+                          "award", "oscar", "grammy",
+                          "science", "tech", "ai ", "space",
+                          "weather", "hurricane", "tornado",
+                          "sports", "super bowl", "world series",
+                          "playoff", "championship",
+                          "crypto", "bitcoin", "ethereum"]
+    # Ticker-prefix matching for high-edge series (catches markets whose
+    # titles wouldn't match the keyword list above — e.g., KXNOBELPEACE,
+    # KXEPSTEIN). Aligned with Becker classifier.
+    HIGH_EDGE_PREFIXES = (
+        "KXNOBEL", "KXNEXTPOPE", "KXPOPE", "KXEPSTEIN", "KXOTEEPSTEIN",
+        "KXZELENSKYYPUTINMEET", "KXBOLIVIAPRES", "KXSKPRES",
+        "KXLAGODAYS", "KXARREST",
+        "KXMENTION", "KXHEADLINE", "KXGOOGLESEARCH", "KX538APPROVE", "KXAPRPOTUS",
+        "KXOSCAR", "KXGRAMMY", "KXEMMY", "KXBAFTA", "KXGAMEAWARDS",
+        "KXSPOTIFY", "KXNETFLIX", "KXRT", "KXTOPSONG", "KXTOPALBUM", "KXTOPARTIST",
+        "KXBILLBOARD",
+        "KXLLM", "KXAI", "KXSPACEX", "KXALIENS", "KXAPPLE",
+        "KXHIGH", "KXRAIN", "KXSNOW", "KXTORNADO", "KXHURCAT", "KXARCTICICE", "KXWEATHER",
+        "KXBTCMAX", "KXBTCMIN", "KXETHMAX", "KXETHMIN", "KXBTCRESERVE",
+    )
 
     async def _auto_select_markets(self, client) -> list[str]:
         """Auto-select the best markets for spread-capturing.
 
-        Research-informed scoring:
-        - Avoid 40-60¢ mid range (near-zero maker edge)
-        - Prefer tail prices (5-20¢, 80-95¢) where longshot bias is strongest
-        - Prefer high-bias categories (sports, entertainment, politics)
-        - Avoid finance/economics (nearly efficient, 0.17pp gap)
+        Empirical scoring (Becker dataset 2026-04-28, mispricing_by_price.csv):
+        - True dead zone is 41-50¢ (+0.16pp). 51-60¢ is +2.40pp — best band.
+        - Best maker bands: 51-60¢ (+2.40pp), 31-40¢ (+2.14pp), 81-90¢ (+1.93pp)
+        - Drop "always prefer 1-20¢ tails" — 1-15¢ is weak (+0.06–0.48pp)
+        - Avoid finance (0.17pp) and 21-25¢ (negative maker edge)
         """
         markets = await client.discover_active_markets(min_volume=10, max_days_to_close=self.max_days_to_close)
         candidates = []
@@ -288,27 +332,34 @@ class KalshiSpreadBot:
             if mid < 5 or mid > 95:
                 continue  # Extreme illiquid tails
 
-            # Skip dead zone — near-zero edge at 40-60¢
-            if 40 <= mid <= 60:
+            # True dead zone: 41-50¢ has near-zero maker edge (+0.16pp avg).
+            # 51-60¢ is the BEST band (+2.40pp), so don't lump them together.
+            if 41 <= mid <= 50:
                 continue
 
-            # Category filtering
+            # Category filtering (ticker prefix + title keyword)
+            ticker = m.get("ticker", "")
+            if ticker.startswith(self.LOW_EDGE_PREFIXES):
+                continue
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
             if any(kw in title for kw in self.LOW_EDGE_KEYWORDS):
                 continue  # Skip near-efficient finance markets
 
-            # Category bonus for high-bias markets
+            # Category bonus for high-bias markets — ticker-prefix match first
+            # (catches series whose titles don't contain the keyword), then keyword fallback.
             category_bonus = 0.0
-            if any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
+            if ticker.startswith(self.HIGH_EDGE_PREFIXES) or \
+               any(kw in title for kw in self.HIGH_EDGE_KEYWORDS):
                 category_bonus = 0.2
 
-            # Tail preference: best edge at 5-20¢ and 80-95¢
-            tail_distance = abs(mid - 50) / 50
+            # Empirical maker-edge score by price band (Becker mispricing curve).
+            # Replaces old linear `tail_distance` heuristic, which the data doesn't support.
+            edge_score = _empirical_edge_score(mid)
             volume_score = min(volume, 5000) / 5000
             spread_score = min(spread, 15) / 15
 
             score = (volume_score * 0.4 + spread_score * 0.2 +
-                     tail_distance * 0.3 + category_bonus + 0.1)
+                     edge_score * 0.3 + category_bonus + 0.1)
 
             candidates.append({
                 "ticker": m.get("ticker", ""),
@@ -318,14 +369,25 @@ class KalshiSpreadBot:
                 "score": score,
             })
 
-        # Sort by score descending, take top 3
+        # Sort by score descending. Pick top-N where N depends on hour:
+        # high-edge windows get the full slate; the 8-15 ET efficient window
+        # gets a tighter subset (avoids burning quota when markets are most efficient).
         candidates.sort(key=lambda c: c["score"], reverse=True)
-        selected = [c["ticker"] for c in candidates[:3]]
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            hour_et = datetime.now(ZoneInfo("America/New_York")).hour
+        except Exception:
+            hour_et = -1  # Fall back to active behavior if tz lookup fails
+        is_quiet = hour_et in self.quiet_hours_et
+        limit = self.quiet_max_markets if is_quiet else self.active_max_markets
+        selected = [c["ticker"] for c in candidates[:limit]]
 
         if selected and self._cycle_count % 20 == 1:  # Log every ~5 min
+            window = "quiet" if is_quiet else "active"
             logger.info(
-                f"Auto-selected markets: {selected} "
-                f"(from {len(candidates)} candidates)"
+                f"Auto-selected markets ({window} window, hour {hour_et} ET, "
+                f"top-{limit}): {selected} (from {len(candidates)} candidates)"
             )
 
         return selected
@@ -407,11 +469,17 @@ class KalshiSpreadBot:
 
         # If YES order is gone, it was filled
         if state.yes_order_id and state.yes_order_id not in open_ids:
-            state.fills_yes += self.contracts_per_side
-            state.yes_position += self.contracts_per_side
+            fill_qty = self.contracts_per_side
+            fill_price = float(state.yes_order_price)
+            new_pos = state.yes_position + fill_qty
+            state.yes_avg_entry = (
+                state.yes_avg_entry * state.yes_position + fill_price * fill_qty
+            ) / new_pos
+            state.yes_position = new_pos
+            state.fills_yes += fill_qty
             logger.info(
                 f"YES fill on {state.ticker} @ {state.yes_order_price}¢ "
-                f"x{self.contracts_per_side} (inventory: {state.net_inventory()})"
+                f"x{fill_qty} (inventory: {state.net_inventory()}, avg_entry: {state.yes_avg_entry:.1f}¢)"
             )
             state.yes_order_id = None
             state.yes_order_price = 0
@@ -421,11 +489,17 @@ class KalshiSpreadBot:
 
         # If NO order is gone, it was filled
         if state.no_order_id and state.no_order_id not in open_ids:
-            state.fills_no += self.contracts_per_side
-            state.no_position += self.contracts_per_side
+            fill_qty = self.contracts_per_side
+            fill_price = float(state.no_order_price)
+            new_pos = state.no_position + fill_qty
+            state.no_avg_entry = (
+                state.no_avg_entry * state.no_position + fill_price * fill_qty
+            ) / new_pos
+            state.no_position = new_pos
+            state.fills_no += fill_qty
             logger.info(
                 f"NO fill on {state.ticker} @ {state.no_order_price}¢ "
-                f"x{self.contracts_per_side} (inventory: {state.net_inventory()})"
+                f"x{fill_qty} (inventory: {state.net_inventory()}, avg_entry: {state.no_avg_entry:.1f}¢)"
             )
             state.no_order_id = None
             state.no_order_price = 0
@@ -456,11 +530,109 @@ class KalshiSpreadBot:
             )
 
     # =========================================================================
+    # EXIT RULES (added 2026-04-27)
+    # =========================================================================
+
+    async def _check_exits(self, client, state: MarketState):
+        """Close unpaired inventory at take-profit or stop-loss thresholds.
+
+        Runs after _check_fills/_check_spread_capture, so yes_position and
+        no_position represent UNPAIRED directional risk only. Paired pairs are
+        already netted to 0 and held to settlement for the guaranteed $1 payout.
+        """
+        if state.yes_position > 0 and state.yes_bid > 0:
+            if state.yes_bid >= self.take_profit_cents:
+                await self._exit_position(client, state, "yes", state.yes_bid, "TP")
+            elif state.yes_bid <= self.stop_loss_cents:
+                await self._exit_position(client, state, "yes", state.yes_bid, "SL")
+
+        if state.no_position > 0 and state.no_bid > 0:
+            if state.no_bid >= self.take_profit_cents:
+                await self._exit_position(client, state, "no", state.no_bid, "TP")
+            elif state.no_bid <= self.stop_loss_cents:
+                await self._exit_position(client, state, "no", state.no_bid, "SL")
+
+    async def _exit_position(self, client, state: MarketState, side: str, bid: int, reason: str):
+        """Sell unpaired inventory aggressively at the bid."""
+        if side == "yes":
+            qty = state.yes_position
+            entry = state.yes_avg_entry
+        else:
+            qty = state.no_position
+            entry = state.no_avg_entry
+
+        if qty <= 0:
+            return
+
+        # Aggressive sell — undercut bid by 1¢ to ensure fill, clamped to [1, 99]
+        sell_price = max(1, min(99, bid - 1))
+
+        # Cancel any resting buy on this side first (would otherwise add to inventory)
+        existing_order = state.yes_order_id if side == "yes" else state.no_order_id
+        if existing_order:
+            try:
+                await client.cancel_order(existing_order)
+            except Exception:
+                pass
+            if side == "yes":
+                state.yes_order_id = None
+                state.yes_order_price = 0
+            else:
+                state.no_order_id = None
+                state.no_order_price = 0
+
+        try:
+            client_id = f"sb-x{reason.lower()}-{state.ticker[:10]}-{uuid.uuid4().hex[:6]}"
+            kwargs = {
+                "ticker": state.ticker,
+                "side": side,
+                "action": "sell",
+                "count": qty,
+                "order_type": "limit",
+                "client_order_id": client_id,
+            }
+            if side == "yes":
+                kwargs["yes_price"] = sell_price
+            else:
+                kwargs["no_price"] = sell_price
+
+            await client.place_order(**kwargs)
+
+            realized = int(round((sell_price - entry) * qty))
+            state.realized_pnl_cents += realized
+            self._total_pnl_cents += realized
+
+            if side == "yes":
+                state.yes_position = 0
+                state.yes_avg_entry = 0.0
+            else:
+                state.no_position = 0
+                state.no_avg_entry = 0.0
+
+            sign = "+" if realized >= 0 else ""
+            logger.info(
+                f"{reason} exit on {state.ticker}: sold {qty} {side.upper()} @ {sell_price}¢ "
+                f"(entry {entry:.1f}¢, realized {sign}{realized}¢)"
+            )
+            if self.exit_telegram_alerts:
+                await self._alert(
+                    f"<b>{reason}</b> {sign}{realized}¢ on {state.ticker}\n"
+                    f"Sold {qty} {side.upper()} @ {sell_price}¢ (entry {entry:.1f}¢)"
+                )
+        except Exception as e:
+            logger.error(f"Failed {reason} exit on {state.ticker} {side}: {e}")
+
+    # =========================================================================
     # QUOTING
     # =========================================================================
 
     async def _requote(self, client, state: MarketState):
         """Place or update quotes on both sides of the market."""
+        # Skip if cooling down after API rejection (422/insufficient funds)
+        if state.rejection_cooldown > 0:
+            state.rejection_cooldown -= 1
+            return
+
         mid = state.mid_price
         half_spread = self.default_spread_cents / 2
 
@@ -527,7 +699,12 @@ class KalshiSpreadBot:
                 state.yes_order_id = order.get("order_id", client_id)
                 state.yes_order_price = yes_bid_price
             except Exception as e:
-                logger.error(f"YES quote failed on {state.ticker}: {e}")
+                err_str = str(e)
+                if "422" in err_str or "insufficient" in err_str.lower() or "exposure" in err_str.lower():
+                    logger.warning(f"YES quote rejected on {state.ticker}: {e}")
+                    state.rejection_cooldown = 10  # Skip 10 cycles (~5 min at 30s interval)
+                else:
+                    logger.error(f"YES quote failed on {state.ticker}: {e}")
 
         if no_stale and no_ok:
             if state.no_order_id:
@@ -552,7 +729,12 @@ class KalshiSpreadBot:
                 state.no_order_id = order.get("order_id", client_id)
                 state.no_order_price = no_bid_price
             except Exception as e:
-                logger.error(f"NO quote failed on {state.ticker}: {e}")
+                err_str = str(e)
+                if "422" in err_str or "insufficient" in err_str.lower() or "exposure" in err_str.lower():
+                    logger.warning(f"NO quote rejected on {state.ticker}: {e}")
+                    state.rejection_cooldown = 10  # Skip 10 cycles (~5 min at 30s interval)
+                else:
+                    logger.error(f"NO quote failed on {state.ticker}: {e}")
 
     # =========================================================================
     # ORDER MANAGEMENT
@@ -564,7 +746,7 @@ class KalshiSpreadBot:
         client = get_async_kalshi_client()
 
         # Cancel tracked orders
-        for ticker, state in self._markets.items():
+        for ticker, state in list(self._markets.items()):
             for order_id in [state.yes_order_id, state.no_order_id]:
                 if order_id:
                     try:
@@ -703,6 +885,8 @@ class KalshiSpreadBot:
                 "max_inventory": self.max_inventory_per_market,
                 "max_exposure_cents": self.max_total_exposure_cents,
                 "poll_interval": self.poll_interval,
+                "take_profit_cents": self.take_profit_cents,
+                "stop_loss_cents": self.stop_loss_cents,
             },
             "markets": {
                 ticker: state.to_dict()
