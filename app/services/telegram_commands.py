@@ -179,7 +179,7 @@ class TelegramCommandHandler:
     # ── Command Handlers ─────────────────────────────────────────
 
     async def cmd_help(self):
-        lines = ["<b>TRINITY BOT COMMANDS</b>\n"]
+        lines = ["<b>MORPHEUS BOT COMMANDS</b>\n"]
         for cmd, desc in self.COMMANDS.items():
             lines.append(f"  {cmd} — {desc}")
         await self.send("\n".join(lines))
@@ -1006,7 +1006,7 @@ class TelegramCommandHandler:
 
         # Send to Claude for analysis
         system_prompt = (
-            "You are Trinity, an expert Pine Script and trading indicator analyst. "
+            "You are Morpheus, an expert Pine Script and trading indicator analyst. "
             "Review the following indicator script and provide:\n"
             "1. **Summary** — what the indicator does in 2-3 sentences\n"
             "2. **Signals** — what buy/sell/close signals it generates\n"
@@ -1106,7 +1106,7 @@ class TelegramCommandHandler:
         # Gather bot context so Claude has awareness
         context = await self._build_chat_context()
         system_prompt = (
-            "You are Trinity, an AI assistant for a Solana trading bot. "
+            "You are Morpheus, an AI assistant for a Solana trading bot. "
             "You help the user with trading questions, market analysis, strategy ideas, "
             "bot configuration, and general questions. Be concise — this is Telegram, "
             "keep responses under 300 words. Use plain text (Telegram HTML is OK for bold/italic). "
