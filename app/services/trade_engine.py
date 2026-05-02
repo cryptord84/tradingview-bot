@@ -1038,13 +1038,13 @@ class TradeEngine:
             )
 
             # Create position record for TP/SL monitoring (BUY only)
-            # Skip TP/SL position record for EVM trades — position_monitor only
-            # knows how to close via Jupiter (Solana). EVM positions exit only
-            # via signal-driven CLOSE webhooks (which DO route correctly through
-            # this method). Updating position_monitor for EVM is a Phase 4 task.
+            # Position record powers TP/SL monitoring. As of EVM Phase 4
+            # (2026-05-02), position_monitor is chain-aware and routes EVM
+            # closes through OpenOcean — so we now create position records
+            # for both chains. Signal-driven CLOSE webhooks ALSO route
+            # correctly through process_signal for both chains.
             chain_for_position = result.get("chain", "solana")
-            if (signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0
-                    and chain_for_position == "solana"):
+            if signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0:
                 tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy, signal.symbol, signal.timeframe)
                 tp_price = token_price + (signal.atr * tp_mult)
                 sl_price = token_price - (signal.atr * sl_mult)

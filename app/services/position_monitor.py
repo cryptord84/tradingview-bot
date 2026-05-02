@@ -178,11 +178,24 @@ class PositionMonitor:
     async def _close_position(
         self, pos: dict, current_price: float, trigger: str, jupiter=None
     ):
-        """Execute a position close via Jupiter swap."""
+        """Execute a position close via Jupiter (Solana) or OpenOcean (EVM).
+
+        Chain is inferred from the position symbol — if it's in
+        TradeEngine.EVM_TOKENS we route to the EVM executor; otherwise the
+        original Jupiter Solana path runs unchanged.
+        """
         from app.services.jupiter_client import JupiterClient
         from app.services.wallet_service import WalletService
         from app.services.telegram_service import TelegramService
         from app.services.kamino_client import KaminoClient
+        from app.services.trade_engine import TradeEngine
+
+        # ── EVM close path ──────────────────────────────────────────────────
+        token_symbol_norm = (pos.get("symbol", "") or "").upper()\
+            .replace("USDT", "").replace("USD", "").replace(".P", "")
+        if token_symbol_norm in TradeEngine.EVM_TOKENS:
+            await self._close_position_evm(pos, current_price, trigger, token_symbol_norm)
+            return
 
         own_jupiter = jupiter is None
         if own_jupiter:
@@ -390,6 +403,146 @@ class PositionMonitor:
             await wallet.close()
             if own_jupiter:
                 await jupiter.close()
+
+    async def _close_position_evm(
+        self, pos: dict, current_price: float, trigger: str, token_symbol: str,
+    ):
+        """Close an EVM position via OpenOcean on Arbitrum.
+
+        Mirrors `_close_position` (Solana/Jupiter) but uses EVMSwapExecutor.
+        Pre-flight balance check uses on-chain ERC20 balanceOf instead of
+        Solana SPL token accounts.
+        """
+        from app.services.evm_wallet_service import EVMWalletService
+        from app.services.evm_swap_executor import EVMSwapExecutor
+        from app.services.telegram_service import TelegramService
+        from app.services.trade_engine import TradeEngine
+
+        wallet = EVMWalletService()
+        executor = EVMSwapExecutor(wallet)
+        telegram = TelegramService()
+
+        try:
+            # Resolve EVM contract + decimals
+            evm_token_addr, evm_token_decimals = TradeEngine.EVM_TOKENS[token_symbol]
+
+            # Pre-flight balance check via on-chain ERC20 balanceOf
+            on_chain_amt = await wallet.get_erc20_balance(evm_token_addr, decimals=evm_token_decimals)
+            recorded_amt = float(pos.get("amount_sol") or 0)
+
+            if recorded_amt > 0 and on_chain_amt < recorded_amt * 0.01:
+                # Ghost EVM position — wallet has < 1% of recorded
+                logger.warning(
+                    f"EVM Position #{pos['id']} ghost: expected {recorded_amt:.6f} {token_symbol}, "
+                    f"wallet holds {on_chain_amt:.6f}. Marking abandoned."
+                )
+                await telegram.notify_error(
+                    f"Ghost EVM position #{pos['id']} {pos['symbol']} abandoned",
+                    f"Expected {recorded_amt:.6f} {token_symbol} on Arbitrum but found "
+                    f"{on_chain_amt:.6f}. Position closed as unrecoverable.",
+                )
+                close_position(
+                    position_id=pos["id"], exit_price=current_price, exit_tx="",
+                    status="abandoned", pnl_usdc=0.0, pnl_percent=0.0,
+                )
+                return
+
+            # Use min(recorded, on_chain) so we don't try to sell more than we hold
+            sell_amount = min(recorded_amt, on_chain_amt) if recorded_amt > 0 else on_chain_amt
+            sell_wei = int(sell_amount * (10 ** evm_token_decimals))
+
+            # Execute SELL: token → USDC
+            try:
+                evm_result = await executor.execute_swap(
+                    src_token=evm_token_addr, src_decimals=evm_token_decimals,
+                    dst_token=TradeEngine.EVM_USDC_CONTRACT,
+                    dst_decimals=TradeEngine.EVM_USDC_DECIMALS,
+                    amount_wei=sell_wei,
+                    slippage_bps=300,  # 3% — higher tolerance for forced closes
+                    dry_run=False,
+                    wait_for_swap_receipt=True,
+                    receipt_timeout_s=120,
+                )
+            except Exception as e:
+                logger.error(f"Failed to close EVM position #{pos['id']}: {e}")
+                await telegram.notify_error(
+                    f"Failed to close EVM position #{pos['id']}: {e}",
+                    f"Entry=${pos['entry_price']:.4f}, "
+                    f"Trigger={trigger.upper()} @ ${current_price:.4f}",
+                )
+                return
+
+            receipt = evm_result.get("receipt") or {}
+            if int(receipt.get("status", "0x0"), 16) != 1:
+                logger.error(f"EVM close tx reverted on-chain for #{pos['id']}")
+                await telegram.notify_error(
+                    f"EVM close reverted on-chain (#{pos['id']})",
+                    f"tx={evm_result['swap_tx']['hash']}",
+                )
+                return
+
+            tx_hash = evm_result["swap_tx"]["hash"]
+
+            # Calculate P&L
+            pnl_usdc = (current_price - pos["entry_price"]) * sell_amount
+            pnl_percent = ((current_price - pos["entry_price"]) / pos["entry_price"]) * 100
+
+            status_map = {
+                "tp": "closed_tp", "sl": "closed_sl",
+                "trail_sl": "closed_trail", "manual": "closed_manual",
+            }
+            status = status_map.get(trigger, "closed_manual")
+
+            close_position(
+                position_id=pos["id"], exit_price=current_price, exit_tx=tx_hash,
+                status=status, pnl_usdc=pnl_usdc, pnl_percent=pnl_percent,
+            )
+
+            insert_trade({
+                "timestamp": datetime.utcnow().isoformat(),
+                "tx_id": tx_hash,
+                "signal_type": "SELL",
+                "symbol": pos["symbol"],
+                "action": "EXECUTE",
+                "amount_sol": sell_amount,
+                "price_usd": current_price,
+                "fees_sol": 0.0,
+                "leverage": 1,
+                "wallet_address": wallet.address,
+                "confidence_score": pos.get("confidence", 0),
+                "claude_reasoning": f"Auto-close (EVM): {trigger.upper()} hit",
+                "pnl_usd": pnl_usdc,
+                "notes": f"Position #{pos['id']} {status} | EVM | "
+                         f"Entry=${pos['entry_price']:.4f} Exit=${current_price:.4f} | chain=arbitrum",
+                "strategy": pos.get("strategy", ""),
+                "reason": TRIGGER_TO_REASON.get(trigger, TradeReason.MANUAL_CLOSE),
+            })
+
+            # Telegram notification
+            trigger_labels = {
+                "tp": ("Take Profit", "\U0001f3af"),
+                "sl": ("Stop Loss", "\U0001f6d1"),
+                "trail_sl": ("Trailing Stop", "\U0001f4c9"),
+                "manual": ("Manual Close", "✅"),
+            }
+            label, emoji = trigger_labels.get(trigger, ("Close", "✅"))
+            pnl_emoji = "\U0001f4c8" if pnl_usdc >= 0 else "\U0001f4c9"
+            await telegram.send_message(
+                f"{emoji} <b>{label} (Arbitrum)</b>: {pos['symbol']}\n"
+                f"Sold {sell_amount:.6f} @ ${current_price:.4f} for "
+                f"{pnl_emoji} ${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)\n"
+                f"Tx: <a href=\"https://arbiscan.io/tx/{tx_hash}\">{tx_hash[:10]}...</a>"
+            )
+
+            logger.info(
+                f"EVM position #{pos['id']} closed via {trigger}: "
+                f"P&L=${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)"
+            )
+
+        finally:
+            await telegram.close()
+            await executor.close()
+            await wallet.close()
 
 
 # Singleton
