@@ -1,0 +1,99 @@
+//@version=6
+// EMA Ribbon v1.0 — Alert Indicator
+// Passed backtesting thresholds (risk-managed engine):
+//   BONK   4H  PF=4.36  WR=80.6%  67 trades  DD=4.7%   NP=126.6%
+//   WIF    4H  PF=4.24  WR=81.5%  54 trades  DD=5.4%   NP=158.4%
+//   RENDER 4H  PF=3.56  WR=75.0%  76 trades  DD=7.0%   NP=134.4%
+//   SOL    4H  PF=3.51  WR=73.5%  68 trades  DD=5.5%   NP=100.9%
+//   ETH    4H  PF=2.80  WR=72.6%  62 trades  DD=5.8%   NP=74.5%
+//   BONK   1H  PF=3.24  WR=71.9%  64 trades  DD=7.3%   NP=121.5%
+//   RENDER 1H  PF=2.47  WR=67.1%  73 trades  DD=12.1%  NP=101.0%
+//   SOL    1H  PF=2.22  WR=65.2%  66 trades  DD=10.0%  NP=61.2%
+//
+// Signal logic: 3/8/21/55 EMA stack alignment
+//   BUY:   all 4 EMAs bullish aligned (3>8>21>55) — first bar of alignment
+//   CLOSE: alignment breaks (EMAs no longer stacked)
+
+indicator("EMA Ribbon v1.0 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_ema  = "EMA Settings"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+len1           = input.int(3,    "Fast EMA",          minval=2,     group=grp_ema)
+len2           = input.int(8,    "Medium EMA",        minval=2,     group=grp_ema)
+len3           = input.int(21,   "Slow EMA",          minval=2,     group=grp_ema)
+len4           = input.int(55,   "Anchor EMA",        minval=2,     group=grp_ema)
+confidence     = input.int(70,   "Confidence Score",  minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage", minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %", minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showRibbon     = input.bool(true, "Show Ribbon Fill",  group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+e3  = ta.ema(close, len1)
+e8  = ta.ema(close, len2)
+e21 = ta.ema(close, len3)
+e55 = ta.ema(close, len4)
+
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+
+bull_aligned = e3 > e8 and e8 > e21 and e21 > e55
+bear_aligned = e3 < e8 and e8 < e21 and e21 < e55
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = bull_aligned and not bull_aligned[1]
+long_exit   = not bull_aligned and bull_aligned[1]
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+p1 = plot(e3,  "EMA 3",  color=color.new(#00ff41, 20), linewidth=1)
+p2 = plot(e8,  "EMA 8",  color=color.new(#00cc33, 30), linewidth=1)
+p3 = plot(e21, "EMA 21", color=color.new(#009926, 40), linewidth=2)
+p4 = plot(e55, "EMA 55", color=color.new(#006619, 50), linewidth=2)
+
+ribbonColor = bull_aligned ? color.new(color.green, 85) : bear_aligned ? color.new(color.red, 85) : color.new(color.gray, 92)
+fill(p1, p4, color=showRibbon ? ribbonColor : na, title="Ribbon Fill")
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
+plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "EMA Ribbon v1.0"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+if long_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions ──────────────────────────────────────────────────────────
+alertcondition(long_entry,              "EMA Ribbon — BUY",   "EMA Ribbon BUY")
+alertcondition(long_exit, "EMA Ribbon — CLOSE", "EMA Ribbon CLOSE")

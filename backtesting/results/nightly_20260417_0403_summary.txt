@@ -1,0 +1,162 @@
+Nightly Backtest Summary — nightly_20260417_0403
+Tests: 490 | Passing: 159
+
+EMA Ribbon     BONK    1H   PF=2.85 WR=74.6% Trades=122 DD=8.2% NP=340.8% Sharpe=1.87 Lev=2.4x
+EMA Ribbon     PENGU   1H   PF=2.56 WR=71.3% Trades=122 DD=8.7% NP=273.8% Sharpe=1.70 Lev=2.4x
+EMA Ribbon     SOL     4H   PF=3.43 WR=71.4% Trades=119 DD=5.6% NP=245.7% Sharpe=1.88 Lev=2.4x
+EMA Ribbon     ETH     4H   PF=3.05 WR=74.6% Trades=118 DD=7.5% NP=213.1% Sharpe=1.78 Lev=2.4x
+EMA Ribbon     WIF     4H   PF=3.54 WR=74.2% Trades=120 DD=5.4% NP=390.6% Sharpe=2.07 Lev=2.4x
+EMA Ribbon     BONK    4H   PF=3.98 WR=76.6% Trades=128 DD=4.7% NP=318.5% Sharpe=2.18 Lev=2.4x
+EMA Ribbon     RENDER  4H   PF=3.79 WR=77.0% Trades=139 DD=7.0% NP=367.1% Sharpe=2.21 Lev=2.4x
+EMA Ribbon     JUP     4H   PF=2.58 WR=74.1% Trades=112 DD=6.5% NP=263.3% Sharpe=1.83 Lev=2.4x
+EMA Ribbon     PENGU   4H   PF=3.67 WR=75.9% Trades=137 DD=6.5% NP=332.7% Sharpe=2.24 Lev=2.4x
+VWAP Dev       JUP     4H   PF=3.62 WR=74.0% Trades=104 DD=8.4% NP=232.4% Sharpe=1.82 Lev=2.4x
+Stoch RSI      WIF     4H   PF=2.96 WR=71.9% Trades=114 DD=7.6% NP=239.9% Sharpe=1.76 Lev=2.4x
+Stoch RSI      JUP     4H   PF=3.63 WR=75.2% Trades=105 DD=4.3% NP=322.0% Sharpe=1.96 Lev=2.4x
+FVG            WIF     4H   PF=2.63 WR=66.4% Trades=140 DD=5.0% NP=151.1% Sharpe=1.52 Lev=2.4x
+FVG            BONK    4H   PF=2.65 WR=72.5% Trades=138 DD=3.6% NP=112.2% Sharpe=1.51 Lev=2.4x
+Liq Sweep      ETH     4H   PF=2.67 WR=76.4% Trades=106 DD=8.5% NP=160.0% Sharpe=1.59 Lev=2.4x
+Donchian       SOL     1H   PF=3.42 WR=76.1% Trades=67 DD=7.1% NP=154.9% Sharpe=1.63 Lev=2.3x
+Stoch RSI      RENDER  1H   PF=4.23 WR=77.5% Trades=89 DD=9.1% NP=264.7% Sharpe=1.92 Lev=2.3x
+EMA Ribbon     JTO     4H   PF=3.11 WR=71.2% Trades=80 DD=7.0% NP=170.3% Sharpe=1.54 Lev=2.3x
+EMA Ribbon     MOODENG 4H   PF=3.12 WR=68.4% Trades=79 DD=7.3% NP=160.9% Sharpe=1.60 Lev=2.3x
+VWAP Dev       FARTCOIN 4H   PF=11.55 WR=86.7% Trades=75 DD=5.8% NP=319.1% Sharpe=2.26 Lev=2.3x
+VWAP Dev       PNUT    4H   PF=4.16 WR=72.7% Trades=88 DD=6.0% NP=231.4% Sharpe=1.91 Lev=2.3x
+VWAP Dev       MOODENG 4H   PF=5.44 WR=75.0% Trades=76 DD=7.0% NP=201.7% Sharpe=1.88 Lev=2.3x
+Stoch RSI      FARTCOIN 4H   PF=6.60 WR=79.2% Trades=72 DD=5.2% NP=326.5% Sharpe=2.10 Lev=2.3x
+Stoch RSI      PNUT    4H   PF=3.72 WR=75.7% Trades=74 DD=6.0% NP=211.9% Sharpe=1.74 Lev=2.3x
+Stoch RSI      MOODENG 4H   PF=4.56 WR=75.0% Trades=64 DD=9.0% NP=162.6% Sharpe=1.65 Lev=2.3x
+Supertrend     PENGU   1H   PF=5.33 WR=86.1% Trades=36 DD=4.6% NP=102.0% Sharpe=1.51 Lev=2.2x
+Stoch RSI      PENGU   1H   PF=2.52 WR=70.1% Trades=107 DD=8.0% NP=174.6% Sharpe=1.40 Lev=2.2x
+FVG            RENDER  1H   PF=2.26 WR=67.0% Trades=197 DD=7.7% NP=355.6% Sharpe=1.91 Lev=2.2x
+Donchian       MEW     4H   PF=21.91 WR=93.3% Trades=30 DD=2.7% NP=143.3% Sharpe=1.83 Lev=2.2x
+EMA Ribbon     FARTCOIN 4H   PF=2.44 WR=69.2% Trades=107 DD=8.1% NP=165.0% Sharpe=1.61 Lev=2.2x
+VWAP Dev       POPCAT  4H   PF=6.17 WR=72.4% Trades=58 DD=4.3% NP=167.5% Sharpe=1.82 Lev=2.2x
+Stoch RSI      SOL     4H   PF=2.46 WR=70.8% Trades=130 DD=9.0% NP=214.3% Sharpe=1.58 Lev=2.2x
+FVG            PENGU   4H   PF=2.84 WR=71.1% Trades=121 DD=5.5% NP=102.4% Sharpe=1.45 Lev=2.2x
+VWAP Dev       PENGU   15m  PF=2.73 WR=75.8% Trades=66 DD=9.4% NP=152.3% Sharpe=1.15 Lev=2.1x
+Donchian       ETH     1H   PF=2.55 WR=74.0% Trades=73 DD=6.5% NP=129.3% Sharpe=1.38 Lev=2.1x
+Donchian       BONK    1H   PF=2.51 WR=76.3% Trades=76 DD=9.8% NP=166.8% Sharpe=1.42 Lev=2.1x
+Donchian       RENDER  1H   PF=2.83 WR=73.8% Trades=84 DD=6.9% NP=151.6% Sharpe=1.45 Lev=2.1x
+Donchian       ETH     4H   PF=2.61 WR=69.2% Trades=78 DD=6.4% NP=106.3% Sharpe=1.25 Lev=2.1x
+Donchian       JTO     4H   PF=2.51 WR=69.8% Trades=63 DD=8.7% NP=107.2% Sharpe=1.16 Lev=2.1x
+Donchian       WIF     4H   PF=3.31 WR=73.5% Trades=68 DD=4.7% NP=119.8% Sharpe=1.41 Lev=2.1x
+Donchian       RENDER  4H   PF=2.55 WR=73.0% Trades=74 DD=6.1% NP=94.8% Sharpe=1.22 Lev=2.1x
+EMA Ribbon     POPCAT  4H   PF=4.06 WR=67.7% Trades=65 DD=8.4% NP=165.6% Sharpe=1.02 Lev=2.1x
+VWAP Dev       JTO     4H   PF=3.04 WR=69.8% Trades=63 DD=6.7% NP=117.9% Sharpe=1.35 Lev=2.1x
+FVG            JTO     4H   PF=2.71 WR=66.7% Trades=90 DD=4.1% NP=79.0% Sharpe=1.15 Lev=2.1x
+Liq Sweep      PENGU   4H   PF=2.90 WR=77.8% Trades=63 DD=5.7% NP=68.2% Sharpe=1.27 Lev=2.1x
+Stoch RSI      BONK    15m  PF=4.90 WR=87.8% Trades=41 DD=6.0% NP=172.4% Sharpe=1.37 Lev=2.0x
+Supertrend     WIF     1H   PF=2.93 WR=76.3% Trades=38 DD=5.8% NP=64.3% Sharpe=1.01 Lev=2.0x
+Donchian       WIF     1H   PF=3.49 WR=80.8% Trades=52 DD=11.9% NP=113.6% Sharpe=1.32 Lev=2.0x
+Donchian       FARTCOIN 1H   PF=3.77 WR=74.4% Trades=43 DD=3.2% NP=87.9% Sharpe=1.27 Lev=2.0x
+EMA Ribbon     SOL     1H   PF=2.14 WR=67.2% Trades=119 DD=10.0% NP=146.3% Sharpe=1.29 Lev=2.0x
+EMA Ribbon     RENDER  1H   PF=3.21 WR=71.6% Trades=141 DD=14.7% NP=887.3% Sharpe=0.81 Lev=2.0x
+VWAP Dev       BONK    1H   PF=2.06 WR=68.5% Trades=108 DD=12.2% NP=126.6% Sharpe=1.14 Lev=2.0x
+VWAP Dev       PENGU   1H   PF=2.50 WR=73.3% Trades=116 DD=11.6% NP=161.9% Sharpe=1.40 Lev=2.0x
+Stoch RSI      SOL     1H   PF=2.22 WR=69.4% Trades=111 DD=7.6% NP=127.6% Sharpe=1.25 Lev=2.0x
+MACD Vol       RENDER  1H   PF=2.70 WR=76.3% Trades=38 DD=5.3% NP=59.1% Sharpe=1.05 Lev=2.0x
+Liq Sweep      ETH     1H   PF=2.51 WR=70.6% Trades=102 DD=11.6% NP=124.8% Sharpe=1.31 Lev=2.0x
+Mean Rev       JUP     1H   PF=2.99 WR=68.6% Trades=51 DD=10.9% NP=94.3% Sharpe=1.12 Lev=2.0x
+Donchian       ORCA    4H   PF=2.70 WR=72.9% Trades=48 DD=6.0% NP=61.8% Sharpe=1.03 Lev=2.0x
+Donchian       FARTCOIN 4H   PF=2.78 WR=70.6% Trades=51 DD=8.0% NP=57.7% Sharpe=1.12 Lev=2.0x
+Donchian       PNUT    4H   PF=3.02 WR=74.1% Trades=58 DD=4.3% NP=92.6% Sharpe=1.27 Lev=2.0x
+EMA Ribbon     MEW     4H   PF=6.83 WR=83.3% Trades=30 DD=4.2% NP=110.6% Sharpe=1.48 Lev=2.0x
+EMA Ribbon     PNUT    4H   PF=2.35 WR=72.3% Trades=101 DD=12.5% NP=219.3% Sharpe=1.54 Lev=2.0x
+VWAP Dev       SOL     4H   PF=2.31 WR=76.7% Trades=116 DD=11.6% NP=139.4% Sharpe=1.55 Lev=2.0x
+VWAP Dev       ETH     4H   PF=2.09 WR=72.2% Trades=108 DD=7.5% NP=92.6% Sharpe=1.22 Lev=2.0x
+VWAP Dev       WIF     4H   PF=2.59 WR=69.4% Trades=108 DD=10.5% NP=181.0% Sharpe=1.54 Lev=2.0x
+VWAP Dev       BONK    4H   PF=2.41 WR=69.9% Trades=123 DD=8.0% NP=145.3% Sharpe=1.46 Lev=2.0x
+Stoch RSI      ETH     4H   PF=2.11 WR=69.6% Trades=125 DD=7.8% NP=143.4% Sharpe=1.34 Lev=2.0x
+Stoch RSI      BONK    4H   PF=2.21 WR=69.3% Trades=114 DD=10.1% NP=142.2% Sharpe=1.36 Lev=2.0x
+Stoch RSI      RENDER  4H   PF=2.18 WR=70.5% Trades=112 DD=8.1% NP=130.8% Sharpe=1.31 Lev=2.0x
+Stoch RSI      POPCAT  4H   PF=3.85 WR=73.8% Trades=42 DD=6.5% NP=93.9% Sharpe=1.37 Lev=2.0x
+Stoch RSI      MEW     4H   PF=4.64 WR=80.0% Trades=30 DD=6.6% NP=70.7% Sharpe=1.49 Lev=2.0x
+FVG            RENDER  4H   PF=2.12 WR=68.9% Trades=151 DD=6.2% NP=87.9% Sharpe=1.24 Lev=2.0x
+FVG            JUP     4H   PF=2.78 WR=62.7% Trades=150 DD=10.0% NP=163.9% Sharpe=1.58 Lev=2.0x
+MACD Vol       SOL     4H   PF=4.86 WR=78.8% Trades=33 DD=2.2% NP=43.6% Sharpe=1.10 Lev=2.0x
+MACD Vol       BONK    4H   PF=4.93 WR=80.0% Trades=30 DD=5.2% NP=47.7% Sharpe=1.12 Lev=2.0x
+Liq Sweep      WIF     4H   PF=3.59 WR=79.5% Trades=44 DD=4.4% NP=71.9% Sharpe=1.28 Lev=2.0x
+Liq Sweep      FARTCOIN 4H   PF=6.04 WR=83.3% Trades=30 DD=2.6% NP=48.3% Sharpe=1.30 Lev=2.0x
+Mean Rev       JTO     4H   PF=3.23 WR=66.0% Trades=47 DD=5.2% NP=85.7% Sharpe=1.13 Lev=2.0x
+Mean Rev       BONK    4H   PF=6.78 WR=84.2% Trades=38 DD=4.6% NP=79.2% Sharpe=1.47 Lev=2.0x
+Mean Rev       JUP     4H   PF=5.30 WR=78.4% Trades=37 DD=4.2% NP=101.5% Sharpe=1.39 Lev=2.0x
+Mean Rev       FARTCOIN 4H   PF=8.66 WR=82.4% Trades=34 DD=3.8% NP=93.5% Sharpe=1.47 Lev=2.0x
+Mean Rev       PNUT    4H   PF=4.39 WR=74.4% Trades=39 DD=4.0% NP=77.2% Sharpe=1.22 Lev=2.0x
+Donchian       PENGU   1H   PF=2.29 WR=73.1% Trades=78 DD=7.2% NP=113.3% Sharpe=1.31 Lev=1.9x
+EMA Ribbon     FARTCOIN 1H   PF=2.92 WR=69.7% Trades=33 DD=6.4% NP=53.3% Sharpe=0.99 Lev=1.9x
+Stoch RSI      BONK    1H   PF=2.30 WR=69.9% Trades=73 DD=9.3% NP=105.2% Sharpe=1.16 Lev=1.9x
+FVG            ETH     1H   PF=2.22 WR=65.9% Trades=88 DD=6.1% NP=53.2% Sharpe=1.02 Lev=1.9x
+MACD Vol       SOL     1H   PF=2.55 WR=75.0% Trades=32 DD=6.8% NP=29.8% Sharpe=0.74 Lev=1.9x
+Mean Rev       RENDER  1H   PF=2.87 WR=75.0% Trades=40 DD=14.5% NP=59.3% Sharpe=0.93 Lev=1.9x
+Supertrend     ETH     4H   PF=3.05 WR=73.3% Trades=30 DD=5.6% NP=42.0% Sharpe=0.92 Lev=1.9x
+Supertrend     WIF     4H   PF=3.05 WR=70.3% Trades=37 DD=4.1% NP=52.8% Sharpe=0.99 Lev=1.9x
+Donchian       BONK    4H   PF=2.37 WR=66.7% Trades=66 DD=7.1% NP=86.1% Sharpe=1.13 Lev=1.9x
+Donchian       PENGU   4H   PF=2.49 WR=66.2% Trades=68 DD=5.9% NP=86.8% Sharpe=1.16 Lev=1.9x
+Donchian       POPCAT  4H   PF=2.71 WR=66.7% Trades=45 DD=11.4% NP=88.9% Sharpe=0.70 Lev=1.9x
+Liq Sweep      SOL     4H   PF=2.38 WR=70.2% Trades=94 DD=6.3% NP=114.7% Sharpe=1.27 Lev=1.9x
+Liq Sweep      BONK    4H   PF=2.32 WR=67.5% Trades=80 DD=11.4% NP=85.6% Sharpe=1.17 Lev=1.9x
+Mean Rev       MOODENG 4H   PF=7.06 WR=71.4% Trades=42 DD=6.7% NP=186.1% Sharpe=0.86 Lev=1.9x
+Supertrend     RENDER  15m  PF=2.00 WR=71.4% Trades=70 DD=11.0% NP=100.1% Sharpe=0.85 Lev=1.8x
+Supertrend     RENDER  1H   PF=1.98 WR=65.3% Trades=72 DD=8.6% NP=90.4% Sharpe=1.02 Lev=1.8x
+Stoch RSI      ETH     1H   PF=1.75 WR=65.8% Trades=111 DD=11.9% NP=68.8% Sharpe=0.86 Lev=1.8x
+FVG            BONK    1H   PF=1.78 WR=67.3% Trades=150 DD=8.9% NP=124.7% Sharpe=1.21 Lev=1.8x
+Liq Sweep      RENDER  1H   PF=2.03 WR=68.9% Trades=61 DD=8.8% NP=55.5% Sharpe=0.88 Lev=1.8x
+Supertrend     JUP     4H   PF=2.21 WR=69.6% Trades=56 DD=8.3% NP=70.2% Sharpe=1.06 Lev=1.8x
+Stoch RSI      JTO     4H   PF=2.39 WR=67.8% Trades=59 DD=7.6% NP=92.0% Sharpe=1.11 Lev=1.8x
+Stoch RSI      PENGU   4H   PF=2.29 WR=61.8% Trades=110 DD=13.3% NP=152.4% Sharpe=1.29 Lev=1.8x
+FVG            FARTCOIN 4H   PF=2.48 WR=60.7% Trades=107 DD=7.2% NP=76.9% Sharpe=1.32 Lev=1.8x
+FVG            MEW     4H   PF=3.21 WR=60.5% Trades=38 DD=2.8% NP=34.5% Sharpe=1.19 Lev=1.8x
+FVG            MOODENG 4H   PF=2.27 WR=66.7% Trades=75 DD=9.8% NP=62.6% Sharpe=0.99 Lev=1.8x
+Mean Rev       ETH     4H   PF=2.48 WR=71.7% Trades=53 DD=6.6% NP=66.6% Sharpe=1.11 Lev=1.8x
+EMA Ribbon     BONK    15m  PF=1.89 WR=68.3% Trades=82 DD=12.8% NP=153.6% Sharpe=0.93 Lev=1.7x
+Stoch RSI      PENGU   15m  PF=2.05 WR=71.2% Trades=52 DD=10.7% NP=79.4% Sharpe=0.83 Lev=1.7x
+Supertrend     ETH     1H   PF=2.21 WR=68.4% Trades=38 DD=6.9% NP=41.2% Sharpe=0.80 Lev=1.7x
+Supertrend     BONK    1H   PF=2.02 WR=70.7% Trades=41 DD=6.1% NP=38.8% Sharpe=0.72 Lev=1.7x
+EMA Ribbon     JUP     1H   PF=2.37 WR=70.0% Trades=50 DD=7.4% NP=73.8% Sharpe=0.98 Lev=1.7x
+Supertrend     JTO     4H   PF=2.33 WR=66.7% Trades=39 DD=11.0% NP=51.4% Sharpe=0.91 Lev=1.7x
+Supertrend     PNUT    4H   PF=2.04 WR=66.7% Trades=39 DD=7.1% NP=38.3% Sharpe=0.76 Lev=1.7x
+FVG            ETH     4H   PF=2.14 WR=62.7% Trades=83 DD=3.8% NP=34.9% Sharpe=0.81 Lev=1.7x
+Mean Rev       SOL     4H   PF=2.00 WR=68.6% Trades=35 DD=5.9% NP=26.5% Sharpe=0.62 Lev=1.7x
+Mean Rev       ORCA    4H   PF=2.16 WR=65.1% Trades=43 DD=14.5% NP=67.5% Sharpe=0.85 Lev=1.7x
+Stoch RSI      ETH     15m  PF=1.51 WR=66.7% Trades=102 DD=9.8% NP=76.7% Sharpe=0.80 Lev=1.6x
+Mean Rev       SOL     15m  PF=1.88 WR=74.2% Trades=31 DD=12.7% NP=26.1% Sharpe=0.55 Lev=1.6x
+Supertrend     JUP     1H   PF=1.94 WR=66.0% Trades=47 DD=8.1% NP=48.8% Sharpe=0.76 Lev=1.6x
+Supertrend     BONK    4H   PF=1.98 WR=67.6% Trades=37 DD=6.7% NP=26.5% Sharpe=0.67 Lev=1.6x
+Donchian       MOODENG 4H   PF=2.15 WR=62.7% Trades=51 DD=8.1% NP=57.1% Sharpe=0.94 Lev=1.6x
+Donchian       RENDER  15m  PF=1.94 WR=73.3% Trades=86 DD=16.1% NP=147.5% Sharpe=0.94 Lev=1.5x
+EMA Ribbon     RENDER  15m  PF=1.48 WR=70.6% Trades=85 DD=19.3% NP=93.7% Sharpe=0.76 Lev=1.5x
+Mean Rev       RENDER  15m  PF=2.02 WR=76.1% Trades=67 DD=15.9% NP=148.1% Sharpe=1.04 Lev=1.5x
+EMA Ribbon     ETH     1H   PF=1.87 WR=62.2% Trades=135 DD=15.0% NP=109.9% Sharpe=1.05 Lev=1.5x
+VWAP Dev       SOL     1H   PF=1.74 WR=66.1% Trades=118 DD=18.8% NP=72.4% Sharpe=0.88 Lev=1.5x
+VWAP Dev       ETH     1H   PF=1.63 WR=67.3% Trades=107 DD=15.1% NP=54.2% Sharpe=0.75 Lev=1.5x
+VWAP Dev       RENDER  1H   PF=2.39 WR=69.1% Trades=81 DD=16.8% NP=108.7% Sharpe=1.12 Lev=1.5x
+FVG            PENGU   1H   PF=1.69 WR=62.6% Trades=174 DD=13.5% NP=108.6% Sharpe=1.09 Lev=1.5x
+Donchian       SOL     4H   PF=1.60 WR=66.7% Trades=81 DD=14.6% NP=47.2% Sharpe=0.75 Lev=1.5x
+VWAP Dev       RENDER  4H   PF=1.99 WR=67.9% Trades=109 DD=15.3% NP=111.9% Sharpe=1.23 Lev=1.5x
+VWAP Dev       PENGU   4H   PF=2.22 WR=69.6% Trades=115 DD=15.6% NP=113.5% Sharpe=1.29 Lev=1.5x
+EMA Ribbon     WIF     1H   PF=1.63 WR=66.7% Trades=54 DD=12.5% NP=53.7% Sharpe=0.59 Lev=1.4x
+VWAP Dev       JUP     1H   PF=2.43 WR=54.3% Trades=35 DD=7.5% NP=41.0% Sharpe=0.79 Lev=1.4x
+Liq Sweep      SOL     1H   PF=1.44 WR=60.8% Trades=97 DD=20.6% NP=34.4% Sharpe=0.50 Lev=1.4x
+Mean Rev       BONK    1H   PF=1.87 WR=64.9% Trades=37 DD=12.4% NP=30.3% Sharpe=0.59 Lev=1.4x
+Mean Rev       FARTCOIN 1H   PF=1.98 WR=61.0% Trades=41 DD=7.7% NP=32.8% Sharpe=0.62 Lev=1.4x
+Supertrend     RENDER  4H   PF=1.85 WR=61.1% Trades=36 DD=4.2% NP=26.5% Sharpe=0.60 Lev=1.4x
+Donchian       JUP     4H   PF=1.68 WR=63.4% Trades=71 DD=10.2% NP=54.5% Sharpe=0.80 Lev=1.4x
+VWAP Dev       ORCA    4H   PF=1.76 WR=62.0% Trades=50 DD=9.5% NP=29.1% Sharpe=0.56 Lev=1.4x
+FVG            SOL     4H   PF=1.61 WR=62.1% Trades=95 DD=4.7% NP=20.1% Sharpe=0.60 Lev=1.4x
+FVG            ORCA    4H   PF=2.10 WR=52.8% Trades=36 DD=6.3% NP=16.6% Sharpe=0.52 Lev=1.4x
+FVG            PNUT    4H   PF=1.42 WR=61.0% Trades=105 DD=9.0% NP=27.2% Sharpe=0.55 Lev=1.4x
+Liq Sweep      RENDER  4H   PF=1.66 WR=63.2% Trades=87 DD=11.4% NP=50.5% Sharpe=0.78 Lev=1.4x
+Liq Sweep      JUP     4H   PF=1.73 WR=64.0% Trades=50 DD=10.7% NP=32.0% Sharpe=0.68 Lev=1.4x
+Mean Rev       WIF     4H   PF=1.83 WR=60.5% Trades=38 DD=8.4% NP=29.8% Sharpe=0.59 Lev=1.4x
+Mean Rev       ETH     15m  PF=1.54 WR=66.7% Trades=36 DD=10.8% NP=22.0% Sharpe=0.44 Lev=1.3x
+Liq Sweep      SOL     15m  PF=1.46 WR=62.3% Trades=61 DD=20.7% NP=33.3% Sharpe=0.47 Lev=1.2x
+Donchian       JUP     1H   PF=1.56 WR=59.3% Trades=59 DD=8.8% NP=42.1% Sharpe=0.58 Lev=1.2x
+Mean Rev       ETH     1H   PF=1.62 WR=61.7% Trades=47 DD=15.5% NP=24.4% Sharpe=0.51 Lev=1.2x
+Supertrend     MOODENG 4H   PF=1.60 WR=58.1% Trades=43 DD=11.4% NP=30.5% Sharpe=0.60 Lev=1.2x
+EMA Ribbon     ORCA    4H   PF=1.68 WR=62.7% Trades=59 DD=8.1% NP=41.9% Sharpe=0.70 Lev=1.2x
+Liq Sweep      PENGU   1H   PF=1.42 WR=60.5% Trades=43 DD=15.1% NP=18.2% Sharpe=0.40 Lev=1.1x
+Supertrend     FARTCOIN 4H   PF=1.65 WR=54.8% Trades=42 DD=8.4% NP=28.7% Sharpe=0.59 Lev=1.1x
+VWAP Dev       MEW     4H   PF=1.59 WR=53.8% Trades=39 DD=7.0% NP=24.4% Sharpe=0.61 Lev=1.1x
+Donchian       BONK    15m  PF=1.61 WR=68.5% Trades=92 DD=28.3% NP=173.0% Sharpe=0.79 Lev=1.0x
+Mean Rev       PENGU   15m  PF=1.78 WR=68.1% Trades=69 DD=25.4% NP=72.9% Sharpe=0.64 Lev=1.0x

@@ -1,0 +1,30 @@
+Nightly Backtest Summary — nightly_20260501_2336
+Tests: 470 | Passing (WF-validated): 0
+
+No strategies passed walk-forward validation.
+
+Top 15 by combined PF (>=30 trades, WF status shown):
+  Stoch RSI      FARTCOIN 4H   PF=4.49 WR=65.0% Trades=40 DD=3.5% IS_PF=4.62 OOS_PF=4.17 Ret=90% [fail]
+  VWAP Dev       FARTCOIN 4H   PF=3.88 WR=70.3% Trades=37 DD=5.4% IS_PF=2.93 OOS_PF=10.34 Ret=353% [fail]
+  VWAP Dev       MOODENG 4H   PF=2.13 WR=50.0% Trades=42 DD=14.6% IS_PF=1.57 OOS_PF=4.82 Ret=307% [fail]
+  VWAP Dev       JUP     4H   PF=1.89 WR=45.9% Trades=61 DD=13.6% IS_PF=1.43 OOS_PF=2.89 Ret=202% [fail]
+  VWAP Dev       POPCAT  4H   PF=1.81 WR=48.6% Trades=35 DD=5.8% IS_PF=2.51 OOS_PF=0.00 Ret=0% [fail]
+  VWAP Dev       JTO     4H   PF=1.48 WR=42.1% Trades=38 DD=9.8% IS_PF=1.78 OOS_PF=0.00 Ret=0% [fail]
+  Donchian       RENDER  4H   PF=1.47 WR=29.0% Trades=31 DD=12.7% IS_PF=1.36 OOS_PF=1.94 Ret=143% [fail]
+  VWAP Dev       PNUT    4H   PF=1.37 WR=52.1% Trades=48 DD=7.0% IS_PF=1.42 OOS_PF=1.05 Ret=74% [fail]
+  Stoch RSI      PENGU   4H   PF=1.30 WR=48.1% Trades=52 DD=14.6% IS_PF=1.16 OOS_PF=1.70 Ret=147% [fail]
+  VWAP Dev       WIF     4H   PF=1.23 WR=52.5% Trades=61 DD=14.0% IS_PF=1.08 OOS_PF=1.37 Ret=127% [fail]
+  FVG            MOODENG 4H   PF=1.17 WR=32.5% Trades=40 DD=13.7% IS_PF=1.26 OOS_PF=0.71 Ret=56% [fail]
+  Stoch RSI      WIF     4H   PF=1.14 WR=45.9% Trades=61 DD=20.9% IS_PF=1.25 OOS_PF=0.79 Ret=63% [fail]
+  Stoch RSI      PNUT    4H   PF=1.12 WR=46.2% Trades=39 DD=15.6% IS_PF=1.33 OOS_PF=0.00 Ret=0% [fail]
+  EMA Ribbon     PENGU   4H   PF=1.10 WR=30.9% Trades=55 DD=22.4% IS_PF=1.33 OOS_PF=0.87 Ret=65% [fail]
+  FVG            PENGU   4H   PF=1.07 WR=28.1% Trades=57 DD=12.5% IS_PF=1.49 OOS_PF=0.10 Ret=7% [fail]
+
+PF distribution (n=119 combos with >=30 trades):
+     0.00-0.50    63
+     0.50-0.80    24
+     0.80-1.00    15
+     1.00-1.20     7
+     1.20-1.50     5
+     1.50-2.00     2
+         2.00+     3

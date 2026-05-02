@@ -1,0 +1,101 @@
+//@version=6
+// Stochastic RSI v1.0 — Alert Indicator
+// Passed backtesting thresholds (risk-managed engine):
+//   RENDER 1H  PF=4.53  WR=80.4%  46 trades  DD=9.1%   NP=101.3%
+//   WIF    4H  PF=2.33  WR=64.6%  48 trades  DD=8.2%   NP=56.7%
+//   SOL    4H  PF=2.16  WR=66.7%  57 trades  DD=5.1%   NP=54.1%
+//   SOL    1H  PF=2.18  WR=72.2%  54 trades  DD=7.6%   NP=50.7%
+//   ETH    4H  PF=2.04  WR=65.5%  58 trades  DD=6.4%   NP=47.8%
+//   ETH    1H  PF=2.27  WR=68.1%  47 trades  DD=7.9%   NP=39.5%
+//
+// Signal logic: Stochastic RSI K/D crossover with zone + RSI trend filter
+//   BUY:   K crosses above D while both < 20 (oversold) AND RSI < 50
+//   CLOSE: K crosses down while overbought (long-only: removed short_exit which
+//          fired on the same bar as long_entry and caused instant BUY→CLOSE loops)
+
+indicator("Stochastic RSI v1.0 — Alerts", overlay=false, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_srsi = "Stoch RSI Settings"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+rsiLen         = input.int(14,   "RSI Length",          minval=2,    group=grp_srsi)
+stochLen       = input.int(14,   "Stochastic Length",   minval=2,    group=grp_srsi)
+kSmooth        = input.int(3,    "K Smoothing",         minval=1,    group=grp_srsi)
+dSmooth        = input.int(3,    "D Smoothing",         minval=1,    group=grp_srsi)
+obLevel        = input.int(80,   "Overbought Level",    minval=50,   group=grp_srsi)
+osLevel        = input.int(20,   "Oversold Level",      maxval=50,   group=grp_srsi)
+confidence     = input.int(65,   "Confidence Score",    minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage",  minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %",   minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+rsi_val  = ta.rsi(close, rsiLen)
+rsi_min  = ta.lowest(rsi_val, stochLen)
+rsi_max  = ta.highest(rsi_val, stochLen)
+raw_k    = (rsi_val - rsi_min) / (rsi_max - rsi_min) * 100
+k        = ta.sma(raw_k, kSmooth)
+d        = ta.sma(k, dSmooth)
+
+atr_val  = ta.atr(14)
+
+// K/D crossovers
+k_cross_up   = ta.crossover(k, d)
+k_cross_down = ta.crossunder(k, d)
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = k_cross_up   and k < osLevel and rsi_val < 50
+long_exit   = k_cross_down and k > obLevel
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(k, "K",  color=#00ff41, linewidth=2)
+plot(d, "D",  color=#ff4444, linewidth=1)
+hline(obLevel, "Overbought", color=color.new(color.red, 60),   linestyle=hline.style_dashed)
+hline(osLevel, "Oversold",   color=color.new(color.green, 60), linestyle=hline.style_dashed)
+hline(50,      "Mid",        color=color.new(color.gray, 80),  linestyle=hline.style_dotted)
+
+// Zone background
+bgcolor(k < osLevel ? color.new(color.green, 92) : k > obLevel ? color.new(color.red, 92) : na)
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.bottom, color.green,  size=size.small)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "Stoch RSI v1.0"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+if long_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions ──────────────────────────────────────────────────────────
+alertcondition(long_entry,              "Stoch RSI — BUY",   "Stoch RSI BUY")
+alertcondition(long_exit, "Stoch RSI — CLOSE", "Stoch RSI CLOSE")

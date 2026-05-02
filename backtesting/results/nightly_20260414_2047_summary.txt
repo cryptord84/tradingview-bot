@@ -1,0 +1,4 @@
+Nightly Backtest Summary — nightly_20260414_2047
+Tests: 140 | Passing: 0
+
+No strategies passed thresholds.

@@ -1,0 +1,93 @@
+//@version=6
+// Liquidity Sweep v1.0 — Alert Indicator
+// Passed backtesting thresholds (risk-managed engine):
+//   ETH    1H  PF=3.43  WR=75.0%  52 trades  DD=4.9%   NP=77.3%
+//   SOL    4H  PF=2.47  WR=71.1%  45 trades  DD=6.0%   NP=42.3%
+//   ETH    4H  PF=2.05  WR=69.2%  52 trades  DD=8.5%   NP=39.0%
+//   SOL    1H  PF=2.01  WR=75.0%  44 trades  DD=6.1%   NP=34.1%
+//   BONK   4H  PF=1.96  WR=63.3%  30 trades  DD=11.4%  NP=20.1%
+//
+// Signal logic: ICT Liquidity Sweep — stop-hunt reversal
+//   BUY:   price wicks below swing low (10-bar) but closes above it + volume surge
+//   CLOSE: opposite sweep forms
+
+indicator("Liquidity Sweep v1.0 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_liq  = "Liquidity Settings"
+var grp_vol  = "Volume Filter"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+lookback       = input.int(10,   "Swing Lookback",     minval=3,    group=grp_liq)
+volLen         = input.int(20,   "Volume MA Length",    minval=5,    group=grp_vol)
+volMult        = input.float(1.2, "Min Volume (x MA)",  step=0.1,   group=grp_vol)
+confidence     = input.int(65,   "Confidence Score",   minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage",  minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %",  minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(true, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showLevels     = input.bool(true, "Show Swing Levels",  group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+swing_high = ta.highest(high, lookback)[1]  // prior bars only — no look-ahead
+swing_low  = ta.lowest(low,   lookback)[1]
+
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+vol_ok  = volume > ta.sma(volume, volLen) * volMult
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+// Bullish sweep: wick through swing low but close above it = institutional reversal
+bull_sweep = low < swing_low and close > swing_low and vol_ok
+// Bearish sweep: wick through swing high but close below it
+bear_sweep = high > swing_high and close < swing_high and vol_ok
+
+long_entry  = bull_sweep
+// `and not long_entry` prevents a wide double-wick bar (both bull_sweep and
+// bear_sweep true) from emitting same-bar BUY+CLOSE.
+long_exit   = bear_sweep and not long_entry
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(showLevels ? swing_high : na, "Swing High", color=color.new(color.red, 50),   linewidth=1, style=plot.style_stepline)
+plot(showLevels ? swing_low  : na, "Swing Low",  color=color.new(color.green, 50), linewidth=1, style=plot.style_stepline)
+
+plotshape(long_entry,  "Bullish Sweep", shape.triangleup,   location.belowbar, color.green,  size=size.small, text="SWEEP")
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "Liquidity Sweep v1.0"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+if long_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions ──────────────────────────────────────────────────────────
+alertcondition(long_entry,              "Liq Sweep — BUY",   "Liq Sweep BUY")
+alertcondition(long_exit, "Liq Sweep — CLOSE", "Liq Sweep CLOSE")

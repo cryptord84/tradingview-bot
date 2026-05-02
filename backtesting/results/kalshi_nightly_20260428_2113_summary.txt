@@ -1,0 +1,147 @@
+Kalshi Nightly Backtest — 20260428_2113
+Started: 2026-04-29T01:13:02.292918+00:00  Elapsed: 219.6s  Strategy configs: 12  Calibration runs: 5  Markets/config: 242
+Sim defaults for the strategy sweep: fee=0c, fill_rate=1.0 (optimistic).
+
+=== STRATEGY SWEEP — sorted by ROI ===
+hs= 3c  dz=35-55c  sz=10  inv= 50  skew=0 | P&L=$-40.84  ROI= -0.34%  WR= 59.1%  Sharpe=-0.03  DD=$197.99  fills=3,077  adv=34%  mkts=242
+hs= 3c  dz=35-50c  sz=10  inv= 50  skew=0 | P&L=$-71.41  ROI= -0.60%  WR= 57.4%  Sharpe=-0.06  DD=$202.99  fills=3,090  adv=35%  mkts=242
+hs= 3c  dz=41-55c  sz=10  inv= 50  skew=0 | P&L=$-72.17  ROI= -0.61%  WR= 56.6%  Sharpe=-0.06  DD=$227.59  fills=3,102  adv=34%  mkts=242
+hs= 3c  dz=41-50c  sz=10  inv= 50  skew=0 | P&L=$-110.89  ROI= -0.93%  WR= 53.7%  Sharpe=-0.09  DD=$242.26  fills=3,115  adv=35%  mkts=242
+hs= 2c  dz=35-55c  sz=10  inv= 50  skew=0 | P&L=$-229.63  ROI= -1.89%  WR= 56.6%  Sharpe=-0.18  DD=$295.46  fills=3,107  adv=34%  mkts=242
+hs= 2c  dz=41-55c  sz=10  inv= 50  skew=0 | P&L=$-238.25  ROI= -1.96%  WR= 55.0%  Sharpe=-0.20  DD=$295.07  fills=3,138  adv=34%  mkts=242
+hs= 2c  dz=35-50c  sz=10  inv= 50  skew=0 | P&L=$-253.62  ROI= -2.08%  WR= 56.2%  Sharpe=-0.20  DD=$319.61  fills=3,133  adv=34%  mkts=242
+hs= 2c  dz=41-50c  sz=10  inv= 50  skew=0 | P&L=$-263.42  ROI= -2.16%  WR= 55.0%  Sharpe=-0.22  DD=$317.04  fills=3,163  adv=34%  mkts=242
+hs= 1c  dz=35-55c  sz=10  inv= 50  skew=0 | P&L=$-288.12  ROI= -2.34%  WR= 53.3%  Sharpe=-0.22  DD=$317.47  fills=3,067  adv=34%  mkts=242
+hs= 1c  dz=41-55c  sz=10  inv= 50  skew=0 | P&L=$-289.11  ROI= -2.34%  WR= 51.2%  Sharpe=-0.25  DD=$296.76  fills=3,107  adv=35%  mkts=242
+hs= 1c  dz=35-50c  sz=10  inv= 50  skew=0 | P&L=$-295.10  ROI= -2.39%  WR= 51.2%  Sharpe=-0.24  DD=$308.94  fills=3,094  adv=35%  mkts=242
+hs= 1c  dz=41-50c  sz=10  inv= 50  skew=0 | P&L=$-316.66  ROI= -2.56%  WR= 50.0%  Sharpe=-0.28  DD=$325.19  fills=3,130  adv=35%  mkts=242
+
+=== CALIBRATION SWEEP (best-strategy × fee × fill_rate) ===
+Strategy: hs= 3c  dz=35-55c  sz=10  inv= 50  skew=0
+  fee=0c fill_rate=1.00        | P&L=$-40.84  ROI= -0.34%  WR= 59.1%  fees=$0.00  fills=3,077  adv=34%
+  fee=2c fill_rate=1.00        | P&L=$-518.04  ROI= -4.37%  WR= 29.8%  fees=$477.20  fills=3,077  adv=34%
+  fee=2c fill_rate=0.50        | P&L=$-473.49  ROI= -4.13%  WR= 27.7%  fees=$468.18  fills=6,869  adv=30%
+  fee=2c fill_rate=0.30        | P&L=$-464.73  ROI= -4.21%  WR= 27.7%  fees=$456.60  fills=10,571  adv=29%
+  fee=2c fill_rate=0.10        | P&L=$-380.42  ROI= -3.87%  WR= 24.8%  fees=$419.96  fills=20,998  adv=26%
+
+=== PER-CONFIG BREAKDOWN (strategy sweep) ===
+
+hs= 3c  dz=35-55c  sz=10  inv= 50  skew=0
+  Markets:           242 (241 with fills)
+  Total fills:       3,077  (adverse: 1,033 / 33.6%)
+  Total invested:    $11,860.84
+  Total fees:        $0.00
+  Total P&L (net):   $-40.84  ROI -0.34%
+  Mean P&L/market:   $-0.17
+  Median P&L/market: $+0.67
+  Win rate:          59.1%
+  Sharpe-like:       -0.03
+  Max drawdown:      $197.99
+  best 3 markets:
+    KXMLBGAME-25OCT15TORSEA-TOR         P&L=$+20.35  fills=12
+    KXETHD-25OCT0314-T4489.99           P&L=$+16.55  fills=13
+    KXNHLGAME-25NOV13NYIVGK-VGK         P&L=$+15.60  fills=17
+  worst 3 markets:
+    KXETHD-25OCT0311-T4469.99           P&L=$-26.90  fills=5
+    KXETHD-24NOV0717-T2839.99           P&L=$-22.30  fills=10
+    KXEPSTEINLIST-26-DLAM               P&L=$-19.46  fills=14
+
+hs= 3c  dz=35-50c  sz=10  inv= 50  skew=0
+  Markets:           242 (241 with fills)
+  Total fills:       3,090  (adverse: 1,069 / 34.6%)
+  Total invested:    $11,901.41
+  Total fees:        $0.00
+  Total P&L (net):   $-71.41  ROI -0.60%
+  Mean P&L/market:   $-0.30
+  Median P&L/market: $+0.56
+  Win rate:          57.4%
+  Sharpe-like:       -0.06
+  Max drawdown:      $202.99
+  best 3 markets:
+    KXMLBGAME-25OCT15TORSEA-TOR         P&L=$+18.90  fills=11
+    KXNHLGAME-25NOV13NYIVGK-VGK         P&L=$+15.60  fills=17
+    KXETHD-25OCT0314-T4489.99           P&L=$+14.79  fills=14
+  worst 3 markets:
+    KXETHD-25OCT0311-T4469.99           P&L=$-26.90  fills=5
+    KXETHD-24NOV0717-T2839.99           P&L=$-22.30  fills=10
+    KXEPSTEINLIST-26-DLAM               P&L=$-19.46  fills=14
+
+hs= 3c  dz=41-55c  sz=10  inv= 50  skew=0
+  Markets:           242 (241 with fills)
+  Total fills:       3,102  (adverse: 1,054 / 34.0%)
+  Total invested:    $11,904.17
+  Total fees:        $0.00
+  Total P&L (net):   $-72.17  ROI -0.61%
+  Mean P&L/market:   $-0.30
+  Median P&L/market: $+0.52
+  Win rate:          56.6%
+  Sharpe-like:       -0.06
+  Max drawdown:      $227.59
+  best 3 markets:
+    KXMLBGAME-25OCT15TORSEA-TOR         P&L=$+17.71  fills=13
+    KXNHLGAME-25NOV13NYIVGK-VGK         P&L=$+14.08  fills=16
+    KXETHD-25OCT0314-T4489.99           P&L=$+12.27  fills=14
+  worst 3 markets:
+    KXETHD-25OCT0311-T4469.99           P&L=$-28.93  fills=7
+    KXETHD-24NOV0717-T2839.99           P&L=$-22.30  fills=10
+    KXEPSTEINLIST-26-DLAM               P&L=$-18.51  fills=15
+
+hs= 1c  dz=41-55c  sz=10  inv= 50  skew=0
+  Markets:           242 (242 with fills)
+  Total fills:       3,107  (adverse: 1,080 / 34.8%)
+  Total invested:    $12,339.11
+  Total fees:        $0.00
+  Total P&L (net):   $-289.11  ROI -2.34%
+  Mean P&L/market:   $-1.19
+  Median P&L/market: $+0.10
+  Win rate:          51.2%
+  Sharpe-like:       -0.25
+  Max drawdown:      $296.76
+  best 3 markets:
+    KXBTCD-24NOV2017-T94249.99          P&L=$+15.10  fills=12
+    KXBTCD-24NOV2017-T94749.99          P&L=$+10.07  fills=13
+    KXETHD-25APR0122-T1889.99           P&L=$+9.70  fills=1
+  worst 3 markets:
+    KXETHD-24NOV0717-T2839.99           P&L=$-24.90  fills=10
+    KXEPSTEINLIST-26-BCLI               P&L=$-20.78  fills=14
+    KXETHD-25OCT0311-T4469.99           P&L=$-19.99  fills=11
+
+hs= 1c  dz=35-50c  sz=10  inv= 50  skew=0
+  Markets:           242 (242 with fills)
+  Total fills:       3,094  (adverse: 1,072 / 34.6%)
+  Total invested:    $12,327.10
+  Total fees:        $0.00
+  Total P&L (net):   $-295.10  ROI -2.39%
+  Mean P&L/market:   $-1.22
+  Median P&L/market: $+0.10
+  Win rate:          51.2%
+  Sharpe-like:       -0.24
+  Max drawdown:      $308.94
+  best 3 markets:
+    KXBTCD-24NOV2017-T94249.99          P&L=$+13.70  fills=10
+    KXBTCD-24NOV2017-T94749.99          P&L=$+13.59  fills=11
+    KXMLBGAME-25OCT15TORSEA-TOR         P&L=$+13.35  fills=12
+  worst 3 markets:
+    KXETHD-25OCT0311-T4469.99           P&L=$-32.20  fills=8
+    KXETHD-24NOV0717-T2839.99           P&L=$-24.90  fills=10
+    KXEPSTEINNO-26JAN01                 P&L=$-17.68  fills=11
+
+hs= 1c  dz=41-50c  sz=10  inv= 50  skew=0
+  Markets:           242 (242 with fills)
+  Total fills:       3,130  (adverse: 1,082 / 34.6%)
+  Total invested:    $12,366.66
+  Total fees:        $0.00
+  Total P&L (net):   $-316.66  ROI -2.56%
+  Mean P&L/market:   $-1.31
+  Median P&L/market: $+0.04
+  Win rate:          50.0%
+  Sharpe-like:       -0.28
+  Max drawdown:      $325.19
+  best 3 markets:
+    KXBTCD-24NOV2017-T94249.99          P&L=$+13.70  fills=10
+    KXBTCD-24NOV2017-T94749.99          P&L=$+11.39  fills=13
+    KXETHD-25APR0122-T1889.99           P&L=$+9.70  fills=1
+  worst 3 markets:
+    KXETHD-24NOV0717-T2839.99           P&L=$-24.90  fills=10
+    KXETHD-25OCT0311-T4469.99           P&L=$-19.99  fills=11
+    KXEPSTEINNO-26JAN01                 P&L=$-17.68  fills=11

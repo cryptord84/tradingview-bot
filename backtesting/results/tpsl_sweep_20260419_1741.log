@@ -1,0 +1,352 @@
+
+================================================================================
+  TP/SL SWEEP
+================================================================================
+  Strategies: ['Mean Rev', 'RSI Div', 'EMA Ribbon', 'VWAP Dev', 'Donchian', 'Stoch RSI', 'FVG', 'Liq Sweep']
+  Tokens:     ALL fetched
+  TFs:        ['1H', '4H']
+  SL grid:    [1.0, 1.25, 1.5, 2.0, 2.5]
+  TP grid:    [1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+  Valid cells per slot: 24 (tp > sl)
+  Slots planned: ???????????????? → ~? backtests
+  Bars: 3000
+================================================================================
+
+Fetching 1H data…
+  SOL (SOLUSDT)… 3000 bars
+  ETH (ETHUSDT)… 3000 bars
+  JTO (JTOUSDT)… 3000 bars
+  WIF (WIFUSDT)… 3000 bars
+  BONK (BONKUSDT)… 3000 bars
+  ORCA (ORCAUSDT)… 3000 bars
+  RENDER (RENDERUSDT)… 3000 bars
+  JUP (JUPUSDT)… 3000 bars
+  PENGU (PENGUUSDT)… 3000 bars
+  FARTCOIN (FARTCOINUSDT)… 3000 bars
+  POPCAT (POPCATUSDT)… 3000 bars
+  MEW (MEWUSDT)… 3000 bars
+  PNUT (PNUTUSDT)… 3000 bars
+  MOODENG (MOODENGUSDT)… 3000 bars
+  PYTH (CoinGecko:pyth-network)… 2165 bars
+  RAY (CoinGecko:raydium)… 2167 bars
+  W (CoinGecko:wormhole)… 2166 bars
+  HNT (CoinGecko:helium)… 2166 bars
+  DRIFT (CoinGecko:drift-protocol)… 
+  [coingecko] 429 on drift-protocol, skipping
+skipped
+  TNSR (CoinGecko:tensor)… 
+  [coingecko] 429 on tensor, skipping
+skipped
+  → 18 tokens available on 1H
+
+Fetching 4H data…
+  SOL (SOLUSDT)… 3000 bars
+  ETH (ETHUSDT)… 3000 bars
+  JTO (JTOUSDT)… 2332 bars
+  WIF (WIFUSDT)… 2968 bars
+  BONK (BONKUSDT)… 3000 bars
+  ORCA (ORCAUSDT)… 2290 bars
+  RENDER (RENDERUSDT)… 3000 bars
+  JUP (JUPUSDT)… 2374 bars
+  PENGU (PENGUUSDT)… 2752 bars
+  FARTCOIN (FARTCOINUSDT)… 1834 bars
+  POPCAT (POPCATUSDT)… 1792 bars
+  MEW (MEWUSDT)… 1282 bars
+  PNUT (PNUTUSDT)… 2794 bars
+  MOODENG (MOODENGUSDT)… 1786 bars
+  PYTH (CoinGecko:pyth-network)… 
+  [coingecko] 429 on pyth-network, skipping
+skipped
+  RAY (CoinGecko:raydium)… 
+  [coingecko] 429 on raydium, skipping
+skipped
+  W (CoinGecko:wormhole)… 
+  [coingecko] 429 on wormhole, skipping
+skipped
+  HNT (CoinGecko:helium)… 
+  [coingecko] 429 on helium, skipping
+skipped
+  DRIFT (CoinGecko:drift-protocol)… 
+  [coingecko] 429 on drift-protocol, skipping
+skipped
+  TNSR (CoinGecko:tensor)… 
+  [coingecko] 429 on tensor, skipping
+skipped
+  → 14 tokens available on 4H
+
+  Mean Rev       SOL      1H  winner: sl=1.5 tp=4.0 PF=1.31 trades=48 DD=17.3%
+  Mean Rev       ETH      1H  winner: sl=2.0 tp=5.0 PF=1.69 trades=66 DD=19.9%
+  Mean Rev       JTO      1H  no passing cells
+  Mean Rev       WIF      1H  no passing cells
+  Mean Rev       BONK     1H  winner: sl=2.5 tp=5.0 PF=1.50 trades=50 DD=14.8%
+  Mean Rev       ORCA     1H  no passing cells
+  Mean Rev       RENDER   1H  winner: sl=2.0 tp=5.0 PF=4.57 trades=58 DD=7.5%
+  Mean Rev       JUP      1H  winner: sl=1.5 tp=5.0 PF=3.22 trades=71 DD=15.3%
+  Mean Rev       PENGU    1H  winner: sl=2.5 tp=5.0 PF=4.06 trades=41 DD=4.9%
+  Mean Rev       FARTCOIN 1H  winner: sl=1.25 tp=5.0 PF=1.93 trades=57 DD=15.4%
+  Mean Rev       POPCAT   1H  no passing cells
+  Mean Rev       MEW      1H  no passing cells
+  Mean Rev       PNUT     1H  winner: sl=1.0 tp=5.0 PF=1.43 trades=38 DD=16.1%
+  Mean Rev       MOODENG  1H  no passing cells
+  Mean Rev       PYTH     1H  winner: sl=2.0 tp=5.0 PF=6.07 trades=17 DD=2.4%
+  Mean Rev       RAY      1H  winner: sl=2.0 tp=3.0 PF=13.44 trades=16 DD=2.4%
+  Mean Rev       W        1H  winner: sl=1.5 tp=3.0 PF=12.00 trades=13 DD=2.5%
+  Mean Rev       HNT      1H  winner: sl=1.0 tp=2.5 PF=5.19 trades=18 DD=5.9%
+  Mean Rev       SOL      4H  winner: sl=1.0 tp=5.0 PF=1.98 trades=64 DD=12.8%
+  Mean Rev       ETH      4H  winner: sl=2.5 tp=3.0 PF=1.83 trades=72 DD=8.0%
+  Mean Rev       JTO      4H  winner: sl=1.0 tp=5.0 PF=3.70 trades=51 DD=17.9%
+  Mean Rev       WIF      4H  winner: sl=1.0 tp=5.0 PF=2.91 trades=56 DD=11.5%
+  Mean Rev       BONK     4H  winner: sl=1.5 tp=2.5 PF=5.00 trades=55 DD=6.0%
+  Mean Rev       ORCA     4H  winner: sl=2.0 tp=5.0 PF=2.27 trades=47 DD=14.5%
+  Mean Rev       RENDER   4H  winner: sl=2.0 tp=5.0 PF=2.42 trades=38 DD=5.9%
+  Mean Rev       JUP      4H  winner: sl=1.0 tp=5.0 PF=7.34 trades=44 DD=5.6%
+  Mean Rev       PENGU    4H  winner: sl=1.5 tp=4.0 PF=3.76 trades=40 DD=4.5%
+  Mean Rev       FARTCOIN 4H  winner: sl=1.25 tp=5.0 PF=15.97 trades=35 DD=2.2%
+  Mean Rev       POPCAT   4H  no passing cells
+  Mean Rev       MEW      4H  no passing cells
+  Mean Rev       PNUT     4H  winner: sl=1.0 tp=5.0 PF=5.86 trades=54 DD=4.6%
+  Mean Rev       MOODENG  4H  winner: sl=1.0 tp=5.0 PF=14.84 trades=44 DD=8.4%
+  RSI Div        SOL      1H  winner: sl=2.5 tp=4.0 PF=1.54 trades=24 DD=5.7%
+  RSI Div        ETH      1H  winner: sl=1.25 tp=5.0 PF=1.90 trades=30 DD=9.9%
+  RSI Div        JTO      1H  no passing cells
+  RSI Div        WIF      1H  winner: sl=1.0 tp=5.0 PF=2.31 trades=11 DD=10.7%
+  RSI Div        BONK     1H  winner: sl=1.25 tp=5.0 PF=3.26 trades=27 DD=9.4%
+  RSI Div        ORCA     1H  winner: sl=2.5 tp=3.0 PF=1.05 trades=2 DD=2.0%
+  RSI Div        RENDER   1H  winner: sl=2.5 tp=5.0 PF=7.41 trades=24 DD=2.7%
+  RSI Div        JUP      1H  winner: sl=1.25 tp=5.0 PF=14.17 trades=11 DD=2.6%
+  RSI Div        PENGU    1H  winner: sl=1.0 tp=5.0 PF=2.75 trades=24 DD=11.6%
+  RSI Div        FARTCOIN 1H  winner: sl=1.25 tp=5.0 PF=99.00 trades=5 DD=0.0%
+  RSI Div        POPCAT   1H  no passing cells
+  RSI Div        MEW      1H  no passing cells
+  RSI Div        PNUT     1H  winner: sl=1.0 tp=5.0 PF=4.42 trades=3 DD=3.2%
+  RSI Div        MOODENG  1H  no passing cells
+  RSI Div        PYTH     1H  winner: sl=2.5 tp=3.0 PF=1.06 trades=22 DD=4.8%
+  RSI Div        RAY      1H  winner: sl=2.0 tp=4.0 PF=1.46 trades=24 DD=6.8%
+  RSI Div        W        1H  no passing cells
+  RSI Div        HNT      1H  winner: sl=1.25 tp=2.0 PF=2.05 trades=14 DD=5.4%
+  RSI Div        SOL      4H  winner: sl=1.25 tp=1.5 PF=3.01 trades=30 DD=5.0%
+  RSI Div        ETH      4H  winner: sl=1.0 tp=1.5 PF=7.62 trades=27 DD=2.7%
+  RSI Div        JTO      4H  winner: sl=1.0 tp=5.0 PF=1.89 trades=11 DD=9.7%
+  RSI Div        WIF      4H  winner: sl=1.5 tp=5.0 PF=5.95 trades=28 DD=6.2%
+  RSI Div        BONK     4H  winner: sl=2.0 tp=2.5 PF=2.74 trades=25 DD=4.0%
+  RSI Div        ORCA     4H  winner: sl=1.0 tp=5.0 PF=9.16 trades=10 DD=5.3%
+  RSI Div        RENDER   4H  winner: sl=1.0 tp=1.5 PF=3.07 trades=27 DD=5.2%
+  RSI Div        JUP      4H  winner: sl=2.5 tp=5.0 PF=3.68 trades=23 DD=4.3%
+  RSI Div        PENGU    4H  no passing cells
+  RSI Div        FARTCOIN 4H  winner: sl=1.5 tp=3.0 PF=9.95 trades=13 DD=2.1%
+  RSI Div        POPCAT   4H  winner: sl=1.0 tp=5.0 PF=6.42 trades=11 DD=4.7%
+  RSI Div        MEW      4H  no passing cells
+  RSI Div        PNUT     4H  winner: sl=1.0 tp=5.0 PF=2.27 trades=16 DD=7.4%
+  RSI Div        MOODENG  4H  winner: sl=1.0 tp=5.0 PF=3.33 trades=5 DD=2.7%
+  EMA Ribbon     SOL      1H  winner: sl=1.25 tp=2.5 PF=1.63 trades=193 DD=24.4%
+  EMA Ribbon     ETH      1H  winner: sl=2.5 tp=5.0 PF=1.69 trades=206 DD=16.6%
+  EMA Ribbon     JTO      1H  winner: sl=2.5 tp=5.0 PF=2.57 trades=30 DD=11.4%
+  EMA Ribbon     WIF      1H  winner: sl=2.5 tp=5.0 PF=1.87 trades=93 DD=17.5%
+  EMA Ribbon     BONK     1H  winner: sl=1.25 tp=4.0 PF=2.68 trades=192 DD=11.5%
+  EMA Ribbon     ORCA     1H  winner: sl=2.5 tp=5.0 PF=14.44 trades=27 DD=7.2%
+  EMA Ribbon     RENDER   1H  winner: sl=1.5 tp=5.0 PF=2.42 trades=211 DD=23.0%
+  EMA Ribbon     JUP      1H  winner: sl=2.5 tp=5.0 PF=1.28 trades=83 DD=23.6%
+  EMA Ribbon     PENGU    1H  winner: sl=2.0 tp=5.0 PF=2.37 trades=187 DD=13.2%
+  EMA Ribbon     FARTCOIN 1H  winner: sl=2.0 tp=5.0 PF=2.35 trades=53 DD=7.6%
+  EMA Ribbon     POPCAT   1H  no passing cells
+  EMA Ribbon     MEW      1H  winner: sl=2.0 tp=5.0 PF=8.46 trades=17 DD=6.3%
+  EMA Ribbon     PNUT     1H  winner: sl=1.5 tp=5.0 PF=1.79 trades=38 DD=10.6%
+  EMA Ribbon     MOODENG  1H  no passing cells
+  EMA Ribbon     PYTH     1H  winner: sl=2.0 tp=5.0 PF=2.10 trades=124 DD=8.6%
+  EMA Ribbon     RAY      1H  winner: sl=2.5 tp=5.0 PF=1.70 trades=142 DD=8.4%
+  EMA Ribbon     W        1H  winner: sl=1.25 tp=2.5 PF=1.99 trades=131 DD=18.8%
+  EMA Ribbon     HNT      1H  winner: sl=2.5 tp=5.0 PF=3.36 trades=139 DD=5.0%
+  EMA Ribbon     SOL      4H  winner: sl=2.5 tp=5.0 PF=3.31 trades=189 DD=5.3%
+  EMA Ribbon     ETH      4H  winner: sl=1.0 tp=5.0 PF=2.66 trades=194 DD=15.7%
+  EMA Ribbon     JTO      4H  winner: sl=2.0 tp=5.0 PF=2.65 trades=90 DD=7.5%
+  EMA Ribbon     WIF      4H  winner: sl=2.0 tp=5.0 PF=3.72 trades=182 DD=4.9%
+  EMA Ribbon     BONK     4H  winner: sl=1.0 tp=5.0 PF=4.09 trades=204 DD=7.7%
+  EMA Ribbon     ORCA     4H  winner: sl=1.0 tp=5.0 PF=1.37 trades=70 DD=17.8%
+  EMA Ribbon     RENDER   4H  winner: sl=1.25 tp=2.5 PF=3.97 trades=204 DD=11.6%
+  EMA Ribbon     JUP      4H  winner: sl=1.0 tp=5.0 PF=2.78 trades=132 DD=7.6%
+  EMA Ribbon     PENGU    4H  winner: sl=2.0 tp=4.0 PF=3.38 trades=192 DD=5.9%
+  EMA Ribbon     FARTCOIN 4H  winner: sl=1.25 tp=4.0 PF=2.45 trades=107 DD=9.4%
+  EMA Ribbon     POPCAT   4H  winner: sl=1.0 tp=5.0 PF=7.59 trades=65 DD=9.9%
+  EMA Ribbon     MEW      4H  winner: sl=1.0 tp=5.0 PF=10.61 trades=31 DD=8.5%
+  EMA Ribbon     PNUT     4H  winner: sl=2.0 tp=5.0 PF=2.15 trades=154 DD=17.7%
+  EMA Ribbon     MOODENG  4H  winner: sl=1.0 tp=5.0 PF=4.04 trades=80 DD=21.7%
+  VWAP Dev       SOL      1H  winner: sl=2.5 tp=4.0 PF=1.48 trades=160 DD=21.0%
+  VWAP Dev       ETH      1H  winner: sl=2.5 tp=4.0 PF=1.25 trades=167 DD=23.2%
+  VWAP Dev       JTO      1H  winner: sl=1.0 tp=5.0 PF=4.06 trades=19 DD=11.3%
+  VWAP Dev       WIF      1H  winner: sl=2.5 tp=5.0 PF=1.78 trades=79 DD=11.1%
+  VWAP Dev       BONK     1H  winner: sl=1.5 tp=5.0 PF=1.71 trades=161 DD=16.0%
+  VWAP Dev       ORCA     1H  no passing cells
+  VWAP Dev       RENDER   1H  winner: sl=2.5 tp=4.0 PF=2.21 trades=127 DD=12.7%
+  VWAP Dev       JUP      1H  winner: sl=2.5 tp=5.0 PF=3.39 trades=57 DD=8.6%
+  VWAP Dev       PENGU    1H  winner: sl=1.5 tp=5.0 PF=2.30 trades=173 DD=16.3%
+  VWAP Dev       FARTCOIN 1H  winner: sl=1.0 tp=5.0 PF=1.72 trades=41 DD=19.3%
+  VWAP Dev       POPCAT   1H  winner: sl=1.0 tp=5.0 PF=9.72 trades=8 DD=10.3%
+  VWAP Dev       MEW      1H  no passing cells
+  VWAP Dev       PNUT     1H  winner: sl=1.0 tp=5.0 PF=1.64 trades=27 DD=21.7%
+  VWAP Dev       MOODENG  1H  winner: sl=2.0 tp=5.0 PF=11.18 trades=33 DD=5.7%
+  VWAP Dev       PYTH     1H  winner: sl=1.25 tp=4.0 PF=1.32 trades=108 DD=19.9%
+  VWAP Dev       RAY      1H  winner: sl=2.0 tp=3.0 PF=2.60 trades=102 DD=12.4%
+  VWAP Dev       W        1H  winner: sl=2.5 tp=3.0 PF=1.24 trades=98 DD=9.7%
+  VWAP Dev       HNT      1H  winner: sl=2.5 tp=3.0 PF=1.60 trades=92 DD=10.2%
+  VWAP Dev       SOL      4H  winner: sl=2.0 tp=4.0 PF=2.57 trades=172 DD=8.4%
+  VWAP Dev       ETH      4H  winner: sl=1.5 tp=2.0 PF=1.96 trades=173 DD=9.1%
+  VWAP Dev       JTO      4H  winner: sl=1.25 tp=5.0 PF=3.12 trades=72 DD=8.2%
+  VWAP Dev       WIF      4H  winner: sl=2.0 tp=5.0 PF=2.66 trades=161 DD=8.8%
+  VWAP Dev       BONK     4H  winner: sl=2.5 tp=5.0 PF=2.44 trades=171 DD=5.6%
+  VWAP Dev       ORCA     4H  winner: sl=2.0 tp=5.0 PF=1.96 trades=62 DD=11.6%
+  VWAP Dev       RENDER   4H  winner: sl=2.0 tp=5.0 PF=1.70 trades=160 DD=11.9%
+  VWAP Dev       JUP      4H  winner: sl=1.0 tp=5.0 PF=4.05 trades=125 DD=10.2%
+  VWAP Dev       PENGU    4H  winner: sl=2.5 tp=5.0 PF=2.86 trades=139 DD=9.1%
+  VWAP Dev       FARTCOIN 4H  winner: sl=1.5 tp=5.0 PF=15.43 trades=75 DD=6.0%
+  VWAP Dev       POPCAT   4H  winner: sl=1.5 tp=5.0 PF=4.68 trades=56 DD=5.3%
+  VWAP Dev       MEW      4H  winner: sl=1.0 tp=5.0 PF=2.00 trades=39 DD=9.3%
+  VWAP Dev       PNUT     4H  winner: sl=1.5 tp=5.0 PF=3.91 trades=129 DD=6.4%
+  VWAP Dev       MOODENG  4H  winner: sl=1.0 tp=5.0 PF=6.45 trades=78 DD=9.8%
+  Donchian       SOL      1H  winner: sl=2.5 tp=5.0 PF=2.29 trades=93 DD=10.1%
+  Donchian       ETH      1H  winner: sl=2.0 tp=5.0 PF=1.86 trades=96 DD=15.5%
+  Donchian       JTO      1H  winner: sl=2.5 tp=5.0 PF=3.26 trades=36 DD=7.6%
+  Donchian       WIF      1H  winner: sl=2.0 tp=5.0 PF=2.90 trades=87 DD=12.9%
+  Donchian       BONK     1H  winner: sl=2.0 tp=5.0 PF=3.08 trades=104 DD=9.6%
+  Donchian       ORCA     1H  winner: sl=1.25 tp=5.0 PF=4.39 trades=25 DD=9.7%
+  Donchian       RENDER   1H  winner: sl=1.5 tp=5.0 PF=2.74 trades=129 DD=9.4%
+  Donchian       JUP      1H  winner: sl=1.25 tp=5.0 PF=1.71 trades=84 DD=19.2%
+  Donchian       PENGU    1H  winner: sl=2.0 tp=3.0 PF=2.27 trades=101 DD=9.5%
+  Donchian       FARTCOIN 1H  winner: sl=1.0 tp=5.0 PF=3.87 trades=60 DD=21.6%
+  Donchian       POPCAT   1H  no passing cells
+  Donchian       MEW      1H  winner: sl=2.0 tp=5.0 PF=5.47 trades=26 DD=11.9%
+  Donchian       PNUT     1H  winner: sl=2.0 tp=5.0 PF=1.20 trades=33 DD=12.3%
+  Donchian       MOODENG  1H  winner: sl=1.5 tp=5.0 PF=3.60 trades=30 DD=6.8%
+  Donchian       PYTH     1H  winner: sl=1.0 tp=2.0 PF=2.18 trades=9 DD=5.5%
+  Donchian       RAY      1H  winner: sl=1.0 tp=4.0 PF=2.80 trades=9 DD=2.8%
+  Donchian       W        1H  no passing cells
+  Donchian       HNT      1H  no passing cells
+  Donchian       SOL      4H  winner: sl=2.0 tp=3.0 PF=1.86 trades=112 DD=14.8%
+  Donchian       ETH      4H  winner: sl=2.5 tp=5.0 PF=2.97 trades=99 DD=5.3%
+  Donchian       JTO      4H  winner: sl=1.5 tp=4.0 PF=2.41 trades=71 DD=12.6%
+  Donchian       WIF      4H  winner: sl=1.5 tp=5.0 PF=3.56 trades=91 DD=9.5%
+  Donchian       BONK     4H  winner: sl=2.5 tp=4.0 PF=2.29 trades=94 DD=7.9%
+  Donchian       ORCA     4H  winner: sl=1.5 tp=4.0 PF=2.46 trades=56 DD=8.1%
+  Donchian       RENDER   4H  winner: sl=1.0 tp=5.0 PF=3.71 trades=112 DD=13.4%
+  Donchian       JUP      4H  winner: sl=1.25 tp=5.0 PF=1.94 trades=85 DD=10.7%
+  Donchian       PENGU    4H  winner: sl=1.0 tp=5.0 PF=2.93 trades=92 DD=9.2%
+  Donchian       FARTCOIN 4H  winner: sl=2.5 tp=5.0 PF=4.20 trades=48 DD=7.7%
+  Donchian       POPCAT   4H  winner: sl=2.0 tp=5.0 PF=3.85 trades=41 DD=13.6%
+  Donchian       MEW      4H  winner: sl=1.0 tp=5.0 PF=43.18 trades=29 DD=4.2%
+  Donchian       PNUT     4H  winner: sl=1.5 tp=5.0 PF=3.45 trades=81 DD=8.3%
+  Donchian       MOODENG  4H  winner: sl=1.0 tp=5.0 PF=3.23 trades=49 DD=9.8%
+  Stoch RSI      SOL      1H  winner: sl=2.5 tp=5.0 PF=1.66 trades=138 DD=16.8%
+  Stoch RSI      ETH      1H  winner: sl=2.0 tp=4.0 PF=1.56 trades=152 DD=18.9%
+  Stoch RSI      JTO      1H  winner: sl=2.5 tp=5.0 PF=1.56 trades=9 DD=12.3%
+  Stoch RSI      WIF      1H  no passing cells
+  Stoch RSI      BONK     1H  winner: sl=1.0 tp=5.0 PF=1.93 trades=101 DD=13.8%
+  Stoch RSI      ORCA     1H  winner: sl=1.5 tp=4.0 PF=3.57 trades=10 DD=9.5%
+  Stoch RSI      RENDER   1H  winner: sl=2.5 tp=5.0 PF=3.23 trades=116 DD=9.4%
+  Stoch RSI      JUP      1H  no passing cells
+  Stoch RSI      PENGU    1H  winner: sl=2.5 tp=5.0 PF=2.25 trades=147 DD=11.2%
+  Stoch RSI      FARTCOIN 1H  winner: sl=1.5 tp=5.0 PF=1.66 trades=14 DD=19.0%
+  Stoch RSI      POPCAT   1H  winner: sl=1.0 tp=5.0 PF=35.70 trades=4 DD=4.2%
+  Stoch RSI      MEW      1H  no passing cells
+  Stoch RSI      PNUT     1H  no passing cells
+  Stoch RSI      MOODENG  1H  winner: sl=2.5 tp=5.0 PF=70.42 trades=11 DD=1.2%
+  Stoch RSI      PYTH     1H  winner: sl=1.5 tp=5.0 PF=1.43 trades=116 DD=15.2%
+  Stoch RSI      RAY      1H  winner: sl=2.5 tp=5.0 PF=1.81 trades=106 DD=5.6%
+  Stoch RSI      W        1H  winner: sl=1.25 tp=5.0 PF=1.25 trades=126 DD=14.9%
+  Stoch RSI      HNT      1H  winner: sl=2.5 tp=3.0 PF=1.34 trades=108 DD=10.6%
+  Stoch RSI      SOL      4H  winner: sl=2.5 tp=4.0 PF=2.29 trades=165 DD=9.3%
+  Stoch RSI      ETH      4H  winner: sl=2.5 tp=5.0 PF=2.27 trades=151 DD=7.3%
+  Stoch RSI      JTO      4H  winner: sl=1.0 tp=5.0 PF=3.87 trades=70 DD=9.1%
+  Stoch RSI      WIF      4H  winner: sl=1.5 tp=5.0 PF=3.14 trades=165 DD=9.5%
+  Stoch RSI      BONK     4H  winner: sl=2.0 tp=5.0 PF=1.85 trades=159 DD=9.7%
+  Stoch RSI      ORCA     4H  winner: sl=1.25 tp=5.0 PF=4.14 trades=28 DD=11.6%
+  Stoch RSI      RENDER   4H  winner: sl=1.0 tp=2.5 PF=1.94 trades=178 DD=10.3%
+  Stoch RSI      JUP      4H  winner: sl=1.0 tp=5.0 PF=4.23 trades=123 DD=11.0%
+  Stoch RSI      PENGU    4H  winner: sl=2.5 tp=5.0 PF=2.77 trades=129 DD=6.5%
+  Stoch RSI      FARTCOIN 4H  winner: sl=2.0 tp=5.0 PF=9.91 trades=70 DD=4.0%
+  Stoch RSI      POPCAT   4H  winner: sl=1.0 tp=5.0 PF=4.44 trades=43 DD=7.6%
+  Stoch RSI      MEW      4H  winner: sl=1.0 tp=5.0 PF=6.70 trades=29 DD=11.1%
+  Stoch RSI      PNUT     4H  winner: sl=1.0 tp=5.0 PF=3.60 trades=112 DD=8.8%
+  Stoch RSI      MOODENG  4H  winner: sl=1.5 tp=5.0 PF=5.33 trades=62 DD=10.9%
+  FVG            SOL      1H  winner: sl=2.5 tp=5.0 PF=1.29 trades=168 DD=16.8%
+  FVG            ETH      1H  winner: sl=2.5 tp=5.0 PF=1.15 trades=132 DD=18.3%
+  FVG            JTO      1H  winner: sl=2.5 tp=5.0 PF=3.60 trades=11 DD=2.1%
+  FVG            WIF      1H  winner: sl=2.5 tp=5.0 PF=1.23 trades=54 DD=13.1%
+  FVG            BONK     1H  winner: sl=2.0 tp=5.0 PF=1.74 trades=210 DD=11.6%
+  FVG            ORCA     1H  winner: sl=1.5 tp=5.0 PF=2.11 trades=14 DD=5.0%
+  FVG            RENDER   1H  winner: sl=2.5 tp=5.0 PF=1.98 trades=276 DD=7.8%
+  FVG            JUP      1H  winner: sl=2.5 tp=5.0 PF=1.31 trades=59 DD=7.6%
+  FVG            PENGU    1H  winner: sl=2.5 tp=5.0 PF=1.72 trades=252 DD=11.2%
+  FVG            FARTCOIN 1H  winner: sl=1.0 tp=5.0 PF=5.64 trades=21 DD=6.1%
+  FVG            POPCAT   1H  winner: sl=2.5 tp=3.0 PF=2.88 trades=3 DD=0.2%
+  FVG            MEW      1H  winner: sl=2.5 tp=3.0 PF=1.33 trades=7 DD=2.6%
+  FVG            PNUT     1H  winner: sl=2.5 tp=5.0 PF=6.40 trades=8 DD=1.8%
+  FVG            MOODENG  1H  winner: sl=1.0 tp=5.0 PF=4.02 trades=10 DD=2.5%
+  FVG            PYTH     1H  winner: sl=1.0 tp=5.0 PF=1.64 trades=16 DD=7.7%
+  FVG            RAY      1H  winner: sl=1.0 tp=5.0 PF=1.69 trades=31 DD=6.6%
+  FVG            W        1H  winner: sl=1.0 tp=1.5 PF=99.00 trades=1 DD=0.0%
+  FVG            HNT      1H  winner: sl=1.0 tp=3.0 PF=1.17 trades=28 DD=7.3%
+  FVG            SOL      4H  winner: sl=1.25 tp=2.5 PF=1.48 trades=144 DD=9.9%
+  FVG            ETH      4H  winner: sl=1.25 tp=4.0 PF=1.95 trades=127 DD=7.6%
+  FVG            JTO      4H  winner: sl=1.0 tp=4.0 PF=2.73 trades=96 DD=9.9%
+  FVG            WIF      4H  winner: sl=1.25 tp=5.0 PF=2.44 trades=191 DD=8.0%
+  FVG            BONK     4H  winner: sl=1.0 tp=5.0 PF=2.14 trades=196 DD=7.5%
+  FVG            ORCA     4H  winner: sl=1.0 tp=5.0 PF=3.00 trades=41 DD=7.7%
+  FVG            RENDER   4H  winner: sl=2.5 tp=4.0 PF=1.85 trades=209 DD=4.5%
+  FVG            JUP      4H  winner: sl=1.25 tp=5.0 PF=2.56 trades=174 DD=16.8%
+  FVG            PENGU    4H  winner: sl=2.0 tp=5.0 PF=2.76 trades=174 DD=5.6%
+  FVG            FARTCOIN 4H  winner: sl=1.5 tp=5.0 PF=2.11 trades=107 DD=7.9%
+  FVG            POPCAT   4H  no passing cells
+  FVG            MEW      4H  winner: sl=2.0 tp=5.0 PF=2.52 trades=38 DD=3.6%
+  FVG            PNUT     4H  winner: sl=1.0 tp=5.0 PF=1.58 trades=156 DD=11.5%
+  FVG            MOODENG  4H  winner: sl=1.0 tp=5.0 PF=2.68 trades=75 DD=15.8%
+  Liq Sweep      SOL      1H  winner: sl=1.5 tp=4.0 PF=1.31 trades=143 DD=24.9%
+  Liq Sweep      ETH      1H  winner: sl=2.5 tp=5.0 PF=2.14 trades=133 DD=10.9%
+  Liq Sweep      JTO      1H  no passing cells
+  Liq Sweep      WIF      1H  winner: sl=1.0 tp=5.0 PF=1.86 trades=7 DD=10.9%
+  Liq Sweep      BONK     1H  winner: sl=1.0 tp=5.0 PF=1.50 trades=31 DD=16.4%
+  Liq Sweep      ORCA     1H  no passing cells
+  Liq Sweep      RENDER   1H  winner: sl=1.0 tp=5.0 PF=2.56 trades=83 DD=9.2%
+  Liq Sweep      JUP      1H  no passing cells
+  Liq Sweep      PENGU    1H  winner: sl=1.0 tp=3.0 PF=1.29 trades=50 DD=24.1%
+  Liq Sweep      FARTCOIN 1H  winner: sl=2.5 tp=5.0 PF=1.03 trades=8 DD=6.5%
+  Liq Sweep      POPCAT   1H  no passing cells
+  Liq Sweep      MEW      1H  no passing cells
+  Liq Sweep      PNUT     1H  winner: sl=1.0 tp=5.0 PF=3.82 trades=4 DD=3.3%
+  Liq Sweep      MOODENG  1H  winner: sl=1.0 tp=5.0 PF=2.90 trades=8 DD=7.4%
+  Liq Sweep      PYTH     1H  winner: sl=2.5 tp=5.0 PF=82.03 trades=15 DD=0.2%
+  Liq Sweep      RAY      1H  winner: sl=1.0 tp=2.0 PF=2.90 trades=25 DD=8.2%
+  Liq Sweep      W        1H  winner: sl=1.0 tp=4.0 PF=12.78 trades=13 DD=2.5%
+  Liq Sweep      HNT      1H  winner: sl=1.0 tp=5.0 PF=2.52 trades=19 DD=7.5%
+  Liq Sweep      SOL      4H  winner: sl=2.5 tp=5.0 PF=2.39 trades=139 DD=7.4%
+  Liq Sweep      ETH      4H  winner: sl=2.0 tp=3.0 PF=2.47 trades=147 DD=8.2%
+  Liq Sweep      JTO      4H  winner: sl=1.0 tp=2.5 PF=2.33 trades=21 DD=9.2%
+  Liq Sweep      WIF      4H  winner: sl=1.25 tp=5.0 PF=3.98 trades=76 DD=7.9%
+  Liq Sweep      BONK     4H  winner: sl=2.0 tp=4.0 PF=3.23 trades=123 DD=6.5%
+  Liq Sweep      ORCA     4H  winner: sl=1.0 tp=5.0 PF=1.29 trades=20 DD=11.7%
+  Liq Sweep      RENDER   4H  winner: sl=1.0 tp=1.5 PF=1.71 trades=147 DD=11.9%
+  Liq Sweep      JUP      4H  winner: sl=2.0 tp=2.5 PF=1.76 trades=52 DD=12.3%
+  Liq Sweep      PENGU    4H  winner: sl=1.0 tp=1.5 PF=3.28 trades=95 DD=8.4%
+  Liq Sweep      FARTCOIN 4H  winner: sl=2.5 tp=5.0 PF=23.25 trades=28 DD=1.5%
+  Liq Sweep      POPCAT   4H  winner: sl=1.25 tp=5.0 PF=2.21 trades=12 DD=6.3%
+  Liq Sweep      MEW      4H  winner: sl=1.0 tp=5.0 PF=99.00 trades=4 DD=0.0%
+  Liq Sweep      PNUT     4H  winner: sl=1.25 tp=5.0 PF=3.42 trades=38 DD=3.8%
+  Liq Sweep      MOODENG  4H  winner: sl=1.0 tp=5.0 PF=1.94 trades=18 DD=8.8%
+
+  Cells CSV: /Users/clawbot/Documents/Claude/Projects/tradingview-bot/backtesting/results/tpsl_sweep_20260419_1743.csv
+  Winners YAML: /Users/clawbot/Documents/Claude/Projects/tradingview-bot/config_tpsl_overrides.yaml
+
+  Slots evaluated:  256
+  Cells tested:     6144
+  Winners picked:   224
+  Non-default winners: 222
+
+  Top 10 by score:
+    Donchian       MEW      4H   sl=1.0 tp=5.0  PF=43.18 WR=93.1% trades=29 DD=4.2% score=41.74
+    Liq Sweep      PYTH     1H   sl=2.5 tp=5.0  PF=82.03 WR=86.7% trades=15 DD=0.2% score=41.02
+    Stoch RSI      MOODENG  1H   sl=2.5 tp=5.0  PF=70.42 WR=81.8% trades=11 DD=1.2% score=25.82
+    Liq Sweep      FARTCOIN 4H   sl=2.5 tp=5.0  PF=23.25 WR=92.9% trades=28 DD=1.5% score=21.70
+    RSI Div        FARTCOIN 1H   sl=1.25 tp=5.0  PF=99.00 WR=100.0% trades=5 DD=0.0% score=16.50
+    Mean Rev       FARTCOIN 4H   sl=1.25 tp=5.0  PF=15.97 WR=80.0% trades=35 DD=2.2% score=15.97
+    VWAP Dev       FARTCOIN 4H   sl=1.5 tp=5.0  PF=15.43 WR=85.3% trades=75 DD=6.0% score=15.43
+    Mean Rev       MOODENG  4H   sl=1.0 tp=5.0  PF=14.84 WR=68.2% trades=44 DD=8.4% score=14.84
+    Liq Sweep      MEW      4H   sl=1.0 tp=5.0  PF=99.00 WR=100.0% trades=4 DD=0.0% score=13.20
+    EMA Ribbon     ORCA     1H   sl=2.5 tp=5.0  PF=14.44 WR=70.4% trades=27 DD=7.2% score=13.00

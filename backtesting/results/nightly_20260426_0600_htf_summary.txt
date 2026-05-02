@@ -1,0 +1,6 @@
+Nightly Backtest Summary — nightly_20260426_0600_htf
+Tests: 470 | Passing (WF-validated): 3
+
+EMA Ribbon     RENDER  4H   PF=5.62 WR=81.8% Trades=110 DD=3.4% NP=358.6% Sharpe=2.41 IS_PF=6.10 OOS_PF=5.30 Ret=87% Lev=2.4x
+EMA Ribbon     BONK    4H   PF=4.40 WR=81.4% Trades=97 DD=5.0% NP=215.0% Sharpe=2.09 IS_PF=5.05 OOS_PF=3.81 Ret=75% Lev=2.3x
+EMA Ribbon     ETH     1H   PF=2.34 WR=66.7% Trades=111 DD=12.2% NP=163.1% Sharpe=1.26 IS_PF=1.54 OOS_PF=4.76 Ret=309% Lev=2.0x

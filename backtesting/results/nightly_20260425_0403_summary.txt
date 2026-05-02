@@ -1,0 +1,24 @@
+Nightly Backtest Summary — nightly_20260425_0403
+Tests: 490 | Passing (WF-validated): 21
+
+EMA Ribbon     WIF     4H   PF=3.08 WR=75.4% Trades=118 DD=6.1% NP=351.7% Sharpe=1.94 IS_PF=3.97 OOS_PF=2.45 Ret=62% Lev=2.4x
+EMA Ribbon     BONK    4H   PF=2.97 WR=74.8% Trades=131 DD=6.3% NP=273.0% Sharpe=1.96 IS_PF=3.43 OOS_PF=2.62 Ret=76% Lev=2.4x
+EMA Ribbon     RENDER  4H   PF=3.82 WR=76.4% Trades=140 DD=7.9% NP=376.5% Sharpe=2.21 IS_PF=4.15 OOS_PF=3.59 Ret=87% Lev=2.4x
+Stoch RSI      PENGU   1H   PF=2.06 WR=69.2% Trades=107 DD=13.0% NP=155.9% Sharpe=1.18 IS_PF=1.71 OOS_PF=2.70 Ret=158% Lev=2.0x
+VWAP Dev       BONK    4H   PF=2.09 WR=68.0% Trades=122 DD=9.8% NP=111.6% Sharpe=1.24 IS_PF=1.92 OOS_PF=2.40 Ret=125% Lev=2.0x
+Stoch RSI      SOL     4H   PF=2.13 WR=70.3% Trades=128 DD=11.9% NP=185.4% Sharpe=1.43 IS_PF=2.28 OOS_PF=2.04 Ret=89% Lev=2.0x
+FVG            BONK    4H   PF=2.26 WR=69.6% Trades=138 DD=5.7% NP=99.7% Sharpe=1.34 IS_PF=2.55 OOS_PF=2.05 Ret=80% Lev=2.0x
+FVG            PENGU   4H   PF=2.34 WR=65.3% Trades=124 DD=6.2% NP=93.0% Sharpe=1.30 IS_PF=2.55 OOS_PF=2.12 Ret=83% Lev=2.0x
+Liq Sweep      ETH     4H   PF=2.48 WR=72.6% Trades=106 DD=9.8% NP=145.2% Sharpe=1.43 IS_PF=2.81 OOS_PF=2.13 Ret=76% Lev=2.0x
+VWAP Dev       SOL     1H   PF=1.78 WR=67.5% Trades=114 DD=10.2% NP=91.7% Sharpe=0.94 IS_PF=1.67 OOS_PF=1.98 Ret=119% Lev=1.8x
+Liq Sweep      ETH     1H   PF=1.76 WR=65.4% Trades=107 DD=9.2% NP=92.4% Sharpe=0.95 IS_PF=1.73 OOS_PF=1.73 Ret=100% Lev=1.8x
+VWAP Dev       ETH     4H   PF=1.88 WR=69.7% Trades=109 DD=9.1% NP=78.6% Sharpe=1.05 IS_PF=2.13 OOS_PF=1.48 Ret=69% Lev=1.8x
+Stoch RSI      PENGU   4H   PF=2.16 WR=61.9% Trades=113 DD=13.5% NP=146.1% Sharpe=1.26 IS_PF=1.86 OOS_PF=2.35 Ret=126% Lev=1.8x
+EMA Ribbon     ETH     1H   PF=1.91 WR=63.7% Trades=135 DD=14.9% NP=150.5% Sharpe=1.15 IS_PF=1.44 OOS_PF=3.27 Ret=227% Lev=1.7x
+EMA Ribbon     PENGU   1H   PF=1.72 WR=64.8% Trades=125 DD=12.9% NP=134.4% Sharpe=1.12 IS_PF=1.80 OOS_PF=1.92 Ret=107% Lev=1.7x
+Stoch RSI      BONK    1H   PF=1.74 WR=69.5% Trades=82 DD=12.0% NP=76.8% Sharpe=0.88 IS_PF=1.71 OOS_PF=1.79 Ret=105% Lev=1.7x
+FVG            RENDER  4H   PF=1.76 WR=64.2% Trades=148 DD=6.8% NP=69.4% Sharpe=1.00 IS_PF=1.78 OOS_PF=1.77 Ret=99% Lev=1.7x
+EMA Ribbon     RENDER  1H   PF=2.21 WR=67.1% Trades=149 DD=20.4% NP=288.4% Sharpe=1.41 IS_PF=1.66 OOS_PF=3.03 Ret=183% Lev=1.5x
+VWAP Dev       PENGU   4H   PF=2.28 WR=71.7% Trades=113 DD=15.3% NP=116.9% Sharpe=1.32 IS_PF=1.68 OOS_PF=4.24 Ret=252% Lev=1.5x
+Stoch RSI      ETH     4H   PF=1.67 WR=64.8% Trades=125 DD=8.8% NP=98.2% Sharpe=1.01 IS_PF=1.71 OOS_PF=1.61 Ret=94% Lev=1.5x
+FVG            JUP     4H   PF=2.02 WR=60.1% Trades=148 DD=15.4% NP=110.0% Sharpe=1.19 IS_PF=1.70 OOS_PF=3.11 Ret=183% Lev=1.5x

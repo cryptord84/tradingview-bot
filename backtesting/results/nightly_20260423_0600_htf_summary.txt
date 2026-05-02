@@ -1,0 +1,7 @@
+Nightly Backtest Summary — nightly_20260423_0600_htf
+Tests: 490 | Passing (WF-validated): 4
+
+EMA Ribbon     BONK    4H   PF=5.03 WR=79.8% Trades=104 DD=5.1% NP=270.3% Sharpe=2.18 IS_PF=4.28 OOS_PF=6.11 Ret=143% Lev=2.4x
+EMA Ribbon     PENGU   4H   PF=4.12 WR=77.8% Trades=108 DD=5.3% NP=236.6% Sharpe=2.08 IS_PF=5.40 OOS_PF=3.27 Ret=61% Lev=2.4x
+FVG            PENGU   1H   PF=1.71 WR=63.6% Trades=88 DD=18.8% NP=64.1% Sharpe=0.86 IS_PF=1.80 OOS_PF=1.67 Ret=93% Lev=1.5x
+EMA Ribbon     PENGU   1H   PF=1.64 WR=64.7% Trades=102 DD=12.9% NP=90.2% Sharpe=0.92 IS_PF=1.68 OOS_PF=1.60 Ret=95% Lev=1.4x

@@ -1,0 +1,4 @@
+Nightly Backtest Summary — nightly_20260424_0600_htf
+Tests: 490 | Passing (WF-validated): 1
+
+EMA Ribbon     BONK    4H   PF=4.55 WR=81.6% Trades=98 DD=5.0% NP=219.1% Sharpe=2.13 IS_PF=5.61 OOS_PF=4.05 Ret=72% Lev=2.3x

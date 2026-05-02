@@ -1,0 +1,89 @@
+Nightly Backtest Summary — nightly_20260415_0403
+Tests: 140 | Passing: 86
+
+EMA Ribbon     BONK    1H   PF=3.11 WR=76.0% Trades=121 DD=8.2% NP=391.3% Sharpe=2.07 Lev=2.4x
+EMA Ribbon     SOL     4H   PF=3.16 WR=70.0% Trades=120 DD=5.6% NP=219.8% Sharpe=1.77 Lev=2.4x
+EMA Ribbon     ETH     4H   PF=3.16 WR=75.0% Trades=120 DD=7.5% NP=220.1% Sharpe=1.79 Lev=2.4x
+EMA Ribbon     WIF     4H   PF=3.35 WR=73.6% Trades=121 DD=5.8% NP=368.3% Sharpe=1.99 Lev=2.4x
+EMA Ribbon     BONK    4H   PF=3.67 WR=75.2% Trades=129 DD=4.7% NP=291.0% Sharpe=2.09 Lev=2.4x
+EMA Ribbon     RENDER  4H   PF=3.66 WR=75.9% Trades=141 DD=7.0% NP=354.6% Sharpe=2.17 Lev=2.4x
+Stoch RSI      WIF     4H   PF=2.82 WR=71.3% Trades=115 DD=7.6% NP=230.6% Sharpe=1.71 Lev=2.4x
+FVG            WIF     4H   PF=2.56 WR=66.7% Trades=141 DD=5.0% NP=148.7% Sharpe=1.52 Lev=2.4x
+FVG            BONK    4H   PF=2.73 WR=73.3% Trades=135 DD=3.6% NP=111.7% Sharpe=1.52 Lev=2.4x
+Liq Sweep      ETH     4H   PF=2.74 WR=77.1% Trades=105 DD=8.5% NP=163.1% Sharpe=1.58 Lev=2.4x
+Donchian       SOL     1H   PF=3.86 WR=78.8% Trades=66 DD=4.9% NP=164.3% Sharpe=1.70 Lev=2.3x
+Stoch RSI      RENDER  1H   PF=4.03 WR=75.9% Trades=87 DD=9.1% NP=233.3% Sharpe=1.79 Lev=2.3x
+EMA Ribbon     JTO     4H   PF=3.13 WR=72.2% Trades=79 DD=7.0% NP=170.7% Sharpe=1.54 Lev=2.3x
+FVG            RENDER  1H   PF=2.29 WR=66.7% Trades=195 DD=7.7% NP=337.9% Sharpe=1.87 Lev=2.2x
+Stoch RSI      SOL     4H   PF=2.45 WR=70.5% Trades=129 DD=9.0% NP=208.7% Sharpe=1.56 Lev=2.2x
+Donchian       ETH     1H   PF=2.70 WR=75.0% Trades=72 DD=6.5% NP=135.3% Sharpe=1.43 Lev=2.1x
+Donchian       BONK    1H   PF=2.89 WR=78.4% Trades=74 DD=9.8% NP=174.8% Sharpe=1.49 Lev=2.1x
+Donchian       RENDER  1H   PF=2.83 WR=73.5% Trades=83 DD=6.9% NP=155.3% Sharpe=1.47 Lev=2.1x
+Donchian       ETH     4H   PF=2.63 WR=69.2% Trades=78 DD=6.4% NP=107.6% Sharpe=1.27 Lev=2.1x
+Donchian       JTO     4H   PF=2.52 WR=70.3% Trades=64 DD=8.7% NP=109.3% Sharpe=1.18 Lev=2.1x
+Donchian       WIF     4H   PF=3.36 WR=74.6% Trades=67 DD=4.7% NP=125.5% Sharpe=1.45 Lev=2.1x
+Donchian       RENDER  4H   PF=2.55 WR=73.0% Trades=74 DD=6.1% NP=94.7% Sharpe=1.22 Lev=2.1x
+VWAP Dev       JTO     4H   PF=3.04 WR=69.8% Trades=63 DD=6.7% NP=117.9% Sharpe=1.35 Lev=2.1x
+FVG            JTO     4H   PF=2.54 WR=65.6% Trades=90 DD=4.1% NP=71.2% Sharpe=1.10 Lev=2.1x
+Donchian       WIF     1H   PF=3.08 WR=79.2% Trades=53 DD=11.9% NP=103.3% Sharpe=1.25 Lev=2.0x
+EMA Ribbon     SOL     1H   PF=2.48 WR=69.5% Trades=118 DD=10.0% NP=177.9% Sharpe=1.50 Lev=2.0x
+EMA Ribbon     RENDER  1H   PF=2.76 WR=70.5% Trades=146 DD=14.7% NP=369.9% Sharpe=1.81 Lev=2.0x
+VWAP Dev       RENDER  1H   PF=2.87 WR=70.5% Trades=78 DD=14.5% NP=121.6% Sharpe=1.28 Lev=2.0x
+Stoch RSI      SOL     1H   PF=2.14 WR=68.9% Trades=106 DD=7.6% NP=117.6% Sharpe=1.27 Lev=2.0x
+MACD Vol       SOL     1H   PF=4.14 WR=81.2% Trades=32 DD=6.8% NP=46.1% Sharpe=1.08 Lev=2.0x
+Liq Sweep      ETH     1H   PF=2.46 WR=70.6% Trades=102 DD=11.6% NP=123.0% Sharpe=1.30 Lev=2.0x
+Supertrend     WIF     4H   PF=3.21 WR=71.1% Trades=38 DD=4.1% NP=59.4% Sharpe=1.05 Lev=2.0x
+Donchian       ORCA    4H   PF=2.70 WR=72.9% Trades=48 DD=6.0% NP=61.8% Sharpe=1.03 Lev=2.0x
+VWAP Dev       SOL     4H   PF=2.31 WR=76.7% Trades=116 DD=11.6% NP=143.3% Sharpe=1.59 Lev=2.0x
+VWAP Dev       ETH     4H   PF=2.11 WR=72.2% Trades=108 DD=7.5% NP=94.3% Sharpe=1.22 Lev=2.0x
+VWAP Dev       WIF     4H   PF=2.61 WR=69.7% Trades=109 DD=10.5% NP=188.2% Sharpe=1.57 Lev=2.0x
+VWAP Dev       BONK    4H   PF=2.40 WR=69.7% Trades=122 DD=8.0% NP=143.7% Sharpe=1.46 Lev=2.0x
+Stoch RSI      ETH     4H   PF=2.13 WR=69.8% Trades=126 DD=7.8% NP=147.9% Sharpe=1.35 Lev=2.0x
+Stoch RSI      BONK    4H   PF=2.21 WR=69.6% Trades=115 DD=10.1% NP=147.3% Sharpe=1.38 Lev=2.0x
+Stoch RSI      RENDER  4H   PF=2.10 WR=69.6% Trades=112 DD=8.1% NP=116.4% Sharpe=1.23 Lev=2.0x
+FVG            RENDER  4H   PF=2.13 WR=69.3% Trades=150 DD=6.2% NP=87.7% Sharpe=1.24 Lev=2.0x
+MACD Vol       SOL     4H   PF=5.01 WR=79.4% Trades=34 DD=2.2% NP=48.9% Sharpe=1.14 Lev=2.0x
+MACD Vol       BONK    4H   PF=4.93 WR=80.0% Trades=30 DD=5.2% NP=47.7% Sharpe=1.12 Lev=2.0x
+Liq Sweep      WIF     4H   PF=3.60 WR=79.5% Trades=44 DD=4.4% NP=72.0% Sharpe=1.28 Lev=2.0x
+Mean Rev       JTO     4H   PF=3.23 WR=66.0% Trades=47 DD=5.2% NP=85.7% Sharpe=1.13 Lev=2.0x
+Mean Rev       BONK    4H   PF=6.53 WR=83.8% Trades=37 DD=4.6% NP=75.8% Sharpe=1.47 Lev=2.0x
+Supertrend     WIF     1H   PF=2.56 WR=75.6% Trades=41 DD=6.1% NP=60.2% Sharpe=0.91 Lev=1.9x
+MACD Vol       RENDER  1H   PF=2.51 WR=74.4% Trades=39 DD=5.3% NP=55.2% Sharpe=0.98 Lev=1.9x
+Mean Rev       RENDER  1H   PF=2.95 WR=74.4% Trades=39 DD=12.1% NP=58.2% Sharpe=0.97 Lev=1.9x
+Supertrend     ETH     4H   PF=2.70 WR=70.0% Trades=30 DD=5.6% NP=37.3% Sharpe=0.83 Lev=1.9x
+Donchian       BONK    4H   PF=2.33 WR=66.2% Trades=65 DD=7.1% NP=83.4% Sharpe=1.11 Lev=1.9x
+Liq Sweep      SOL     4H   PF=2.41 WR=70.5% Trades=95 DD=6.3% NP=120.6% Sharpe=1.29 Lev=1.9x
+Liq Sweep      BONK    4H   PF=2.23 WR=67.1% Trades=79 DD=11.4% NP=81.6% Sharpe=1.14 Lev=1.9x
+EMA Ribbon     ETH     1H   PF=2.11 WR=64.9% Trades=134 DD=8.8% NP=148.5% Sharpe=1.30 Lev=1.8x
+VWAP Dev       BONK    1H   PF=1.96 WR=67.6% Trades=108 DD=12.2% NP=121.0% Sharpe=1.12 Lev=1.8x
+Stoch RSI      BONK    1H   PF=2.06 WR=67.6% Trades=74 DD=9.3% NP=88.5% Sharpe=0.97 Lev=1.8x
+Liq Sweep      RENDER  1H   PF=2.12 WR=69.4% Trades=62 DD=8.8% NP=63.8% Sharpe=0.95 Lev=1.8x
+Stoch RSI      JTO     4H   PF=2.39 WR=67.8% Trades=59 DD=7.6% NP=92.0% Sharpe=1.11 Lev=1.8x
+Mean Rev       ETH     4H   PF=2.35 WR=70.6% Trades=51 DD=6.6% NP=57.4% Sharpe=1.00 Lev=1.8x
+Supertrend     ETH     1H   PF=2.45 WR=70.3% Trades=37 DD=5.0% NP=45.7% Sharpe=0.87 Lev=1.7x
+Supertrend     BONK    1H   PF=2.05 WR=71.4% Trades=42 DD=6.1% NP=42.5% Sharpe=0.77 Lev=1.7x
+EMA Ribbon     WIF     1H   PF=2.15 WR=69.6% Trades=56 DD=11.1% NP=129.3% Sharpe=0.92 Lev=1.7x
+FVG            ETH     1H   PF=2.03 WR=64.4% Trades=90 DD=6.1% NP=47.1% Sharpe=0.94 Lev=1.7x
+FVG            BONK    1H   PF=1.69 WR=65.8% Trades=146 DD=8.6% NP=103.1% Sharpe=1.04 Lev=1.7x
+Supertrend     JTO     4H   PF=2.29 WR=67.5% Trades=40 DD=11.0% NP=50.4% Sharpe=0.89 Lev=1.7x
+Donchian       SOL     4H   PF=1.72 WR=68.8% Trades=80 DD=12.7% NP=55.0% Sharpe=0.85 Lev=1.7x
+FVG            ETH     4H   PF=2.09 WR=62.2% Trades=82 DD=3.8% NP=33.5% Sharpe=0.78 Lev=1.7x
+Mean Rev       ORCA    4H   PF=2.16 WR=65.1% Trades=43 DD=14.5% NP=67.5% Sharpe=0.85 Lev=1.7x
+Stoch RSI      ETH     1H   PF=1.70 WR=64.2% Trades=109 DD=14.6% NP=61.3% Sharpe=0.79 Lev=1.6x
+Supertrend     BONK    4H   PF=1.98 WR=67.6% Trades=37 DD=6.7% NP=26.5% Sharpe=0.67 Lev=1.6x
+Mean Rev       SOL     4H   PF=1.97 WR=68.6% Trades=35 DD=5.9% NP=25.7% Sharpe=0.65 Lev=1.6x
+Supertrend     RENDER  1H   PF=1.92 WR=64.4% Trades=73 DD=8.6% NP=85.8% Sharpe=0.98 Lev=1.5x
+VWAP Dev       ETH     1H   PF=1.75 WR=67.9% Trades=106 DD=15.5% NP=59.7% Sharpe=0.82 Lev=1.5x
+VWAP Dev       RENDER  4H   PF=2.02 WR=68.2% Trades=110 DD=15.3% NP=117.9% Sharpe=1.26 Lev=1.5x
+FVG            SOL     4H   PF=1.73 WR=63.8% Trades=94 DD=4.7% NP=22.6% Sharpe=0.68 Lev=1.5x
+VWAP Dev       SOL     1H   PF=1.55 WR=64.7% Trades=116 DD=20.3% NP=55.0% Sharpe=0.74 Lev=1.4x
+FVG            SOL     1H   PF=1.45 WR=59.3% Trades=113 DD=14.1% NP=35.1% Sharpe=0.63 Lev=1.4x
+Supertrend     RENDER  4H   PF=1.99 WR=62.9% Trades=35 DD=4.2% NP=29.2% Sharpe=0.66 Lev=1.4x
+VWAP Dev       ORCA    4H   PF=1.75 WR=62.0% Trades=50 DD=9.5% NP=29.0% Sharpe=0.56 Lev=1.4x
+FVG            ORCA    4H   PF=2.12 WR=54.3% Trades=35 DD=6.3% NP=16.7% Sharpe=0.52 Lev=1.4x
+Liq Sweep      RENDER  4H   PF=1.60 WR=62.5% Trades=88 DD=11.4% NP=45.1% Sharpe=0.72 Lev=1.4x
+Mean Rev       WIF     4H   PF=1.75 WR=59.5% Trades=37 DD=8.4% NP=26.1% Sharpe=0.55 Lev=1.4x
+Mean Rev       ETH     1H   PF=1.62 WR=61.7% Trades=47 DD=15.3% NP=24.6% Sharpe=0.51 Lev=1.2x
+EMA Ribbon     ORCA    4H   PF=1.54 WR=59.3% Trades=59 DD=8.1% NP=32.9% Sharpe=0.58 Lev=1.2x
+VWAP Dev       WIF     1H   PF=1.43 WR=59.5% Trades=42 DD=9.3% NP=22.3% Sharpe=0.38 Lev=1.1x
+Mean Rev       BONK    1H   PF=1.59 WR=61.1% Trades=36 DD=14.1% NP=21.8% Sharpe=0.45 Lev=1.1x
