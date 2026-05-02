@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-04-28 11:32 AM EDT (post Apr 20 FVG-dup cleanup)
+**Last verified:** 2026-05-02 ~3:00 PM EDT (post conservative cull + WF passer deploy)
 **Source of truth:** TradingView (`alert_list` MCP / webpack 359399 `listAlerts()`). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -21,16 +21,18 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | # alerts | indicator | script slot | script ver | source file |
 |---|---|---|---|---|
 | 4 | FVG v1.1 | `USER;3156f00306a244688b2d8de21cd03dbe` | 1.0 | `staged/indicator_fvg_v1.1.pine` |
-| 7 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 3.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
-| 2 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
-| 6 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 3.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
-| 5 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
+| 4 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 3.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
+| 0 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
+| 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 3.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
+| 6 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
 | 0 | Donchian Breakout v1.0 (not deployed) | `USER;6a0a490366d34845bed8071a79198cde` | 5.0 | `staged/indicator_donchian_v1.0.pine` |
 
-**Totals:** 24 alerts (24 active, 0 inactive), 5 indicators in production, 2 staged-but-unused.
+**Totals:** 18 alerts (18 active, 0 inactive), 4 indicators in production, 1 indicator culled completely (Liq Sweep), 2 staged-but-unused.
 
-**WF alignment:** every active alert is on a strategy that passed walk-forward validation in ≥3 of the last 4 nightly runs (or just deployed today on a 3-4/4 stable validator).
+**WF alignment:** Mixed. The **4 WF-passers from `nightly_20260502_0403`** are now deployed: Stoch RSI/FARTCOIN.P/4H (`4606125639`), VWAP Dev/FARTCOIN.P/4H (`4606125661`), VWAP Dev/MOODENG.P/4H (`4606125675`), VWAP Dev/JUP/4H (`4606092343`). The remaining **14 alerts have PF in the 0.5–1.4 range** (heavy-loss to marginal under fixed WF gate); kept after conservative cull pending re-evaluation as more nightly data accumulates. Catastrophic combos (PF<0.5) and triple-flagged stale combos already culled 2026-05-02.
+
+**Note on FARTCOIN/MOODENG perp symbols:** These tokens have no Binance Spot listing — alerts use `BINANCE:<TOKEN>USDT.P` (perpetual). The trade engine's symbol normalization was patched 2026-05-02 to strip the `.P` suffix so webhook payloads route correctly.
 
 ---
 
@@ -56,13 +58,11 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | status | symbol | TF | alert_id | last_fired |
 |---|---|---|---|---|
-| ✓ | BONK | 4H | 4454015047 | 2026-04-28 |
-| ✓ | ETH | 4H | 4454015010 | 2026-04-28 |
-| ✓ | PENGU | 1H | 4493207481 | 2026-04-28 |
-| ✓ | RENDER | 1H | 4576191015 | never (deployed today) |
-| ✓ | RENDER | 4H | 4454015019 | 2026-04-27 |
-| ✓ | SOL | 4H | 4454013710 | 2026-04-27 |
-| ✓ | WIF | 4H | 4454015089 | 2026-04-28 |
+| ✓ | BONK | 4H | 4454015047 | 2026-05-02 |
+| ✓ | PENGU | 1H | 4493207481 | 2026-05-02 |
+| ✓ | RENDER | 1H | 4576191015 | 2026-05-02 |
+| ✓ | WIF | 4H | 4454015089 | 2026-05-02 |
+| — | _culled 2026-05-02:_ ETH 4H, RENDER 4H, SOL 1H, SOL 4H, PENGU 1H | | | |
 
 ---
 
@@ -71,12 +71,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 **Logic:** wick-rejection detection at swing highs/lows; edge-triggered sweep + reclaim. Same-bar bugfix Apr 19 (v1.0 → v3.0).
 **Slot:** `USER;12e465c59f0941d2a4fef70e58003c45` · script v3.0 · `staged/indicator_liq_sweep_v1.0.pine`
 
-| status | symbol | TF | alert_id | last_fired |
-|---|---|---|---|---|
-| ✓ | ETH | 1H | 4454017961 | 2026-04-28 |
-| ✓ | ETH | 4H | 4454017945 | 2026-04-28 |
-
-⚠ **Coverage note:** Liq Sweep only validates on ETH in current backtests. All non-ETH alerts culled 2026-04-28.
+**All alerts culled 2026-05-02** — both ETH 1H (`4454017961`) and ETH 4H (`4454017945`) failed WF re-validation under fixed gate (PF 0.40 and 0.93). Indicator slot retained but no active alerts.
 
 ---
 
@@ -85,14 +80,14 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 **Logic:** K/D crossover in oversold zone + RSI<50 trend filter. Was the dominant source of fee-only churn pre-Apr 19 (22/25 BUY→CLOSE loops). v1.0 → v3.0 fix removed `short_exit`.
 **Slot:** `USER;fea633ae4e5a488c8ccea5efd448b93a` · script v3.0 · `staged/indicator_stoch_rsi_v1.0.pine`
 
-| status | symbol | TF | alert_id | last_fired |
+| status | symbol | TF | alert_id | notes |
 |---|---|---|---|---|
-| ✓ | BONK | 1H | 4576190853 | never (deployed today) |
-| ✓ | ETH | 4H | 4454015121 | 2026-04-27 |
-| ✓ | PENGU | 1H | 4558016704 | 2026-04-28 |
-| ✓ | PENGU | 4H | 4479801456 | 2026-04-25 |
-| ✓ | RENDER | 1H | 4454015587 | 2026-04-28 |
-| ✓ | SOL | 4H | 4454015105 | 2026-04-28 |
+| ✓ | ETH | 4H | 4454015121 | retained (PF 0.65, marginal — pending re-eval) |
+| ✓ | PENGU | 4H | 4479801456 | retained (PF 1.25, marginal — pending re-eval) |
+| ✓ | RENDER | 1H | 4454015587 | retained (PF 0.86, marginal — pending re-eval) |
+| ✓ | SOL | 4H | 4454015105 | retained (PF 0.85, marginal — pending re-eval) |
+| ✓ | FARTCOIN.P | 4H | 4606125639 | **NEW — WF passer (PF 4.49, Tier A 12%)** |
+| — | _culled 2026-05-02:_ BONK 1H (`4576190853`), PENGU 1H (`4558016704`) | | | catastrophic 1H |
 
 ---
 
@@ -101,12 +96,15 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 **Logic:** anchored VWAP ± deviation bands; mean-reversion entry on band touch + momentum confirmation. v6.0/v10.0 saves were part of Apr 19 same-bar bugfix series.
 **Slot:** `USER;53163d00de3843f1a78c67bfc88dbf6d` · script v10.0 · `staged/indicator_vwap_dev_v1.0.pine`
 
-| status | symbol | TF | alert_id | last_fired |
+| status | symbol | TF | alert_id | notes |
 |---|---|---|---|---|
-| ✓ | BONK | 4H | 4524592285 | 2026-04-27 |
-| ✓ | ETH | 4H | 4524592433 | 2026-04-27 |
-| ✓ | PENGU | 4H | 4478619043 | 2026-04-25 |
-| ✓ | SOL | 1H | 4576190178 | never (deployed today) |
+| ✓ | BONK | 4H | 4524592285 | retained (PF 0.95, marginal — pending re-eval) |
+| ✓ | ETH | 4H | 4524592433 | retained (PF 0.47, catastrophic but kept — used as clone source) |
+| ✓ | PENGU | 4H | 4478619043 | retained (PF 0.97, marginal — pending re-eval) |
+| ✓ | FARTCOIN.P | 4H | 4606125661 | **NEW — WF passer (PF 3.88, Tier A 12%)** |
+| ✓ | MOODENG.P | 4H | 4606125675 | **NEW — WF passer (PF 2.13, Tier B 9%)** |
+| ✓ | JUP | 4H | 4606092343 | **NEW — WF passer (PF 1.89, Tier C 6%)** |
+| — | _culled 2026-05-02:_ SOL 1H (`4576190178`) | | | catastrophic 1H (PF 0.24) |
 
 ---
 
@@ -129,13 +127,16 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 |  | FVG | EMA Ribbon | Liq Sweep | Stoch RSI | VWAP Dev |
 |---|---|---|---|---|---|
-| **BONK** | 4H | 4H | — | 1H | 4H |
-| **ETH** | — | 4H | 1H, 4H | 4H | 4H |
-| **JUP** | 4H | — | — | — | — |
-| **PENGU** | 4H | 1H | — | 1H, 4H | 4H |
-| **RENDER** | 4H | 1H, 4H | — | 1H | — |
-| **SOL** | — | 4H | — | 4H | 1H |
+| **BONK** | 4H | 4H | — | — | 4H |
+| **ETH** | — | — | — | 4H | 4H |
+| **FARTCOIN.P** | — | — | — | **4H ✦** | **4H ✦** |
+| **JUP** | 4H | — | — | — | **4H ✦** |
+| **MOODENG.P** | — | — | — | — | **4H ✦** |
+| **PENGU** | 4H | 1H | — | 4H | 4H |
+| **RENDER** | 4H | 1H | — | 1H | — |
 | **WIF** | — | 4H | — | — | — |
+
+✦ = WF-validated passer deployed 2026-05-02, sized at A=12%/B=9%/C=6% per `config_sizing_overrides.yaml`.
 
 ---
 
@@ -150,6 +151,8 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-05-02 | **Conservative cull + WF passer deploy**: deleted 10 alerts (4 triple-flagged stale 4H + 6 catastrophic 1H, all PF<0.5 or stale+failing) and created 4 alerts on WF-validated passers from `nightly_20260502_0403`: Stoch RSI/FARTCOIN.P/4H, VWAP Dev/FARTCOIN.P/4H, VWAP Dev/MOODENG.P/4H, VWAP Dev/JUP/4H. FARTCOIN/MOODENG use `BINANCE:<TOKEN>USDT.P` perp symbols (no spot listing on Binance). Trade engine symbol normalization patched to strip `.P` suffix. Net 24 → 14 → 18 alerts. Liq Sweep indicator went from 2 → 0 active alerts. |
+| 2026-05-02 | **Live re-pull during audit**: confirmed 24 active alerts. Added missing `EMA Ribbon SOL 1H` (alert_id `4454014990`). WF-alignment claim invalidated by post-fix-gate re-validation: 0/24 of original deployment passed. Stale 4H slots flagged. See `backtesting/results/audit_deployment_vs_wf_20260502.pdf`. |
 | 2026-04-28 | **Apr 20 FVG-dup cleanup**: deleted 3 disabled FVG alerts (`4513570647` BONK 4H, `4513571230` RENDER 4H, `4513571327` PENGU 4H). All Apr 20 batch with 8 inputs (missing `in_8`) — duplicates of the Apr 13/16 originals on the same tokens/TFs. Total 27 → 24 (100% active). |
 | 2026-04-28 | **WF-alignment cull + deploy**: deleted 16 alerts that never validated in last 4 nightly walk-forward runs (5 Liq Sweep non-ETH, 4 FVG non-validated, 3 EMA Ribbon, 1 Stoch RSI JUP 4H, 3 VWAP Dev non-validated). Created 3 new alerts on stable 3-4/4 validators: VWAP Dev SOL 1H (`4576190178`), Stoch RSI BONK 1H (`4576190853`), EMA Ribbon RENDER 1H (`4576191015`). Total 40 → 27. WF alignment 49% → 100%. |
 | 2026-04-28 | **Duplicate cleanup**: deleted 3 alerts via webpack 359399 `deleteAlerts`. Removed: Liq Sweep ETH 4H `4513574533` (dup of `4454017945`), Stoch RSI PENGU 4H `4524595484` (malformed `in_0` carried "secret: " prefix), VWAP Dev PENGU 4H `4524593076` (dup of `4478619043`, missing `in_8`). Total 43 → 40. |

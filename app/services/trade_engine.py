@@ -189,7 +189,7 @@ def get_sizing_override(strategy: Optional[str], symbol: Optional[str],
     tf = _normalize_timeframe(timeframe)
     if not (strat and symbol and tf):
         return None
-    token = symbol.upper().replace("USDT", "").replace("USD", "")
+    token = symbol.upper().replace("USDT", "").replace("USD", "").replace(".P", "")
     slot = _load_sizing_overrides().get(strat, {}).get(token, {}).get(tf)
     if not slot:
         return None
@@ -198,7 +198,7 @@ def get_sizing_override(strategy: Optional[str], symbol: Optional[str],
 
 def _strip_pair(symbol: str) -> str:
     """Normalise 'BONKUSDT' → 'BONK' for correlation lookups."""
-    return symbol.upper().replace("USDT", "").replace("USD", "")
+    return symbol.upper().replace("USDT", "").replace("USD", "").replace(".P", "")
 
 
 def correlation_check(symbol: str) -> Optional[dict]:
@@ -498,7 +498,7 @@ class TradeEngine:
             tradeable_usd = max(0, usdc_balance + kamino_usdc - usdc_reserve)
 
             # Get actual token price (use Jupiter price lookup, fall back to signal estimate)
-            token_symbol = signal.symbol.replace("USDT", "").replace("USD", "")
+            token_symbol = signal.symbol.replace("USDT", "").replace("USD", "").replace(".P", "")
             if token_symbol == "SOL":
                 token_price = sol_price
             else:
@@ -647,7 +647,7 @@ class TradeEngine:
             drm = get_dry_run_manager()
             drm.record_signal_received()
             strategy_name = signal.strategy or "unknown"
-            token_symbol_dr = signal.symbol.replace("USDT", "").replace("USD", "")
+            token_symbol_dr = signal.symbol.replace("USDT", "").replace("USD", "").replace(".P", "")
             tf_dr = signal.timeframe or ""
 
             if drm.is_dry_run(strategy_name, token_symbol_dr, tf_dr):
@@ -1069,7 +1069,7 @@ class TradeEngine:
         # Token-specific SL override (e.g., memecoins need wider stops)
         token_key = None
         if symbol:
-            token_key = symbol.upper().replace("USDT", "").replace("USD", "")
+            token_key = symbol.upper().replace("USDT", "").replace("USD", "").replace(".P", "")
             token_overrides = pos_cfg.get("token_overrides") or {}
             override = token_overrides.get(token_key)
             if override and "sl_multiplier" in override:
