@@ -49,6 +49,9 @@ BINANCE_TOKENS = {
     "SHIB":     "SHIBUSDT",   # Established meme
     "PEPE":     "PEPEUSDT",   # Established meme
     "FLOKI":    "FLOKIUSDT",  # Established meme
+    # Cosmos research additions (2026-05-02) — Binance.US-listed Cosmos ecosystem
+    "TIA":      "TIAUSDT",    # Celestia (modular blockchain)
+    "KAVA":     "KAVAUSDT",   # Kava (Cosmos DeFi)
 }
 
 # Coinbase Advanced — used for Solana tokens not on Binance US.
@@ -69,6 +72,8 @@ OKX_TOKENS = {
     "ACT":   "ACT-USDT",
     "GOAT":  "GOAT-USDT",
     "ZEUS":  "ZEUS-USDT",  # ⚠ thin liquidity (~1.1% PI on $1k); Tier C sizing only
+    # Cosmos research addition (2026-05-02) — DYDX not on Binance.US
+    "DYDX":  "DYDX-USDT",
 }
 
 # CoinGecko IDs for tokens not on Binance US, Coinbase, or OKX.
