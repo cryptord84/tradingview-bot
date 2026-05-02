@@ -202,7 +202,7 @@ def run_backtest(
             if bar_high >= effective_sl:
                 exit_at = effective_sl
                 pnl_pct = (entry_price / exit_at - 1) - 2 * fill_cost
-                pnl = position_size * exit_at * abs(pnl_pct) if risk.risk_per_trade_pct < 100 else equity * pnl_pct
+                pnl = position_size * exit_at * pnl_pct if risk.risk_per_trade_pct < 100 else equity * pnl_pct
                 trade_pnls.append(pnl)
                 _record_rr(trade_rrs, entry_price, exit_at, sl_price)
                 equity += pnl
@@ -215,7 +215,7 @@ def run_backtest(
             if bar_low <= tp_price:
                 exit_at = tp_price
                 pnl_pct = (entry_price / exit_at - 1) - 2 * fill_cost
-                pnl = position_size * exit_at * abs(pnl_pct) if risk.risk_per_trade_pct < 100 else equity * pnl_pct
+                pnl = position_size * exit_at * pnl_pct if risk.risk_per_trade_pct < 100 else equity * pnl_pct
                 trade_pnls.append(pnl)
                 _record_rr(trade_rrs, entry_price, exit_at, sl_price)
                 equity += pnl
@@ -248,7 +248,7 @@ def run_backtest(
 
         elif position == -1 and exit_short[i]:
             pnl_pct = (entry_price / price - 1) - 2 * fill_cost
-            pnl = position_size * price * abs(pnl_pct) if risk.risk_per_trade_pct < 100 else equity * pnl_pct
+            pnl = position_size * price * pnl_pct if risk.risk_per_trade_pct < 100 else equity * pnl_pct
             trade_pnls.append(pnl)
             _record_rr(trade_rrs, entry_price, price, sl_price)
             equity += pnl
