@@ -194,6 +194,13 @@ class JupiterClient:
         "MEW": "MEWUSDT",
         "PNUT": "PNUTUSDT",
         "MOODENG": "MOODENGUSDT",
+        # Tier 3 additions (2026-05-02)
+        "ME":   "MEUSDT",       # Binance.US
+        "KMNO": "KMNO-USD",     # Coinbase
+        "DBR":  "DBR-USD",      # Coinbase
+        "ACT":  "ACT-USDT",     # OKX
+        "GOAT": "GOAT-USDT",    # OKX
+        "ZEUS": "ZEUS-USDT",    # OKX
     }
 
     # CoinGecko IDs as fallback (also covers tokens not on Binance.us)
@@ -216,6 +223,13 @@ class JupiterClient:
         "RENDER": "render-token",
         "W": "wormhole",
         "DOG": "dog-go-to-the-moon-rune",
+        # Tier 3 additions (2026-05-02)
+        "ME":   "magic-eden",
+        "KMNO": "kamino",
+        "DBR":  "debridge",
+        "ACT":  "act-i-the-prophecy",
+        "GOAT": "goatseus-maximus",
+        "ZEUS": "zeus-network",
     }
 
     async def get_sol_price(self) -> float:

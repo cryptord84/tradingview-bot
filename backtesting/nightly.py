@@ -20,7 +20,7 @@ from typing import Optional
 # Allow running from project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backtesting.data import fetch_all, TIMEFRAMES, BINANCE_TOKENS, COINGECKO_TOKENS
+from backtesting.data import fetch_all, TIMEFRAMES, BINANCE_TOKENS, COINGECKO_TOKENS, COINBASE_TOKENS, OKX_TOKENS
 from backtesting.engine import (
     run_backtest, run_walkforward, BacktestResult, WalkForwardResult,
     RiskConfig, DEFAULT_RISK, risk_for,
@@ -87,7 +87,12 @@ def suggest_leverage(r: BacktestResult) -> float:
 
 
 # ── Focus tokens: all tradeable tokens (Binance + CoinGecko) ─────────────────
-FOCUS_TOKENS = list(BINANCE_TOKENS.keys()) + list(COINGECKO_TOKENS.keys())
+FOCUS_TOKENS = (
+    list(BINANCE_TOKENS.keys())
+    + list(COINBASE_TOKENS.keys())
+    + list(OKX_TOKENS.keys())
+    + list(COINGECKO_TOKENS.keys())
+)
 
 # ── Timeframes to test ───────────────────────────────────────────────────────
 FOCUS_TIMEFRAMES = ["15m", "1H", "4H"]

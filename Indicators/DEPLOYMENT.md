@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-05-02 ~3:00 PM EDT (post conservative cull + WF passer deploy)
+**Last verified:** 2026-05-02 ~4:00 PM EDT (post FOCUS_TOKENS expansion + PNUT WF passer deploy)
 **Source of truth:** TradingView (`alert_list` MCP / webpack 359399 `listAlerts()`). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -24,11 +24,11 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 4 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 3.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
 | 0 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
 | 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 3.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
-| 6 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
+| 7 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
 | 0 | Donchian Breakout v1.0 (not deployed) | `USER;6a0a490366d34845bed8071a79198cde` | 5.0 | `staged/indicator_donchian_v1.0.pine` |
 
-**Totals:** 18 alerts (18 active, 0 inactive), 4 indicators in production, 1 indicator culled completely (Liq Sweep), 2 staged-but-unused.
+**Totals:** 19 alerts (19 active, 0 inactive), 4 indicators in production, 1 indicator culled completely (Liq Sweep), 2 staged-but-unused.
 
 **WF alignment:** Mixed. The **4 WF-passers from `nightly_20260502_0403`** are now deployed: Stoch RSI/FARTCOIN.P/4H (`4606125639`), VWAP Dev/FARTCOIN.P/4H (`4606125661`), VWAP Dev/MOODENG.P/4H (`4606125675`), VWAP Dev/JUP/4H (`4606092343`). The remaining **14 alerts have PF in the 0.5–1.4 range** (heavy-loss to marginal under fixed WF gate); kept after conservative cull pending re-evaluation as more nightly data accumulates. Catastrophic combos (PF<0.5) and triple-flagged stale combos already culled 2026-05-02.
 
@@ -101,9 +101,10 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | ✓ | BONK | 4H | 4524592285 | retained (PF 0.95, marginal — pending re-eval) |
 | ✓ | ETH | 4H | 4524592433 | retained (PF 0.47, catastrophic but kept — used as clone source) |
 | ✓ | PENGU | 4H | 4478619043 | retained (PF 0.97, marginal — pending re-eval) |
-| ✓ | FARTCOIN.P | 4H | 4606125661 | **NEW — WF passer (PF 3.88, Tier A 12%)** |
-| ✓ | MOODENG.P | 4H | 4606125675 | **NEW — WF passer (PF 2.13, Tier B 9%)** |
-| ✓ | JUP | 4H | 4606092343 | **NEW — WF passer (PF 1.89, Tier C 6%)** |
+| ✓ | FARTCOIN.P | 4H | 4606125661 | **WF passer (PF 3.88, Tier A 12%)** |
+| ✓ | MOODENG.P | 4H | 4606125675 | **WF passer (PF 2.13, Tier B 9%)** |
+| ✓ | JUP | 4H | 4606092343 | **WF passer (PF 1.89, Tier C 6%)** |
+| ✓ | PNUT | 4H | 4606392921 | **WF passer (PF 1.52, Tier C 6%) — added 2026-05-02** |
 | — | _culled 2026-05-02:_ SOL 1H (`4576190178`) | | | catastrophic 1H (PF 0.24) |
 
 ---
@@ -133,6 +134,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | **JUP** | 4H | — | — | — | **4H ✦** |
 | **MOODENG.P** | — | — | — | — | **4H ✦** |
 | **PENGU** | 4H | 1H | — | 4H | 4H |
+| **PNUT** | — | — | — | — | **4H ✦** |
 | **RENDER** | 4H | 1H | — | 1H | — |
 | **WIF** | — | 4H | — | — | — |
 
@@ -151,6 +153,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-05-02 | **FOCUS_TOKENS expansion + PNUT deploy**: added 6 Jupiter-tradeable Solana tokens to backtest universe via 3 new exchange data fetchers (Coinbase: KMNO, DBR; OKX: ACT, GOAT, ZEUS; Binance.US: ME). 2 candidates dropped: WBTC (Coinbase data ended Dec 2024 — delisted), GRASS (only 49 OKX bars). New nightly tested 690 combos vs 460 prior. **0 of the 6 new tokens passed WF** (KMNO/DBR have only 30 days history; ACT/GOAT/ZEUS have history but no edge above PF 1.4; ME max PF 1.04 with ≥30 trades). However, PNUT (existing token) crossed WF gate this run at PF 1.52 — deployed `VWAP Dev / PNUT / 4H` (alert_id `4606392921`, Tier C 6%). 18 → 19 alerts. |
 | 2026-05-02 | **Conservative cull + WF passer deploy**: deleted 10 alerts (4 triple-flagged stale 4H + 6 catastrophic 1H, all PF<0.5 or stale+failing) and created 4 alerts on WF-validated passers from `nightly_20260502_0403`: Stoch RSI/FARTCOIN.P/4H, VWAP Dev/FARTCOIN.P/4H, VWAP Dev/MOODENG.P/4H, VWAP Dev/JUP/4H. FARTCOIN/MOODENG use `BINANCE:<TOKEN>USDT.P` perp symbols (no spot listing on Binance). Trade engine symbol normalization patched to strip `.P` suffix. Net 24 → 14 → 18 alerts. Liq Sweep indicator went from 2 → 0 active alerts. |
 | 2026-05-02 | **Live re-pull during audit**: confirmed 24 active alerts. Added missing `EMA Ribbon SOL 1H` (alert_id `4454014990`). WF-alignment claim invalidated by post-fix-gate re-validation: 0/24 of original deployment passed. Stale 4H slots flagged. See `backtesting/results/audit_deployment_vs_wf_20260502.pdf`. |
 | 2026-04-28 | **Apr 20 FVG-dup cleanup**: deleted 3 disabled FVG alerts (`4513570647` BONK 4H, `4513571230` RENDER 4H, `4513571327` PENGU 4H). All Apr 20 batch with 8 inputs (missing `in_8`) — duplicates of the Apr 13/16 originals on the same tokens/TFs. Total 27 → 24 (100% active). |

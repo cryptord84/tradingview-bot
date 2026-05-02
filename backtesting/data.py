@@ -1,4 +1,4 @@
-"""OHLCV fetcher: Binance US (primary) + CoinGecko (fallback for unlisted tokens)."""
+"""OHLCV fetcher: Binance US (primary) + Coinbase + OKX + CoinGecko (fallbacks)."""
 
 import time
 from typing import Optional
@@ -6,7 +6,9 @@ from typing import Optional
 import httpx
 import pandas as pd
 
-BINANCE_BASE = "https://api.binance.us"
+BINANCE_BASE  = "https://api.binance.us"
+COINBASE_BASE = "https://api.exchange.coinbase.com"
+OKX_BASE      = "https://www.okx.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 
 # Binance US trading pairs
@@ -26,9 +28,29 @@ BINANCE_TOKENS = {
     "MEW":      "MEWUSDT",
     "PNUT":     "PNUTUSDT",
     "MOODENG":  "MOODENGUSDT",
+    # Tier 3 additions (2026-05-02) — Jupiter-tradeable Solana tokens with Binance US data
+    "ME":       "MEUSDT",
 }
 
-# CoinGecko IDs for tokens not on Binance US
+# Coinbase Advanced — used for Solana tokens not on Binance US.
+# Coinbase has no native 4H granularity (only 1m/5m/15m/1H/6H/1D).
+# We fetch 1H and resample to 4H downstream.
+# Note: tokens here have limited Coinbase history (~30-60 days). WBTC was removed
+# 2026-05-02 — Coinbase data ended Dec 2024 (delisted/stale).
+COINBASE_TOKENS = {
+    "KMNO": "KMNO-USD",
+    "DBR":  "DBR-USD",
+}
+
+# OKX — used for Solana memecoins not on Binance US or Coinbase.
+# Note: GRASS removed 2026-05-02 — only ~49 bars on 4H, too thin for WF.
+OKX_TOKENS = {
+    "ACT":   "ACT-USDT",
+    "GOAT":  "GOAT-USDT",
+    "ZEUS":  "ZEUS-USDT",  # ⚠ thin liquidity (~1.1% PI on $1k); Tier C sizing only
+}
+
+# CoinGecko IDs for tokens not on Binance US, Coinbase, or OKX.
 COINGECKO_TOKENS = {
     "PYTH":  "pyth-network",
     "RAY":   "raydium",
@@ -40,7 +62,12 @@ COINGECKO_TOKENS = {
     # DOG (dog-go-to-the-moon-rune) — CoinGecko OHLC not available for Runes tokens
 }
 
-TOKENS = {**BINANCE_TOKENS, **{k: f"CG:{v}" for k, v in COINGECKO_TOKENS.items()}}
+TOKENS = {
+    **BINANCE_TOKENS,
+    **{k: f"CB:{v}"  for k, v in COINBASE_TOKENS.items()},
+    **{k: f"OKX:{v}" for k, v in OKX_TOKENS.items()},
+    **{k: f"CG:{v}"  for k, v in COINGECKO_TOKENS.items()},
+}
 
 TIMEFRAMES = {
     "15m": "15m",
@@ -113,6 +140,147 @@ def fetch_binance(symbol: str, interval: str, bars: int = 2000) -> Optional[pd.D
     df = pd.concat(chunks).sort_index()
     df = df[~df.index.duplicated(keep="first")]
     return df
+
+
+def fetch_coinbase(pair: str, interval: str, bars: int = 2000) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV from Coinbase Advanced with pagination.
+
+    Coinbase granularity (seconds): 60, 300, 900, 3600, 21600, 86400.
+    No native 4H — we fetch 1H and resample 4×.
+    Max 300 bars per request → paginate backwards by ~300 bars at a time.
+    """
+    granularity_map = {"15m": 900, "1h": 3600, "1d": 86400}
+    needs_resample_4h = interval == "4h"
+    fetch_interval = "1h" if needs_resample_4h else interval
+    granularity = granularity_map.get(fetch_interval)
+    if granularity is None:
+        return None
+
+    # If resampling 1H→4H, we need 4× the bars
+    target_bars = bars * 4 if needs_resample_4h else bars
+
+    chunks = []
+    end = int(time.time())
+    remaining = target_bars
+    request_secs = 300 * granularity  # 300 bars per request
+    first_call = True
+
+    while remaining > 0:
+        start = end - request_secs
+        # First call without start/end gets Coinbase's default "latest 300" — works
+        # for tokens where explicit time windows reject (some new listings).
+        if first_call:
+            params = {"granularity": granularity}
+            first_call = False
+        else:
+            params = {
+                "granularity": granularity,
+                "start": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(start)),
+                "end":   time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(end)),
+            }
+
+        try:
+            resp = httpx.get(f"{COINBASE_BASE}/products/{pair}/candles",
+                             params=params, timeout=15)
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"\n  [coinbase] {pair}/{interval}: {e}")
+            return None if not chunks else None  # bail on error
+
+        raw = resp.json()
+        if not raw:
+            break
+        # Coinbase returns [time, low, high, open, close, volume], newest first
+        df = pd.DataFrame(raw, columns=["ts", "low", "high", "open", "close", "volume"])
+        df["ts"] = pd.to_datetime(df["ts"].astype(int), unit="s", utc=True)
+        df = df.set_index("ts").sort_index()
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = df[col].astype(float)
+        chunks.insert(0, df[["open", "high", "low", "close", "volume"]])
+        remaining -= len(raw)
+        # After first call, set end to the oldest ts we got so next page goes further back
+        end = int(df.index[0].timestamp())
+        if len(raw) < 300:
+            break
+        time.sleep(0.35)  # Coinbase rate limit: 3 req/s public
+
+    if not chunks:
+        return None
+    df = pd.concat(chunks).sort_index()
+    df = df[~df.index.duplicated(keep="first")]
+
+    if needs_resample_4h:
+        df = df.resample("4h").agg({
+            "open": "first", "high": "max", "low": "min",
+            "close": "last", "volume": "sum",
+        }).dropna()
+
+    return df
+
+
+def fetch_okx(pair: str, interval: str, bars: int = 2000) -> Optional[pd.DataFrame]:
+    """Fetch OHLCV from OKX with pagination via history-candles.
+
+    OKX bar values: 15m, 1H, 4H, 1D (uppercase).
+    Max 100 bars per request.
+    """
+    bar_map = {"15m": "15m", "1h": "1H", "4h": "4H", "1d": "1D"}
+    bar = bar_map.get(interval)
+    if bar is None:
+        return None
+
+    chunks = []
+    after_ts = None  # OKX uses 'after' for pagination (older than this ts)
+    fetched = 0
+    max_pages = max(1, (bars + 99) // 100) + 2
+
+    for _ in range(max_pages):
+        params = {"instId": pair, "bar": bar, "limit": 100}
+        if after_ts is not None:
+            params["after"] = str(after_ts)
+
+        try:
+            resp = httpx.get(f"{OKX_BASE}/api/v5/market/history-candles",
+                             params=params, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != "0":
+                if not chunks:  # first call failed
+                    print(f"\n  [okx] {pair}/{interval}: {data.get('msg', 'unknown')[:60]}")
+                    return None
+                break
+            raw = data.get("data", [])
+        except Exception as e:
+            print(f"\n  [okx] {pair}/{interval}: {e}")
+            return None if not chunks else None  # bail if any error
+
+        if not raw:
+            break
+
+        # OKX shape: [ts, open, high, low, close, vol, volCcy, volCcyQuote, confirm]
+        df = pd.DataFrame(raw, columns=[
+            "ts", "open", "high", "low", "close", "vol", "volCcy", "volCcyQuote", "confirm",
+        ])
+        df["ts"] = pd.to_datetime(df["ts"].astype("int64"), unit="ms", utc=True)
+        df = df.set_index("ts").sort_index()
+        for col in ["open", "high", "low", "close", "vol"]:
+            df[col] = df[col].astype(float)
+        df = df.rename(columns={"vol": "volume"})
+        chunks.insert(0, df[["open", "high", "low", "close", "volume"]])
+        fetched += len(raw)
+
+        if fetched >= bars:
+            break
+        # Paginate: fetch older bars by setting after = oldest ts in this batch
+        after_ts = int(raw[-1][0])
+        time.sleep(0.15)  # OKX rate limit ~20 req / 2s public
+
+    if not chunks:
+        return None
+    df = pd.concat(chunks).sort_index()
+    return df[~df.index.duplicated(keep="first")]
 
 
 def fetch_coingecko(cg_id: str, interval: str, retries: int = 3) -> Optional[pd.DataFrame]:
@@ -212,6 +380,28 @@ def fetch_all(timeframe: str = "1H", bars: int = 2000) -> dict[str, pd.DataFrame
         else:
             print("skipped")
         time.sleep(0.1)
+
+    # Coinbase tokens (no native 4H — fetch_coinbase resamples 1H→4H)
+    for token, pair in COINBASE_TOKENS.items():
+        print(f"  {token} (Coinbase:{pair})…", end=" ", flush=True)
+        df = fetch_coinbase(pair, interval, bars)
+        if df is not None and len(df) >= 50:
+            results[token] = df
+            print(f"{len(df)} bars")
+        else:
+            print("skipped")
+        time.sleep(0.4)
+
+    # OKX tokens (paginated, 100 bars/request)
+    for token, pair in OKX_TOKENS.items():
+        print(f"  {token} (OKX:{pair})…", end=" ", flush=True)
+        df = fetch_okx(pair, interval, bars)
+        if df is not None and len(df) >= 50:
+            results[token] = df
+            print(f"{len(df)} bars")
+        else:
+            print("skipped")
+        time.sleep(0.2)
 
     # CoinGecko fallback tokens
     for token, cg_id in COINGECKO_TOKENS.items():

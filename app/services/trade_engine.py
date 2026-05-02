@@ -1008,6 +1008,13 @@ class TradeEngine:
         "HNT": "hntyVP6YFm1Hg25TN9WGLqM12b8TQmcknKrdu1oxWux",
         "DRIFT": "DriFtupJYLTosbwoN8koMbEYSx54aFAVLddWsbksjwg7",
         "TNSR": "TNSRxcUxoT9xBG3de7PiJyTDYu7kskLqcpddxnEJAS6",
+        # Tier 3 additions (2026-05-02) — Jupiter-tradeable, Coinbase/OKX/Binance.US data
+        "ME":   "MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u",
+        "KMNO": "KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS",
+        "DBR":  "DBRiDgJAMsM95moTzJs7M9LnkGErpbv9v6CUR1DXnUu5",
+        "ACT":  "GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump",
+        "GOAT": "CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump",
+        "ZEUS": "ZEUS1aR7aX8DFFJf5QjWj2ftDDdNTroMNGo8YoQm3Gq",
     }
 
     _TOKEN_DECIMALS = {
@@ -1017,6 +1024,7 @@ class TradeEngine:
         "JUP": 6, "PENGU": 6, "FARTCOIN": 6, "POPCAT": 9,
         "MEW": 5, "PNUT": 6, "MOODENG": 6,
         "HNT": 8, "DRIFT": 6, "TNSR": 9,
+        "ME": 6, "KMNO": 6, "DBR": 6, "ACT": 6, "GOAT": 6, "ZEUS": 6,
     }
 
     def _resolve_token_mint(self, symbol: str) -> str:
