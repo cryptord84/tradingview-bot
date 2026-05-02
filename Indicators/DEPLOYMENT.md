@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-05-02 ~4:00 PM EDT (post FOCUS_TOKENS expansion + PNUT WF passer deploy)
+**Last verified:** 2026-05-02 ~6:00 PM EDT (post EVM Phase 3 + INJ alert deploy on Arbitrum)
 **Source of truth:** TradingView (`alert_list` MCP / webpack 359399 `listAlerts()`). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -22,13 +22,15 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 |---|---|---|---|---|
 | 4 | FVG v1.1 | `USER;3156f00306a244688b2d8de21cd03dbe` | 1.0 | `staged/indicator_fvg_v1.1.pine` |
 | 4 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 3.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
-| 0 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
+| 1 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
 | 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 3.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
 | 7 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
 | 0 | Donchian Breakout v1.0 (not deployed) | `USER;6a0a490366d34845bed8071a79198cde` | 5.0 | `staged/indicator_donchian_v1.0.pine` |
 
-**Totals:** 19 alerts (19 active, 0 inactive), 4 indicators in production, 1 indicator culled completely (Liq Sweep), 2 staged-but-unused.
+**Totals:** 20 alerts (20 active, 0 inactive), 5 indicators in production, 2 staged-but-unused.
+
+**EVM execution lane (Phase 3 deployed 2026-05-02):** the Liq Sweep / INJ.P / 4H alert routes through the EVM trade engine (OpenOcean on Arbitrum) instead of Jupiter. EVM wallet `0x74F29429...` funded with $100 USDC + ~$15 ETH for gas.
 
 **WF alignment:** Mixed. The **4 WF-passers from `nightly_20260502_0403`** are now deployed: Stoch RSI/FARTCOIN.P/4H (`4606125639`), VWAP Dev/FARTCOIN.P/4H (`4606125661`), VWAP Dev/MOODENG.P/4H (`4606125675`), VWAP Dev/JUP/4H (`4606092343`). The remaining **14 alerts have PF in the 0.5–1.4 range** (heavy-loss to marginal under fixed WF gate); kept after conservative cull pending re-evaluation as more nightly data accumulates. Catastrophic combos (PF<0.5) and triple-flagged stale combos already culled 2026-05-02.
 
@@ -71,7 +73,10 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 **Logic:** wick-rejection detection at swing highs/lows; edge-triggered sweep + reclaim. Same-bar bugfix Apr 19 (v1.0 → v3.0).
 **Slot:** `USER;12e465c59f0941d2a4fef70e58003c45` · script v3.0 · `staged/indicator_liq_sweep_v1.0.pine`
 
-**All alerts culled 2026-05-02** — both ETH 1H (`4454017961`) and ETH 4H (`4454017945`) failed WF re-validation under fixed gate (PF 0.40 and 0.93). Indicator slot retained but no active alerts.
+| status | symbol | TF | alert_id | notes |
+|---|---|---|---|---|
+| ✓ | INJ.P | 4H | 4606986738 | **NEW (2026-05-02) — WF passer (PF 1.55, Tier C 6%) — EVM lane via OpenOcean on Arbitrum** |
+| — | _culled 2026-05-02:_ ETH 1H (`4454017961`) PF 0.40, ETH 4H (`4454017945`) PF 0.93 |
 
 ---
 
@@ -135,6 +140,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | **MOODENG.P** | — | — | — | — | **4H ✦** |
 | **PENGU** | 4H | 1H | — | 4H | 4H |
 | **PNUT** | — | — | — | — | **4H ✦** |
+| **INJ.P** | — | — | **4H ✦ EVM** | — | — |
 | **RENDER** | 4H | 1H | — | 1H | — |
 | **WIF** | — | 4H | — | — | — |
 
@@ -153,6 +159,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-05-02 | **EVM Phase 3 + INJ alert deploy**: trade_engine.py wired to route EVM symbols (INJ + 6 near-misses pre-mapped) through new EVMSwapExecutor → OpenOcean → Arbitrum. Encrypted EVM wallet at `0x74F29429...` funded with $100 USDC + ~$15 ETH. Created `Liq Sweep / INJ.P / 4H` alert (id `4606986738`) on `BINANCE:INJUSDT.P` symbol — first EVM-routed alert. Total alerts 19 → 20. Earlier $2 USDC → 16.31 ARB canary swap on Arbitrum proved the integration end-to-end. |
 | 2026-05-02 | **FOCUS_TOKENS expansion + PNUT deploy**: added 6 Jupiter-tradeable Solana tokens to backtest universe via 3 new exchange data fetchers (Coinbase: KMNO, DBR; OKX: ACT, GOAT, ZEUS; Binance.US: ME). 2 candidates dropped: WBTC (Coinbase data ended Dec 2024 — delisted), GRASS (only 49 OKX bars). New nightly tested 690 combos vs 460 prior. **0 of the 6 new tokens passed WF** (KMNO/DBR have only 30 days history; ACT/GOAT/ZEUS have history but no edge above PF 1.4; ME max PF 1.04 with ≥30 trades). However, PNUT (existing token) crossed WF gate this run at PF 1.52 — deployed `VWAP Dev / PNUT / 4H` (alert_id `4606392921`, Tier C 6%). 18 → 19 alerts. |
 | 2026-05-02 | **Conservative cull + WF passer deploy**: deleted 10 alerts (4 triple-flagged stale 4H + 6 catastrophic 1H, all PF<0.5 or stale+failing) and created 4 alerts on WF-validated passers from `nightly_20260502_0403`: Stoch RSI/FARTCOIN.P/4H, VWAP Dev/FARTCOIN.P/4H, VWAP Dev/MOODENG.P/4H, VWAP Dev/JUP/4H. FARTCOIN/MOODENG use `BINANCE:<TOKEN>USDT.P` perp symbols (no spot listing on Binance). Trade engine symbol normalization patched to strip `.P` suffix. Net 24 → 14 → 18 alerts. Liq Sweep indicator went from 2 → 0 active alerts. |
 | 2026-05-02 | **Live re-pull during audit**: confirmed 24 active alerts. Added missing `EMA Ribbon SOL 1H` (alert_id `4454014990`). WF-alignment claim invalidated by post-fix-gate re-validation: 0/24 of original deployment passed. Stale 4H slots flagged. See `backtesting/results/audit_deployment_vs_wf_20260502.pdf`. |
