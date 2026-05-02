@@ -385,7 +385,48 @@ class TradeEngine:
         self.telegram = TelegramService()
         self.news = NewsService()
         self.kamino = KaminoClient()
+        # EVM execution lane (Phase 3) — lazy-initialized on first EVM trade.
+        # Skipping init here so the bot still runs even if evm_wallet config
+        # block is missing or the EVM wallet is unfunded.
+        self._evm_wallet = None
+        self._evm_executor = None
         self._running = True
+
+    # ── EVM execution lane (Phase 3) ─────────────────────────────────────────
+    # Symbols that route to the EVM (Arbitrum) execution path instead of
+    # Jupiter on Solana. INJ is the only WF passer requiring EVM as of
+    # 2026-05-02; others are research-only until they cross WF thresholds.
+    EVM_TOKENS = {
+        # symbol → (Arbitrum ERC20 contract, decimals)
+        "INJ":   ("0x97ad75064b20fb2B2447feD4fa953bF7F007a706", 18),
+        # Near-misses worth pre-mapping in case they cross WF later:
+        "LDO":   ("0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60", 18),
+        "COMP":  ("0x354A6dA3fcde098F8389cad84b0182725c6C91dE", 18),
+        "AAVE":  ("0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", 18),
+        "LINK":  ("0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18),
+        "UNI":   ("0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", 18),
+        "ARB":   ("0x912CE59144191C1204E64559FE8253a0e49E6548", 18),
+    }
+    EVM_USDC_CONTRACT = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+    EVM_USDC_DECIMALS = 6
+
+    def _is_evm_symbol(self, symbol: str) -> bool:
+        """Return True if the given token symbol routes to EVM execution."""
+        return symbol.upper() in self.EVM_TOKENS
+
+    def _get_evm_wallet(self):
+        """Lazy-init the EVM wallet on first use. Raises if config missing."""
+        if self._evm_wallet is None:
+            from app.services.evm_wallet_service import EVMWalletService
+            self._evm_wallet = EVMWalletService()
+        return self._evm_wallet
+
+    def _get_evm_executor(self):
+        """Lazy-init the EVM swap executor on first use."""
+        if self._evm_executor is None:
+            from app.services.evm_swap_executor import EVMSwapExecutor
+            self._evm_executor = EVMSwapExecutor(self._get_evm_wallet())
+        return self._evm_executor
 
     def is_duplicate(self, signal: WebhookSignal) -> bool:
         """Check if this signal is a duplicate within the configured window."""
@@ -833,56 +874,121 @@ class TradeEngine:
                 })
                 return result
 
-            # Withdraw from Kamino if needed (auto-withdraw before trade)
-            if self.kamino.enabled and self.kamino.auto_withdraw and kamino_usdc > 0:
-                try:
-                    logger.info(f"Withdrawing {kamino_usdc:.2f} USDC from Kamino before trade")
-                    withdraw_result = await self.kamino.withdraw_all(self.wallet.get_keypair())
-                    if withdraw_result.get("success"):
-                        await self.telegram.send_message(
-                            f"Kamino Withdraw: {kamino_usdc:.2f} USDC withdrawn for trade execution"
-                        )
-                        await asyncio.sleep(2)  # Wait for tx to finalize
-                        self.wallet.invalidate_cache()
-                    else:
-                        logger.warning(f"Kamino withdraw failed: {withdraw_result.get('error')}")
-                except Exception as e:
-                    logger.warning(f"Kamino withdraw error (continuing with available balance): {e}")
-
-            # Resolve target token mint address
-            target_mint = self._resolve_token_mint(token_symbol)
-
-            # Execute swap via Jupiter
-            if signal.signal_type.value == "BUY":
-                # BUY: swap USDC → target token
-                input_mint = self.jupiter.usdc_mint
-                output_mint = target_mint
-                amount_lamports = int(trade_usd * 1_000_000)  # USDC has 6 decimals
+            # Skip Solana-specific pre-trade ops (Kamino + mint resolution) for EVM symbols
+            if self._is_evm_symbol(token_symbol):
+                target_mint = None  # not used on EVM path
             else:
-                # SELL: swap target token → USDC
-                input_mint = target_mint
-                output_mint = self.jupiter.usdc_mint
-                # For sells, amount is in target token's smallest unit
-                # We use trade_usd / token_price to get token amount
-                token_amount = trade_usd / token_price if token_price > 0 else 0
-                decimals = self._token_decimals(token_symbol)
-                amount_lamports = int(token_amount * (10 ** decimals))
+                # Withdraw from Kamino if needed (auto-withdraw before trade)
+                if self.kamino.enabled and self.kamino.auto_withdraw and kamino_usdc > 0:
+                    try:
+                        logger.info(f"Withdrawing {kamino_usdc:.2f} USDC from Kamino before trade")
+                        withdraw_result = await self.kamino.withdraw_all(self.wallet.get_keypair())
+                        if withdraw_result.get("success"):
+                            await self.telegram.send_message(
+                                f"Kamino Withdraw: {kamino_usdc:.2f} USDC withdrawn for trade execution"
+                            )
+                            await asyncio.sleep(2)  # Wait for tx to finalize
+                            self.wallet.invalidate_cache()
+                        else:
+                            logger.warning(f"Kamino withdraw failed: {withdraw_result.get('error')}")
+                    except Exception as e:
+                        logger.warning(f"Kamino withdraw error (continuing with available balance): {e}")
 
-            logger.info(
-                f"Executing {signal.signal_type.value} {token_symbol}: "
-                f"${trade_usd:.2f} USDC at {leverage}x "
-                f"(swap {input_mint[:8]}..→{output_mint[:8]}..)"
-            )
+                # Resolve target token mint address (Solana SPL)
+                target_mint = self._resolve_token_mint(token_symbol)
 
-            swap_result = await self.jupiter.execute_swap(
-                keypair=self.wallet.get_keypair(),
-                input_mint=input_mint,
-                output_mint=output_mint,
-                amount_lamports=amount_lamports,
-            )
+            # ── Branch by chain: EVM (Arbitrum via OpenOcean) vs Solana (Jupiter)
+            if self._is_evm_symbol(token_symbol):
+                # EVM execution path
+                evm_executor = self._get_evm_executor()
+                evm_wallet = self._get_evm_wallet()
 
-            result["status"] = "executed"
-            result["tx_signature"] = swap_result["tx_signature"]
+                # Gas-price circuit breaker — skip trade if Arbitrum gas spikes.
+                # Default threshold: 0.5 gwei (current normal is ~0.02 gwei, so
+                # 25x normal). Configurable via evm_wallet.max_gas_price_gwei.
+                evm_cfg = get("evm_wallet") or {}
+                max_gwei = float(evm_cfg.get("max_gas_price_gwei", 0.5))
+                current_gas_wei = await evm_wallet.get_gas_price_wei(with_buffer=False)
+                current_gas_gwei = current_gas_wei / 1e9
+                if current_gas_gwei > max_gwei:
+                    logger.warning(
+                        f"EVM gas-price circuit breaker tripped: {current_gas_gwei:.4f} gwei "
+                        f"> threshold {max_gwei} gwei — skipping {token_symbol} trade"
+                    )
+                    result["status"] = "skipped_gas_too_high"
+                    result["chain"] = "arbitrum"
+                    return result
+
+                evm_token_addr, evm_token_decimals = self.EVM_TOKENS[token_symbol]
+
+                if signal.signal_type.value == "BUY":
+                    src_addr, src_dec = self.EVM_USDC_CONTRACT, self.EVM_USDC_DECIMALS
+                    dst_addr, dst_dec = evm_token_addr, evm_token_decimals
+                    amount_wei = int(trade_usd * (10 ** self.EVM_USDC_DECIMALS))
+                else:
+                    src_addr, src_dec = evm_token_addr, evm_token_decimals
+                    dst_addr, dst_dec = self.EVM_USDC_CONTRACT, self.EVM_USDC_DECIMALS
+                    token_amount = trade_usd / token_price if token_price > 0 else 0
+                    amount_wei = int(token_amount * (10 ** evm_token_decimals))
+
+                logger.info(
+                    f"Executing {signal.signal_type.value} {token_symbol} on EVM (Arbitrum): "
+                    f"${trade_usd:.2f} USDC at {leverage}x via OpenOcean"
+                )
+
+                evm_result = await evm_executor.execute_swap(
+                    src_token=src_addr, src_decimals=src_dec,
+                    dst_token=dst_addr, dst_decimals=dst_dec,
+                    amount_wei=amount_wei,
+                    slippage_bps=200,  # 2% — slightly more than Solana to handle EVM volatility
+                    dry_run=False,
+                    wait_for_swap_receipt=True,
+                    receipt_timeout_s=120,
+                )
+                # Verify swap actually succeeded on-chain
+                receipt = evm_result.get("receipt") or {}
+                evm_status = int(receipt.get("status", "0x0"), 16)
+                if evm_status != 1:
+                    raise RuntimeError(
+                        f"EVM swap reverted on-chain: tx={evm_result['swap_tx']['hash']}"
+                    )
+                # Map EVM result into the same shape as Jupiter for downstream code
+                swap_result = {
+                    "tx_signature": evm_result["swap_tx"]["hash"],
+                    "price_impact": "n/a",  # OpenOcean doesn't return PI in the same format
+                }
+                result["status"] = "executed"
+                result["tx_signature"] = swap_result["tx_signature"]
+                result["chain"] = "arbitrum"
+            else:
+                # Solana execution path (Jupiter) — original flow
+                if signal.signal_type.value == "BUY":
+                    input_mint = self.jupiter.usdc_mint
+                    output_mint = target_mint
+                    amount_lamports = int(trade_usd * 1_000_000)
+                else:
+                    input_mint = target_mint
+                    output_mint = self.jupiter.usdc_mint
+                    token_amount = trade_usd / token_price if token_price > 0 else 0
+                    decimals = self._token_decimals(token_symbol)
+                    amount_lamports = int(token_amount * (10 ** decimals))
+
+                logger.info(
+                    f"Executing {signal.signal_type.value} {token_symbol}: "
+                    f"${trade_usd:.2f} USDC at {leverage}x "
+                    f"(swap {input_mint[:8]}..→{output_mint[:8]}..)"
+                )
+
+                swap_result = await self.jupiter.execute_swap(
+                    keypair=self.wallet.get_keypair(),
+                    input_mint=input_mint,
+                    output_mint=output_mint,
+                    amount_lamports=amount_lamports,
+                )
+
+                result["status"] = "executed"
+                result["tx_signature"] = swap_result["tx_signature"]
+                result["chain"] = "solana"
 
             # Record trade in SOL risk manager for exposure tracking
             if signal.signal_type.value == "BUY":
@@ -890,11 +996,15 @@ class TradeEngine:
 
             # Invalidate cache so next balance read is fresh
             self.wallet.invalidate_cache()
+            if self._evm_wallet is not None:
+                self._evm_wallet.invalidate_cache()
 
-            # Get new balance
+            # Get new balance (Solana SOL only — EVM balance shown via separate dashboard later)
             new_balance = await self.wallet.get_balance_sol()
 
-            # Log trade
+            # Log trade — chain field tells us whether to look up tx on solscan or arbiscan
+            chain_label = result.get("chain", "solana")
+            trade_notes = f"Price impact: {swap_result.get('price_impact', '?')} | chain={chain_label}"
             insert_trade({
                 "timestamp": datetime.utcnow().isoformat(),
                 "tx_id": swap_result["tx_signature"],
@@ -904,12 +1014,13 @@ class TradeEngine:
                 "amount_sol": token_qty,
                 "amount_usd": trade_usd,
                 "price_usd": token_price,
-                "fees_sol": 0.000005,  # Base tx fee
+                "fees_sol": 0.000005,  # Base tx fee (rough — EVM gas tracked in tx itself)
                 "leverage": leverage,
                 "confidence_score": signal.confidence_score,
                 "claude_reasoning": claude_resp.reasoning,
-                "wallet_address": self.wallet.public_key,
-                "notes": f"Price impact: {swap_result.get('price_impact', '?')}",
+                "wallet_address": (self._evm_wallet.address if chain_label == "arbitrum"
+                                   else self.wallet.public_key),
+                "notes": trade_notes,
                 "strategy": strategy_label,
                 "reason": TradeReason.WEBHOOK,
             })
@@ -927,7 +1038,13 @@ class TradeEngine:
             )
 
             # Create position record for TP/SL monitoring (BUY only)
-            if signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0:
+            # Skip TP/SL position record for EVM trades — position_monitor only
+            # knows how to close via Jupiter (Solana). EVM positions exit only
+            # via signal-driven CLOSE webhooks (which DO route correctly through
+            # this method). Updating position_monitor for EVM is a Phase 4 task.
+            chain_for_position = result.get("chain", "solana")
+            if (signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0
+                    and chain_for_position == "solana"):
                 tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy, signal.symbol, signal.timeframe)
                 tp_price = token_price + (signal.atr * tp_mult)
                 sl_price = token_price - (signal.atr * sl_mult)
