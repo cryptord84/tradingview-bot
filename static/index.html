@@ -2539,7 +2539,27 @@ async function loadTrades() {
       typeCell.style.fontWeight = '700';
       tr.appendChild(typeCell);
 
-      tr.appendChild(createCell(t.symbol));
+      // Symbol cell with chain badge for EVM trades. Chain is encoded in
+      // notes ("chain=arbitrum") because the trades table doesn't have a
+      // dedicated column. Tx prefix (0x... for EVM, base58 for Solana) is
+      // also a reliable signal.
+      const isEvmTrade = (t.notes || '').includes('chain=arbitrum')
+        || (t.tx_id || '').startsWith('0x');
+      const symCellEl = createCell('');
+      const symSpan = document.createElement('span');
+      symSpan.textContent = t.symbol;
+      symCellEl.appendChild(symSpan);
+      if (isEvmTrade) {
+        const badge = document.createElement('span');
+        badge.textContent = 'ARB';
+        badge.style.cssText = 'margin-left:6px;padding:1px 5px;font-size:.5rem;'
+          + 'background:#a855f7;color:#000;border-radius:2px;font-weight:700;'
+          + 'letter-spacing:1px;vertical-align:middle;';
+        badge.title = 'EVM trade on Arbitrum';
+        symCellEl.appendChild(badge);
+      }
+      tr.appendChild(symCellEl);
+
       const actionCell = createCell(t.action);
       actionCell.style.color = t.action === 'EXECUTE' ? 'var(--green)' : t.action === 'REJECT' ? 'var(--red)' : 'var(--yellow)';
       tr.appendChild(actionCell);
@@ -2581,8 +2601,12 @@ async function loadTrades() {
 
       tr.appendChild(createCell(`${t.confidence_score || 0}%`, 'dim'));
 
-      const txShort = t.tx_id ? `${t.tx_id.slice(0,8)}...` : '--';
-      const txHref = t.tx_id ? `https://solscan.io/tx/${t.tx_id}` : '#';
+      // Tx hash with chain-aware explorer link. EVM tx hashes start with 0x
+      // and route to arbiscan; Solana tx_signatures are base58 → solscan.
+      const txShort = t.tx_id ? `${t.tx_id.slice(0, 8)}...` : '--';
+      const txHref = !t.tx_id ? '#'
+        : (t.tx_id.startsWith('0x') ? `https://arbiscan.io/tx/${t.tx_id}`
+                                    : `https://solscan.io/tx/${t.tx_id}`);
       tr.appendChild(createLinkCell(txShort, txHref));
 
       tbody.appendChild(tr);
@@ -2636,7 +2660,9 @@ async function loadWalletTxLog() {
       tr.appendChild(createCell(tx.notes || '--', 'dim'));
 
       const txShort = tx.tx_signature ? `${tx.tx_signature.slice(0,8)}...` : '--';
-      const txHref = tx.tx_signature ? `https://solscan.io/tx/${tx.tx_signature}` : '#';
+      const txHref = !tx.tx_signature ? '#'
+        : (tx.tx_signature.startsWith('0x') ? `https://arbiscan.io/tx/${tx.tx_signature}`
+                                            : `https://solscan.io/tx/${tx.tx_signature}`);
       tr.appendChild(createLinkCell(txShort, txHref));
 
       tbody.appendChild(tr);
