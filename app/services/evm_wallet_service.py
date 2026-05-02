@@ -41,8 +41,11 @@ ARBITRUM_TOKENS = {
     "INJ":   "0x97ad75064b20fb2B2447feD4fa953bF7F007a706",
 }
 
-# ERC20 balanceOf(address) selector — first 4 bytes of keccak256("balanceOf(address)")
-ERC20_BALANCE_OF_SELECTOR = "0x70a08231"
+# ERC20 function selectors — first 4 bytes of keccak256(signature)
+ERC20_BALANCE_OF_SELECTOR = "0x70a08231"  # balanceOf(address)
+ERC20_ALLOWANCE_SELECTOR  = "0xdd62ed3e"  # allowance(address owner, address spender)
+ERC20_APPROVE_SELECTOR    = "0x095ea7b3"  # approve(address spender, uint256 amount)
+MAX_UINT256 = (1 << 256) - 1
 
 
 def _derive_key(password: str) -> bytes:
@@ -165,6 +168,24 @@ class EVMWalletService:
             return 0.0
         raw = int(result_hex, 16)
         return raw / (10 ** decimals)
+
+    async def get_allowance(self, token_addr: str, spender: str) -> int:
+        """Read ERC20 allowance(this_wallet, spender) — how much spender can pull."""
+        owner_padded = self.address.lower().removeprefix("0x").rjust(64, "0")
+        spender_padded = spender.lower().removeprefix("0x").rjust(64, "0")
+        calldata = ERC20_ALLOWANCE_SELECTOR + owner_padded + spender_padded
+        data = await self._rpc("eth_call", [
+            {"to": token_addr, "data": calldata}, "latest",
+        ])
+        result = data.get("result", "0x0")
+        return int(result, 16) if result and result != "0x" else 0
+
+    @staticmethod
+    def build_approve_calldata(spender: str, amount_wei: int) -> str:
+        """Build ERC20 approve(spender, amount) calldata. Use as `data` in a tx."""
+        spender_padded = spender.lower().removeprefix("0x").rjust(64, "0")
+        amount_padded = hex(amount_wei).removeprefix("0x").rjust(64, "0")
+        return ERC20_APPROVE_SELECTOR + spender_padded + amount_padded
 
     async def get_usdc_balance(self) -> float:
         """USDC balance on Arbitrum (6 decimals)."""
