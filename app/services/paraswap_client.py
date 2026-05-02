@@ -123,6 +123,12 @@ class ParaswapClient:
 
     # ── Quote ────────────────────────────────────────────────────────────────
 
+    # CLOB DEXs to exclude by default — their quotes are time-sensitive and
+    # expire faster than typical AMM swap latency, causing "External call failed"
+    # reverts. AMMs (Uniswap V3, Sushiswap, Camelot, Curve, Balancer) are stable
+    # for the ~1-5s window between Paraswap quote and our broadcast.
+    EXCLUDE_DEXS_DEFAULT = "Dexalot,HashflowV3,WooFiV2,WooFiV3"
+
     async def get_quote(
         self,
         src_token: str,
@@ -131,6 +137,7 @@ class ParaswapClient:
         dst_decimals: int,
         amount_wei: int,
         side: str = "SELL",
+        exclude_dexs: Optional[str] = None,
     ) -> dict:
         """Get a price quote with route. Returns the full Paraswap response
         (use response['priceRoute'] to feed into get_swap_tx).
@@ -140,8 +147,11 @@ class ParaswapClient:
             dst_token: output token contract
             amount_wei: input amount in token's smallest unit (or output for BUY side)
             side: SELL (default — sell exact src amount) or BUY (buy exact dst amount)
+            exclude_dexs: comma-separated DEX names to exclude. Default excludes
+                CLOB-based venues that have stale-quote failures. Pass "" to
+                allow all DEXs (not recommended for small/quick swaps).
         """
-        return await self._get("/prices", {
+        params = {
             "srcToken": src_token,
             "destToken": dst_token,
             "srcDecimals": src_decimals,
@@ -149,7 +159,11 @@ class ParaswapClient:
             "amount": str(amount_wei),
             "side": side,
             "network": self.chain_id,
-        })
+        }
+        excl = exclude_dexs if exclude_dexs is not None else self.EXCLUDE_DEXS_DEFAULT
+        if excl:
+            params["excludeDEXS"] = excl
+        return await self._get("/prices", params)
 
     # ── Swap (build unsigned tx from a priceRoute) ───────────────────────────
 

@@ -17,7 +17,7 @@ from typing import Optional
 from eth_utils import keccak
 
 from app.services.evm_wallet_service import EVMWalletService
-from app.services.paraswap_client import ParaswapClient, NATIVE_TOKEN_ADDRESS
+from app.services.openocean_client import OpenOceanClient, NATIVE_TOKEN_ADDRESS
 
 logger = logging.getLogger("bot.evm_swap")
 
@@ -32,10 +32,10 @@ class EVMSwapExecutor:
     def __init__(
         self,
         wallet: EVMWalletService,
-        paraswap: Optional[ParaswapClient] = None,
+        aggregator: Optional[OpenOceanClient] = None,
     ):
         self.wallet = wallet
-        self.paraswap = paraswap or ParaswapClient(chain_id=wallet.chain_id)
+        self.aggregator = aggregator or OpenOceanClient(chain_id=wallet.chain_id)
 
     async def ensure_allowance(
         self,
@@ -49,7 +49,7 @@ class EVMSwapExecutor:
             None if allowance was already sufficient (no tx sent)
             dict with tx details if an approve was sent (or would be in dry-run)
         """
-        spender = self.paraswap.approval_target
+        spender = self.aggregator.approval_target
 
         # Skip allowance for native ETH swaps (no approval needed)
         if token_addr.lower() == NATIVE_TOKEN_ADDRESS.lower():
@@ -94,51 +94,71 @@ class EVMSwapExecutor:
 
         Returns:
             {
-              "quote": {srcAmount, destAmount, srcUSD, destUSD, route},
+              "quote": {src_amount, dest_amount, src_usd, dest_usd, route},
               "approve_tx": {hash, broadcast, dry_run} or None,
               "swap_tx":    {hash, broadcast, dry_run, gas_limit, gas_price_wei},
               "receipt":    receipt dict or None,
             }
         """
-        # 1. Get quote
-        quote_resp = await self.paraswap.get_quote(
-            src_token, src_decimals, dst_token, dst_decimals, amount_wei,
+        # 1. Ensure ERC20 approval first (OpenOcean's swap_quote uses fresh
+        # allowance state; doing approval before quote avoids stale-state issues)
+        approve_result = await self.ensure_allowance(src_token, amount_wei, dry_run=dry_run)
+
+        # 2. Get quote + unsigned tx in one call (OpenOcean's swap_quote endpoint).
+        # Convert wei amount → human-readable string for OpenOcean's API.
+        amount_human = str(amount_wei / (10 ** src_decimals))
+        # Convert slippage from bps to percent (slippage_bps=100 → 1.0%)
+        slippage_pct = slippage_bps / 100.0
+        # Estimate gas price in gwei for OpenOcean's gas-aware routing
+        gas_price_wei = await self.wallet.get_gas_price_wei(with_buffer=False)
+        gas_price_gwei = gas_price_wei / 1e9
+
+        swap_data = await self.aggregator.get_swap_quote(
+            src_token=src_token,
+            dst_token=dst_token,
+            amount_human=amount_human,
+            from_address=self.wallet.address,
+            gas_price_gwei=gas_price_gwei,
+            slippage_pct=slippage_pct,
         )
-        pr = quote_resp["priceRoute"]
+
+        # OpenOcean returns: inAmount, outAmount, to, data, value, estimatedGas, gasPrice (wei)
+        in_amount_wei  = int(swap_data["inAmount"])
+        out_amount_wei = int(swap_data["outAmount"])
+        # Some OpenOcean fields are strings, some integers — normalize
+        oo_gas_price   = int(swap_data.get("gasPrice") or gas_price_wei)
+        oo_gas_est     = int(swap_data.get("estimatedGas") or 200_000)
+
+        # Extract route info (best-effort — schema varies)
+        path = swap_data.get("path", {}).get("routes", [{}])[0]
+        sub_routes = path.get("subRoutes", [{}])[0]
+        route_dexes = [d.get("dex", "?") for d in sub_routes.get("dexes", [])]
+
         quote_summary = {
-            "src_amount": int(pr["srcAmount"]) / (10 ** src_decimals),
-            "dest_amount": int(pr["destAmount"]) / (10 ** dst_decimals),
-            "src_usd": float(pr.get("srcUSD", 0)),
-            "dest_usd": float(pr.get("destUSD", 0)),
-            "route": [
-                s.get("swapExchanges", [{}])[0].get("exchange", "?")
-                for s in pr.get("bestRoute", [{}])[0].get("swaps", [])
-            ],
-            "gas_cost_units": int(pr.get("gasCost", 0)),
+            "src_amount":  in_amount_wei / (10 ** src_decimals),
+            "dest_amount": out_amount_wei / (10 ** dst_decimals),
+            "src_usd":     float(swap_data.get("inToken", {}).get("usd", 0))
+                              * (in_amount_wei / (10 ** src_decimals)),
+            "dest_usd":    float(swap_data.get("outToken", {}).get("usd", 0))
+                              * (out_amount_wei / (10 ** dst_decimals)),
+            "route":       route_dexes,
+            "gas_cost_units": oo_gas_est,
         }
         logger.info(
             f"quote: {quote_summary['src_amount']} src → {quote_summary['dest_amount']} dst "
             f"via {quote_summary['route']}"
         )
 
-        # 2. Ensure ERC20 approval (skipped for native ETH input)
-        approve_result = await self.ensure_allowance(src_token, amount_wei, dry_run=dry_run)
-
-        # 3. Build the unsigned swap tx via Paraswap
-        swap_tx = await self.paraswap.get_swap_tx(
-            pr, self.wallet.address, slippage_bps=slippage_bps,
-            ignore_checks=dry_run,  # skip Paraswap's balance pre-flight in dry-run
-        )
-
-        # 4. Compose the signing payload
-        gas_with_buffer = int(quote_summary["gas_cost_units"] * 1.20)
+        # 3. Compose signing payload with gas-price buffer for base-fee creep.
+        gas_with_buffer = int(oo_gas_est * 1.20)
+        gas_price_buffered = int(oo_gas_price * self.wallet.GAS_PRICE_BUFFER)
         sign_input = {
             "from":     self.wallet.address,
-            "to":       swap_tx["to"],
-            "data":     swap_tx["data"],
-            "value":    int(swap_tx["value"]),
+            "to":       swap_data["to"],
+            "data":     swap_data["data"],
+            "value":    int(swap_data.get("value", 0)),
             "gas":      gas_with_buffer,
-            "gasPrice": int(swap_tx["gasPrice"]),
+            "gasPrice": gas_price_buffered,
             "nonce":    await self.wallet.get_nonce(),
             "chainId":  self.wallet.chain_id,
         }
@@ -153,7 +173,7 @@ class EVMSwapExecutor:
 
         swap_tx_result = {
             "hash": local_hash,
-            "to": swap_tx["to"],
+            "to": swap_data["to"],
             "gas_limit": sign_input["gas"],
             "gas_price_wei": sign_input["gasPrice"],
             "estimated_cost_eth": est_cost_eth,
@@ -180,5 +200,5 @@ class EVMSwapExecutor:
         }
 
     async def close(self) -> None:
-        await self.paraswap.close()
+        await self.aggregator.close()
         # Don't close the wallet — it may be reused elsewhere

@@ -214,10 +214,16 @@ class EVMWalletService:
         data = await self._rpc("eth_getTransactionCount", [self.address, block_tag])
         return int(data["result"], 16)
 
-    async def get_gas_price_wei(self) -> int:
-        """Current gas price (l2 fee on Arbitrum) in wei."""
+    # Multiplier applied to fetched gas prices to absorb base-fee fluctuations
+    # between quote and broadcast. On Arbitrum this is ~$0.001 extra, trivial.
+    GAS_PRICE_BUFFER = 1.25
+
+    async def get_gas_price_wei(self, with_buffer: bool = True) -> int:
+        """Current gas price in wei. By default applies a 25% buffer to absorb
+        base-fee creep between quote-time and broadcast-time."""
         data = await self._rpc("eth_gasPrice", [])
-        return int(data["result"], 16)
+        raw = int(data["result"], 16)
+        return int(raw * self.GAS_PRICE_BUFFER) if with_buffer else raw
 
     async def estimate_gas(self, tx: dict) -> int:
         """Estimate gas for a transaction dict {to, data, value, from}."""
