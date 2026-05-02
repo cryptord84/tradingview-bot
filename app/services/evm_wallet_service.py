@@ -201,6 +201,34 @@ class EVMWalletService:
         data = await self._rpc("eth_chainId", [])
         return int(data["result"], 16)
 
+    async def get_tracked_token_balances(self, tokens: Optional[dict] = None) -> dict:
+        """Fetch balances for a set of ERC20 tokens in parallel.
+
+        Args:
+            tokens: dict of {symbol: (contract_addr, decimals)}. Defaults to
+                ARBITRUM_TOKENS minus the gas-side WETH/USDC stables.
+
+        Returns: {symbol: amount_human} for tokens with non-zero balance.
+        """
+        import asyncio as _asyncio
+        if tokens is None:
+            # Skip USDC (queried separately) and stables
+            tokens = {k: (v, 18 if k != "USDC" else 6)
+                      for k, v in ARBITRUM_TOKENS.items()
+                      if k not in ("USDC", "USDT")}
+
+        async def _one(sym, addr, dec):
+            try:
+                bal = await self.get_erc20_balance(addr, decimals=dec)
+                return sym, bal
+            except Exception:
+                return sym, 0.0
+
+        results = await _asyncio.gather(*[
+            _one(sym, addr, dec) for sym, (addr, dec) in tokens.items()
+        ])
+        return {sym: bal for sym, bal in results if bal > 0}
+
     async def get_block_number(self) -> int:
         """Sanity check: current block number on the chain."""
         data = await self._rpc("eth_blockNumber", [])

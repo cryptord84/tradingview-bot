@@ -712,7 +712,7 @@ footer a:hover { color: var(--green); }
 
   <!-- ═══ UNIFIED PORTFOLIO (top of page) ═══ -->
   <div class="card card-portfolio" data-label="// TOTAL PORTFOLIO" id="portfolio-hero" style="grid-column: 1 / -1;">
-    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr;gap:16px;align-items:stretch;">
+    <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr;gap:14px;align-items:stretch;">
       <!-- Grand total -->
       <div class="wallet-item" style="border-right:1px solid var(--green-dark);padding-right:16px;">
         <div class="wallet-item-label">Total Net Worth</div>
@@ -723,11 +723,17 @@ footer a:hover { color: var(--green); }
           &nbsp;·&nbsp; <span id="pf-alltime-pnl" style="color:var(--green-dim);">All: --</span>
         </div>
       </div>
-      <!-- Crypto subtotal -->
+      <!-- Solana Crypto Wallet (Phantom/Jupiter) -->
       <div class="wallet-item">
-        <div class="wallet-item-label">Crypto Wallet</div>
+        <div class="wallet-item-label">Solana Wallet</div>
         <div class="wallet-item-value" id="pf-crypto" style="color:#00e5ff;">$--</div>
         <div class="wallet-item-sub" id="pf-crypto-breakdown">SOL -- · USDC -- · Tokens --</div>
+      </div>
+      <!-- EVM Wallet (Arbitrum / OpenOcean) -->
+      <div class="wallet-item">
+        <div class="wallet-item-label">EVM Wallet (Arbitrum)</div>
+        <div class="wallet-item-value" id="pf-evm" style="color:#a855f7;">$--</div>
+        <div class="wallet-item-sub" id="pf-evm-breakdown">ETH -- · USDC -- · Tokens --</div>
       </div>
       <!-- Kamino -->
       <div class="wallet-item">
@@ -745,14 +751,16 @@ footer a:hover { color: var(--green); }
       <div class="wallet-item">
         <div class="wallet-item-label">Allocation</div>
         <div id="pf-alloc-bar" style="display:flex;height:28px;margin-top:8px;border:1px solid var(--green-dark);overflow:hidden;">
-          <div id="pf-alloc-crypto" style="background:#00e5ff;height:100%;width:0%;" title="Crypto"></div>
+          <div id="pf-alloc-crypto" style="background:#00e5ff;height:100%;width:0%;" title="Solana"></div>
+          <div id="pf-alloc-evm"    style="background:#a855f7;height:100%;width:0%;" title="EVM"></div>
           <div id="pf-alloc-kamino" style="background:var(--yellow);height:100%;width:0%;" title="Kamino"></div>
           <div id="pf-alloc-kalshi" style="background:#ff8ae3;height:100%;width:0%;" title="Kalshi"></div>
         </div>
-        <div class="wallet-item-sub" id="pf-alloc-labels" style="display:flex;justify-content:space-between;margin-top:4px;font-size:.55rem;">
-          <span style="color:#00e5ff;">CRYPTO --%</span>
-          <span style="color:var(--yellow);">KAMINO --%</span>
-          <span style="color:#ff8ae3;">KALSHI --%</span>
+        <div class="wallet-item-sub" id="pf-alloc-labels" style="display:flex;justify-content:space-between;margin-top:4px;font-size:.5rem;gap:4px;flex-wrap:wrap;">
+          <span style="color:#00e5ff;">SOL --%</span>
+          <span style="color:#a855f7;">EVM --%</span>
+          <span style="color:var(--yellow);">KAM --%</span>
+          <span style="color:#ff8ae3;">KAL --%</span>
         </div>
       </div>
     </div>
@@ -5267,11 +5275,30 @@ async function loadPortfolio() {
       ea.style.color = _deltaColor(alltime);
     }
 
-    // Crypto
+    // Crypto (Solana)
     const c = p.crypto || {};
     setText('pf-crypto', _fmt(c.subtotal_usd));
     const solPart = c.sol ? `${c.sol.toFixed(2)} SOL ($${(c.sol_usd || 0).toFixed(2)})` : 'SOL --';
     setText('pf-crypto-breakdown', `${solPart} · USDC $${(c.usdc || 0).toFixed(2)} · Tokens $${(c.tokens_usd || 0).toFixed(2)}`);
+
+    // EVM (Arbitrum)
+    const ev = p.evm || {};
+    if (ev.configured) {
+      setText('pf-evm', _fmt(ev.subtotal_usd));
+      const ethPart = ev.eth_native
+        ? `${ev.eth_native.toFixed(4)} ETH ($${(ev.eth_usd || 0).toFixed(2)})`
+        : 'ETH --';
+      const heldCount = Object.keys(ev.token_holdings || {}).length;
+      const heldStr = heldCount > 0
+        ? `${heldCount} token${heldCount > 1 ? 's' : ''} ($${(ev.tokens_usd || 0).toFixed(2)})`
+        : 'no tokens';
+      setText('pf-evm-breakdown', `${ethPart} · USDC $${(ev.usdc || 0).toFixed(2)} · ${heldStr}`);
+    } else {
+      setText('pf-evm', '$0.00');
+      setText('pf-evm-breakdown', 'not configured');
+      const evEl = document.getElementById('pf-evm');
+      if (evEl) evEl.style.opacity = '0.4';
+    }
 
     // Kamino
     const k = p.kamino || {};
@@ -5308,19 +5335,23 @@ async function loadPortfolio() {
     // Allocation bar
     const total = t.total_usd || 1;
     const pctCrypto = Math.max(0, ((t.crypto_usd || 0) / total) * 100);
+    const pctEvm    = Math.max(0, ((t.evm_usd    || 0) / total) * 100);
     const pctKamino = Math.max(0, ((t.kamino_usd || 0) / total) * 100);
     const pctKalshi = Math.max(0, ((t.kalshi_usd || 0) / total) * 100);
     const sc = document.getElementById('pf-alloc-crypto');
+    const se = document.getElementById('pf-alloc-evm');
     const sk = document.getElementById('pf-alloc-kamino');
     const sx = document.getElementById('pf-alloc-kalshi');
     if (sc) sc.style.width = pctCrypto.toFixed(1) + '%';
+    if (se) se.style.width = pctEvm.toFixed(1) + '%';
     if (sk) sk.style.width = pctKamino.toFixed(1) + '%';
     if (sx) sx.style.width = pctKalshi.toFixed(1) + '%';
     const labels = document.getElementById('pf-alloc-labels');
     if (labels) {
-      labels.children[0].textContent = `CRYPTO ${pctCrypto.toFixed(0)}%`;
-      labels.children[1].textContent = `KAMINO ${pctKamino.toFixed(0)}%`;
-      labels.children[2].textContent = `KALSHI ${pctKalshi.toFixed(0)}%`;
+      labels.children[0].textContent = `SOL ${pctCrypto.toFixed(0)}%`;
+      labels.children[1].textContent = `EVM ${pctEvm.toFixed(0)}%`;
+      labels.children[2].textContent = `KAM ${pctKamino.toFixed(0)}%`;
+      labels.children[3].textContent = `KAL ${pctKalshi.toFixed(0)}%`;
     }
   } catch(e) { console.warn('Portfolio load failed:', e); }
 }

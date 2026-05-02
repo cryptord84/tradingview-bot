@@ -287,9 +287,12 @@ class JupiterClient:
     async def get_multi_token_prices(self) -> dict:
         """Get prices + 24h change for all tracked tokens. Returns dict of symbol -> {price, change_24h}."""
         result = {}
-        # Try Binance 24h ticker for all tokens at once
+        # Try Binance 24h ticker for all tokens at once. Filter to USDT pairs only —
+        # Coinbase (KMNO-USD) and OKX (ACT-USDT) symbols added 2026-05-02 are not
+        # valid Binance.US tickers and would 400 the whole batch.
         try:
-            symbols = list(self.BINANCE_SYMBOLS.values())
+            symbols = [s for s in self.BINANCE_SYMBOLS.values()
+                       if s.endswith("USDT") and "-" not in s]
             resp = await self._client.get(
                 "https://api.binance.us/api/v3/ticker/24hr",
                 params={"symbols": json.dumps(symbols, separators=(",", ":"))},

@@ -35,6 +35,116 @@ def _get_wallet() -> WalletService:
     return _wallet
 
 
+# Module-level EVM wallet singleton (lazy — only loads if config has evm_wallet block)
+_evm_wallet = None
+_evm_wallet_unavailable = False  # cache "no config" state to skip retries
+
+def _get_evm_wallet():
+    """Lazy-load the EVM wallet. Returns None if config missing — dashboard
+    should gracefully render an EVM section as 'not configured' in that case."""
+    global _evm_wallet, _evm_wallet_unavailable
+    if _evm_wallet_unavailable:
+        return None
+    if _evm_wallet is None:
+        try:
+            from app.services.evm_wallet_service import EVMWalletService
+            _evm_wallet = EVMWalletService()
+        except Exception as e:
+            logger.info(f"EVM wallet unavailable (probably no config): {e}")
+            _evm_wallet_unavailable = True
+            return None
+    return _evm_wallet
+
+
+@router.get("/evm/balance")
+async def get_evm_balance():
+    """EVM wallet balances on Arbitrum (or other configured chain).
+
+    Returns ETH (gas), USDC, and any non-zero held tokens with USD valuations
+    where prices are available (currently ETH only — token USD valuations are
+    a follow-up).
+    """
+    wallet = _get_evm_wallet()
+    if wallet is None:
+        return {
+            "configured": False,
+            "address": None,
+            "subtotal_usd": 0.0,
+            "errors": {"config": "evm_wallet block not in config.yaml"},
+        }
+
+    out = {
+        "configured": True,
+        "address": wallet.address,
+        "chain_id": wallet.chain_id,
+        "chain": "arbitrum" if wallet.chain_id == 42161 else f"chain_{wallet.chain_id}",
+        "eth_native": 0.0,
+        "eth_usd": 0.0,
+        "usdc": 0.0,
+        "token_holdings": {},
+        "tokens_usd": 0.0,
+        "subtotal_usd": 0.0,
+        "errors": {},
+    }
+
+    # ETH price: try price_feed first (may not have ETH), fall back to a known reference
+    eth_price = 0.0
+    try:
+        feed = get_price_feed()
+        if feed.is_running:
+            all_prices = feed.get_all_prices()
+            eth_price = (all_prices.get("ETH") or {}).get("price", 0.0)
+    except Exception:
+        pass
+    # Fallback: use a recent price hint via Jupiter (Solana wrapped ETH proxy)
+    if eth_price <= 0:
+        try:
+            jupiter = JupiterClient()
+            try:
+                eth_price = await jupiter.get_token_price("ETH") or 0.0
+            finally:
+                await jupiter.close()
+        except Exception as e:
+            out["errors"]["eth_price"] = str(e)[:120]
+
+    # Fetch native ETH + USDC + tracked token balances in parallel
+    import asyncio as _a
+    try:
+        eth_bal, usdc_bal, holdings = await _a.gather(
+            wallet.get_eth_balance(),
+            wallet.get_usdc_balance(),
+            wallet.get_tracked_token_balances(),
+        )
+        out["eth_native"] = eth_bal
+        out["eth_usd"] = eth_bal * eth_price
+        out["usdc"] = usdc_bal
+        out["token_holdings"] = {
+            sym: {"amount": amt, "price_usd": 0.0, "usd_value": 0.0}
+            for sym, amt in holdings.items()
+        }
+        # USD valuation for held tokens — best-effort via price_feed (Solana feed
+        # may have wrapped versions of some EVM tokens, e.g. RENDER, JTO).
+        # Tokens without prices show as 0 USD value but their amounts still display.
+        try:
+            feed = get_price_feed()
+            if feed.is_running:
+                all_prices = feed.get_all_prices()
+                for sym, info in out["token_holdings"].items():
+                    p = (all_prices.get(sym) or {}).get("price", 0.0)
+                    if p > 0:
+                        info["price_usd"] = p
+                        info["usd_value"] = info["amount"] * p
+                        out["tokens_usd"] += info["usd_value"]
+        except Exception:
+            pass
+        out["subtotal_usd"] = out["eth_usd"] + out["usdc"] + out["tokens_usd"]
+    except Exception as e:
+        logger.warning(f"/evm/balance fetch error: {e}")
+        out["errors"]["balance"] = str(e)[:200]
+
+    return out
+
+
 @router.get("/stats")
 async def get_dashboard_stats():
     """Get live dashboard statistics."""
@@ -110,6 +220,8 @@ async def get_unified_portfolio():
     out: dict = {
         "timestamp": _dt.utcnow().isoformat(),
         "crypto": {"sol": 0.0, "usdc": 0.0, "tokens_usd": 0.0, "subtotal_usd": 0.0},
+        "evm":    {"address": None, "configured": False, "eth_native": 0.0, "usdc": 0.0,
+                   "tokens_usd": 0.0, "subtotal_usd": 0.0},
         "kamino": {"deposited_usd": 0.0, "earnings_usd": 0.0, "supply_apy": 0.0, "daily_yield_est": 0.0},
         "kalshi": {"balance_usd": 0.0, "invested_usd": 0.0, "pnl_usd": 0.0, "open_positions": 0},
         "totals": {"total_usd": 0.0, "today_pnl_usd": 0.0, "all_time_pnl_usd": 0.0, "delta_24h_usd": 0.0, "delta_24h_pct": 0.0},
@@ -241,11 +353,32 @@ async def get_unified_portfolio():
         logger.warning(f"/portfolio kalshi error: {e}")
         out["errors"]["kalshi"] = str(e)[:160]
 
+    # --- EVM wallet (Arbitrum) ---
+    evm_usd = 0.0
+    try:
+        evm_data = await get_evm_balance()
+        if evm_data.get("configured"):
+            out["evm"] = {
+                "address":     evm_data.get("address"),
+                "configured":  True,
+                "chain":       evm_data.get("chain"),
+                "eth_native":  evm_data.get("eth_native", 0.0),
+                "eth_usd":     evm_data.get("eth_usd", 0.0),
+                "usdc":        evm_data.get("usdc", 0.0),
+                "tokens_usd":  evm_data.get("tokens_usd", 0.0),
+                "token_holdings": evm_data.get("token_holdings", {}),
+                "subtotal_usd": evm_data.get("subtotal_usd", 0.0),
+            }
+            evm_usd = evm_data.get("subtotal_usd", 0.0)
+    except Exception as e:
+        logger.warning(f"/portfolio evm error: {e}")
+        out["errors"]["evm"] = str(e)[:160]
+
     # --- Totals ---
     crypto_usd = out["crypto"]["subtotal_usd"]
     # Kalshi contribution = cash + live market value of open contracts
     kalshi_usd = kalshi_cash_usd + kalshi_open_value_usd
-    total_usd = crypto_usd + kamino_usd + kalshi_usd
+    total_usd = crypto_usd + evm_usd + kamino_usd + kalshi_usd
     db_stats = get_stats()
     all_time_pnl = db_stats.get("total_pnl_usd", 0.0) + out["kalshi"].get("pnl_usd", 0.0)
     today_pnl = db_stats.get("today_pnl_usd", 0.0)
@@ -272,6 +405,7 @@ async def get_unified_portfolio():
     out["totals"] = {
         "total_usd": total_usd,
         "crypto_usd": crypto_usd,
+        "evm_usd": evm_usd,
         "kamino_usd": kamino_usd,
         "kalshi_usd": kalshi_usd,
         "today_pnl_usd": today_pnl,
