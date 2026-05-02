@@ -4043,12 +4043,21 @@ async function loadTokenList() {
       const tr = document.createElement('tr');
       if (!t.has_position) tr.classList.add('empty-row');
 
-      // Token (symbol)
+      // Token (symbol) — with chain badge for non-Solana holdings
       const symTd = document.createElement('td');
       const symSpan = document.createElement('span');
       symSpan.className = 'sym';
       symSpan.textContent = t.symbol;
       symTd.appendChild(symSpan);
+      if (t.chain && t.chain !== 'solana') {
+        const badge = document.createElement('span');
+        badge.textContent = t.chain === 'arbitrum' ? 'ARB' : t.chain.toUpperCase();
+        badge.style.cssText = 'margin-left:6px;padding:1px 5px;font-size:.5rem;'
+          + 'background:#a855f7;color:#000;border-radius:2px;font-weight:700;'
+          + 'letter-spacing:1px;vertical-align:middle;';
+        badge.title = `Held on ${t.chain}`;
+        symTd.appendChild(badge);
+      }
       tr.appendChild(symTd);
 
       // Price

@@ -497,8 +497,52 @@ async def get_wallet_tokens():
         "amount": float(balances.get("sol") or 0.0),
         "price": sol_price,
         "usd_value": float(balances.get("sol_usd_value") or 0.0),
+        "chain": "solana",
     }
-    all_holdings = {"SOL": sol_holding, **token_holdings}
+    # Mark Solana SPL holdings with chain info
+    sol_token_holdings = {
+        sym: {**info, "chain": "solana"} for sym, info in token_holdings.items()
+    }
+    all_holdings = {"SOL": sol_holding, **sol_token_holdings}
+
+    # --- EVM wallet holdings (Arbitrum) — merge into the same universe ---
+    evm_chain_map = {}  # symbol → "arbitrum" for badge rendering
+    try:
+        evm_wallet = _get_evm_wallet()
+        if evm_wallet is not None:
+            evm_eth = await evm_wallet.get_eth_balance()
+            evm_holdings = await evm_wallet.get_tracked_token_balances()
+            # ETH balance shown as a holding (gas + tradable asset)
+            if evm_eth > 0:
+                eth_price = (token_prices.get("ETH") or {}).get("price", 0.0)
+                all_holdings["ETH"] = {
+                    "amount": evm_eth,
+                    "price": eth_price,
+                    "usd_value": evm_eth * eth_price,
+                    "chain": "arbitrum",
+                }
+                evm_chain_map["ETH"] = "arbitrum"
+            for sym, amt in evm_holdings.items():
+                price = (token_prices.get(sym) or {}).get("price", 0.0)
+                # If symbol already exists from Solana, prefer the larger holding
+                # but keep the EVM one with a different key suffix to avoid collisions.
+                # For now, EVM-only symbols (INJ, ARB, LDO, etc.) won't collide.
+                if sym in all_holdings and all_holdings[sym].get("chain") == "solana":
+                    # Edge case: symbol exists on both chains. Prefix EVM one for clarity.
+                    key = f"{sym}.ARB"
+                else:
+                    key = sym
+                all_holdings[key] = {
+                    "amount": amt,
+                    "price": price,
+                    "usd_value": amt * price if price > 0 else 0.0,
+                    "chain": "arbitrum",
+                }
+                evm_chain_map[key] = "arbitrum"
+    except Exception as e:
+        logger.warning(f"/wallet/tokens EVM merge error: {e}")
+        out["errors"]["evm"] = str(e)[:160]
+
     universe = set(all_holdings.keys()) | set(targets.keys()) | set(token_prices.keys())
     universe.discard("USDC")
 
@@ -538,6 +582,7 @@ async def get_wallet_tokens():
             "unrealized_pnl_usd": unrealized_pnl_usd,
             "unrealized_pnl_pct": unrealized_pnl_pct,
             "has_position": amount > 0 and usd_value > 0.01,
+            "chain": all_holdings.get(sym, {}).get("chain", "solana"),
         })
 
     # Sort: targeted first by target desc, then untargeted by current % desc
