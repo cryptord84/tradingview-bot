@@ -29,17 +29,22 @@ THRESHOLDS = {
 
 @dataclass
 class RiskConfig:
-    """Risk management parameters for the backtest engine."""
+    """Risk management parameters for the backtest engine.
+
+    Defaults mirror config.yaml position_monitor globals so backtest evaluations
+    match live engine behavior. Per-slot overrides (config_tpsl_overrides.yaml)
+    and per-token SL overrides are layered on top via risk_for() — see nightly.py.
+    """
     # Position sizing: risk this % of equity per trade
     risk_per_trade_pct: float = 2.0
     # ATR-based stop-loss multiplier (SL = entry ± atr_sl_mult * ATR)
     atr_sl_mult: float = 1.5
-    # ATR-based take-profit multiplier (TP = entry ± atr_tp_mult * ATR)
-    atr_tp_mult: float = 3.0
+    # ATR-based take-profit multiplier (live default in config.yaml is 4.0)
+    atr_tp_mult: float = 4.0
     # Trailing stop: activate after price moves this many ATRs in profit
     trail_activation_atr: float = 1.5
-    # Trailing stop offset from current price in ATRs
-    trail_offset_atr: float = 1.0
+    # Trailing offset — live widened to 2.0 on 2026-04-18 (was clipping winners early)
+    trail_offset_atr: float = 2.0
     # Enable trailing stop
     trail_enabled: bool = True
     # Use ATR-based SL/TP (if False, rely purely on strategy exit signals)
@@ -463,10 +468,23 @@ def run_walkforward(
     )
 
     fail_reasons: list[str] = []
-    if not is_result.passed:
-        fail_reasons.append(f"IS fail: {','.join(is_result.fail_reasons)}")
-    if not oos_result.passed:
-        fail_reasons.append(f"OOS fail: {','.join(oos_result.fail_reasons)}")
+
+    # Trade count is a sample-size gate; apply it to the combined window only.
+    # Per-segment, only require quality thresholds (PF/WR/DD/NP).
+    def _quality_reasons(r: BacktestResult) -> list[str]:
+        return [x for x in r.fail_reasons if not x.endswith(" trades")]
+
+    is_quality_reasons = _quality_reasons(is_result)
+    oos_quality_reasons = _quality_reasons(oos_result)
+    if is_quality_reasons:
+        fail_reasons.append(f"IS fail: {','.join(is_quality_reasons)}")
+    if oos_quality_reasons:
+        fail_reasons.append(f"OOS fail: {','.join(oos_quality_reasons)}")
+
+    if combined.trade_count < THRESHOLDS["trade_count"]:
+        fail_reasons.append(
+            f"combined {combined.trade_count} trades < {THRESHOLDS['trade_count']}"
+        )
 
     retention = 0.0
     if is_result.profit_factor > 0:
@@ -487,4 +505,89 @@ def run_walkforward(
         combined=combined,
         passed=len(fail_reasons) == 0,
         fail_reasons=fail_reasons,
+    )
+
+
+# ── Live-engine TP/SL resolution (mirrors trade_engine._resolve_tp_sl) ────────
+import os as _os
+from pathlib import Path as _Path
+
+_PROJECT_ROOT = _Path(__file__).resolve().parents[1]
+_TPSL_PATH = _PROJECT_ROOT / "config_tpsl_overrides.yaml"
+_LIVE_CONFIG_PATH = _PROJECT_ROOT / "config.yaml"
+
+_tpsl_cache: Optional[dict] = None
+_token_overrides_cache: Optional[dict] = None
+
+
+def _load_tpsl_overrides() -> dict:
+    global _tpsl_cache
+    if _tpsl_cache is not None:
+        return _tpsl_cache
+    try:
+        import yaml
+        with open(_TPSL_PATH) as f:
+            data = yaml.safe_load(f) or {}
+        _tpsl_cache = data.get("strategy_token_tf_overrides", {}) or {}
+    except Exception:
+        _tpsl_cache = {}
+    return _tpsl_cache
+
+
+def _load_token_sl_overrides() -> dict:
+    """Per-token SL multiplier overrides from config.yaml position_monitor.token_overrides."""
+    global _token_overrides_cache
+    if _token_overrides_cache is not None:
+        return _token_overrides_cache
+    try:
+        import yaml
+        with open(_LIVE_CONFIG_PATH) as f:
+            data = yaml.safe_load(f) or {}
+        _token_overrides_cache = (data.get("position_monitor", {}) or {}).get("token_overrides", {}) or {}
+    except Exception:
+        _token_overrides_cache = {}
+    return _token_overrides_cache
+
+
+def risk_for(strategy: str, token: str, timeframe: str,
+             base: Optional[RiskConfig] = None) -> RiskConfig:
+    """Return a RiskConfig for (strategy, token, tf) with live-engine override resolution.
+
+    Precedence (matches trade_engine._resolve_tp_sl):
+      1. Per-slot sweep override (config_tpsl_overrides.yaml) — wins outright if matched
+      2. Per-token SL override (config.yaml position_monitor.token_overrides) — SL only
+      3. base defaults (DEFAULT_RISK)
+
+    Token lookup strips USD/USDT suffix and uses the bare ticker (e.g. RENDERUSDT → RENDER).
+    """
+    if base is None:
+        base = DEFAULT_RISK
+
+    # Strip exchange suffix to match live engine's token-key normalization
+    bare = token.replace("USDT", "").replace("USD", "")
+
+    sl_mult = base.atr_sl_mult
+    tp_mult = base.atr_tp_mult
+
+    # 2. Per-token SL override
+    token_overrides = _load_token_sl_overrides()
+    if bare in token_overrides:
+        sl_mult = token_overrides[bare].get("sl_multiplier", sl_mult)
+
+    # 1. Per-slot sweep — wins for matched slot
+    tpsl = _load_tpsl_overrides()
+    slot = tpsl.get(strategy, {}).get(bare, {}).get(timeframe)
+    if slot:
+        tp_mult = slot.get("atr_tp_mult", tp_mult)
+        sl_mult = slot.get("atr_sl_mult", sl_mult)
+
+    # Build a copy of base with overrides applied
+    return RiskConfig(
+        risk_per_trade_pct=base.risk_per_trade_pct,
+        atr_sl_mult=sl_mult,
+        atr_tp_mult=tp_mult,
+        trail_activation_atr=base.trail_activation_atr,
+        trail_offset_atr=base.trail_offset_atr,
+        trail_enabled=base.trail_enabled,
+        use_atr_stops=base.use_atr_stops,
     )
