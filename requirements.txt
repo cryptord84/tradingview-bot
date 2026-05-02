@@ -9,6 +9,10 @@ uvicorn[standard]==0.34.0
 solders==0.21.0
 solana==0.35.0
 
+# EVM (1inch integration on Arbitrum L2 — Phase 1: read-only wallet ops)
+web3==7.16.0
+eth_account==0.13.7
+
 # Anthropic Claude API
 anthropic==0.42.0
 
