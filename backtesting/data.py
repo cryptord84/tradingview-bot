@@ -30,6 +30,25 @@ BINANCE_TOKENS = {
     "MOODENG":  "MOODENGUSDT",
     # Tier 3 additions (2026-05-02) — Jupiter-tradeable Solana tokens with Binance US data
     "ME":       "MEUSDT",
+    # EVM research additions (2026-05-02) — multi-year Binance.US history.
+    # NOT yet executable: no Solana mints in trade_engine.py. Backtest-only until
+    # an EVM wallet integration lands. If a WF passer emerges here, that informs
+    # the EVM expansion decision.
+    "LINK":     "LINKUSDT",   # DeFi blue chip, 7+ years
+    "UNI":      "UNIUSDT",    # DeFi blue chip
+    "AAVE":     "AAVEUSDT",   # DeFi blue chip
+    "MKR":      "MKRUSDT",    # DeFi blue chip
+    "COMP":     "COMPUSDT",   # DeFi blue chip
+    "LDO":      "LDOUSDT",    # Liquid staking
+    "AVAX":     "AVAXUSDT",   # L1
+    "ATOM":     "ATOMUSDT",   # L1
+    "NEAR":     "NEARUSDT",   # L1
+    "ARB":      "ARBUSDT",    # L2
+    "OP":       "OPUSDT",     # L2
+    "MATIC":    "MATICUSDT",  # L2
+    "SHIB":     "SHIBUSDT",   # Established meme
+    "PEPE":     "PEPEUSDT",   # Established meme
+    "FLOKI":    "FLOKIUSDT",  # Established meme
 }
 
 # Coinbase Advanced — used for Solana tokens not on Binance US.
@@ -40,6 +59,8 @@ BINANCE_TOKENS = {
 COINBASE_TOKENS = {
     "KMNO": "KMNO-USD",
     "DBR":  "DBR-USD",
+    # EVM research addition (2026-05-02) — Binance.US doesn't list INJ
+    "INJ":  "INJ-USD",
 }
 
 # OKX — used for Solana memecoins not on Binance US or Coinbase.
