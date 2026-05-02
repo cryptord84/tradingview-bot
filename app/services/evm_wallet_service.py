@@ -185,5 +185,140 @@ class EVMWalletService:
         data = await self._rpc("eth_blockNumber", [])
         return int(data["result"], 16)
 
+    # ── Phase 2: transaction signing + sending ───────────────────────────────
+
+    async def get_nonce(self, pending: bool = True) -> int:
+        """Get the next nonce for this wallet. `pending=True` includes mempool."""
+        block_tag = "pending" if pending else "latest"
+        data = await self._rpc("eth_getTransactionCount", [self.address, block_tag])
+        return int(data["result"], 16)
+
+    async def get_gas_price_wei(self) -> int:
+        """Current gas price (l2 fee on Arbitrum) in wei."""
+        data = await self._rpc("eth_gasPrice", [])
+        return int(data["result"], 16)
+
+    async def estimate_gas(self, tx: dict) -> int:
+        """Estimate gas for a transaction dict {to, data, value, from}."""
+        # eth_estimateGas accepts the same shape as eth_call
+        params = {
+            "from": tx.get("from", self.address),
+            "to": tx["to"],
+            "data": tx.get("data", "0x"),
+            "value": tx.get("value", "0x0"),
+        }
+        data = await self._rpc("eth_estimateGas", [params])
+        if "error" in data:
+            raise RuntimeError(f"gas estimate failed: {data['error']}")
+        return int(data["result"], 16)
+
+    def sign_tx(self, tx: dict) -> str:
+        """Sign a transaction dict locally. Returns hex-encoded raw tx ready to send.
+
+        Expected tx fields: to, data, value, gas, gasPrice (or maxFeePerGas/
+        maxPriorityFeePerGas), nonce, chainId. Missing fields are NOT auto-filled
+        here — caller must supply them via build_tx() or manually.
+        """
+        signed = self.get_account().sign_transaction(tx)
+        return signed.raw_transaction.hex()
+
+    async def build_tx(
+        self,
+        to: str,
+        data: str = "0x",
+        value: int = 0,
+        gas_limit: Optional[int] = None,
+        gas_price_wei: Optional[int] = None,
+    ) -> dict:
+        """Construct a complete transaction dict ready for sign_tx().
+
+        Auto-fills nonce, gas price, gas limit (with 20% buffer over estimate),
+        and chainId. Caller can override any field by passing it explicitly.
+        """
+        nonce = await self.get_nonce(pending=True)
+        if gas_price_wei is None:
+            gas_price_wei = await self.get_gas_price_wei()
+        partial = {
+            "from": self.address,
+            "to": to,
+            "data": data,
+            "value": hex(value),
+        }
+        if gas_limit is None:
+            est = await self.estimate_gas(partial)
+            gas_limit = int(est * 1.20)  # 20% buffer
+        return {
+            "from": self.address,
+            "to": to,
+            "data": data,
+            "value": value,
+            "gas": gas_limit,
+            "gasPrice": gas_price_wei,
+            "nonce": nonce,
+            "chainId": self.chain_id,
+        }
+
+    async def send_raw_tx(self, raw_tx_hex: str) -> str:
+        """Broadcast a signed raw transaction. Returns transaction hash."""
+        if not raw_tx_hex.startswith("0x"):
+            raw_tx_hex = "0x" + raw_tx_hex
+        data = await self._rpc("eth_sendRawTransaction", [raw_tx_hex])
+        if "error" in data:
+            raise RuntimeError(f"sendRawTransaction failed: {data['error']}")
+        return data["result"]
+
+    async def wait_for_receipt(self, tx_hash: str, timeout_s: int = 60, poll_s: float = 2.0) -> dict:
+        """Poll for transaction receipt. Raises TimeoutError if not mined in time."""
+        import asyncio as _asyncio
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            data = await self._rpc("eth_getTransactionReceipt", [tx_hash])
+            receipt = data.get("result")
+            if receipt is not None:
+                return receipt
+            await _asyncio.sleep(poll_s)
+        raise TimeoutError(f"tx {tx_hash} not mined within {timeout_s}s")
+
+    async def sign_and_send(
+        self,
+        to: str,
+        data: str = "0x",
+        value: int = 0,
+        gas_limit: Optional[int] = None,
+        dry_run: bool = False,
+    ) -> dict:
+        """End-to-end: build → sign → broadcast → wait for receipt.
+
+        If dry_run=True, builds and signs but does NOT broadcast. Returns the
+        signed raw tx hex + the would-be tx hash (computed from the signature).
+        Use this for testing without spending gas.
+        """
+        tx = await self.build_tx(to, data=data, value=value, gas_limit=gas_limit)
+        raw_signed = self.sign_tx(tx)
+        # Compute the tx hash from the raw signed tx (same as eth_sendRawTransaction would)
+        from eth_utils import keccak
+        tx_hash = "0x" + keccak(bytes.fromhex(raw_signed.removeprefix("0x"))).hex()
+
+        result = {
+            "from": self.address,
+            "to": to,
+            "value_wei": value,
+            "gas_limit": tx["gas"],
+            "gas_price_wei": tx["gasPrice"],
+            "nonce": tx["nonce"],
+            "estimated_gas_cost_eth": (tx["gas"] * tx["gasPrice"]) / 1e18,
+            "raw_signed": raw_signed,
+            "tx_hash": tx_hash,
+            "dry_run": dry_run,
+            "broadcast": False,
+        }
+        if dry_run:
+            return result
+
+        broadcast_hash = await self.send_raw_tx(raw_signed)
+        result["broadcast"] = True
+        result["tx_hash"] = broadcast_hash  # use the broadcast-confirmed hash
+        return result
+
     async def close(self) -> None:
         await self._client.aclose()
