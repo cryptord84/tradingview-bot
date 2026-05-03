@@ -543,6 +543,18 @@ async def get_wallet_tokens():
         logger.warning(f"/wallet/tokens EVM merge error: {e}")
         out["errors"]["evm"] = str(e)[:160]
 
+    # Always include the bot's tracked EVM tokens (even if not held) so the user
+    # can see their full trading universe at a glance — INJ/LINK/AAVE etc. show
+    # as zero-balance rows until the alert fires and a position opens.
+    try:
+        from app.services.trade_engine import TradeEngine
+        for sym in TradeEngine.EVM_TOKENS:
+            if sym not in all_holdings:
+                all_holdings[sym] = {"amount": 0.0, "price": 0.0,
+                                     "usd_value": 0.0, "chain": "arbitrum"}
+    except Exception:
+        pass
+
     universe = set(all_holdings.keys()) | set(targets.keys()) | set(token_prices.keys())
     universe.discard("USDC")
 
@@ -569,6 +581,17 @@ async def get_wallet_tokens():
             unrealized_pnl_usd = None
             unrealized_pnl_pct = None
 
+        # Mark as "tracked" if it's part of the bot's deployed-alert universe,
+        # even when balance is zero. Lets the dashboard show INJ/LINK/AAVE
+        # as watched-but-unfilled rows so user sees the full active universe.
+        is_tracked = False
+        try:
+            from app.services.trade_engine import TradeEngine
+            if sym in TradeEngine.EVM_TOKENS:
+                is_tracked = True
+        except Exception:
+            pass
+
         rows.append({
             "symbol": sym,
             "price": price,
@@ -582,6 +605,7 @@ async def get_wallet_tokens():
             "unrealized_pnl_usd": unrealized_pnl_usd,
             "unrealized_pnl_pct": unrealized_pnl_pct,
             "has_position": amount > 0 and usd_value > 0.01,
+            "is_tracked": is_tracked,
             "chain": all_holdings.get(sym, {}).get("chain", "solana"),
         })
 

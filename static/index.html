@@ -710,6 +710,28 @@ footer a:hover { color: var(--green); }
 <!-- ── MAIN ── -->
 <main>
 
+  <!-- ═══ TODAY'S ACTIVITY (live signal/trade ticker) ═══ -->
+  <div class="card" data-label="// TODAY'S ACTIVITY" id="today-activity"
+       style="grid-column: 1 / -1; padding:14px 18px;">
+    <div style="display:grid;grid-template-columns:auto auto auto 1fr;gap:24px;align-items:center;font-family:var(--mono);font-size:.7rem;">
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;font-size:.55rem;">TRADES TODAY</div>
+        <div id="ta-count" style="color:var(--green);font-size:1.5rem;letter-spacing:1px;font-weight:700;">--</div>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;font-size:.55rem;">REALIZED P&amp;L</div>
+        <div id="ta-pnl" style="color:var(--green);font-size:1.5rem;letter-spacing:1px;font-weight:700;">$--</div>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);letter-spacing:2px;font-size:.55rem;">LAST FIRE</div>
+        <div id="ta-last" style="color:var(--green);font-size:.95rem;letter-spacing:1px;">--</div>
+      </div>
+      <div id="ta-recent" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;font-size:.6rem;">
+        <!-- recent-trade chips populated by JS -->
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ UNIFIED PORTFOLIO (top of page) ═══ -->
   <div class="card card-portfolio" data-label="// TOTAL PORTFOLIO" id="portfolio-hero" style="grid-column: 1 / -1;">
     <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1fr 1fr;gap:14px;align-items:stretch;">
@@ -4020,7 +4042,7 @@ async function loadTokenList() {
     const tbody = document.getElementById('token-list-body');
     if (!tbody) return;
     const showAll = document.getElementById('tl-show-all')?.checked;
-    const visible = rows.filter(t => showAll || t.has_position || t.target_pct != null);
+    const visible = rows.filter(t => showAll || t.has_position || t.target_pct != null || t.is_tracked);
     tbody.replaceChildren();
     if (!visible.length) {
       const tr = document.createElement('tr');
@@ -5283,6 +5305,63 @@ function _fmt(n, prefix = '$') {
 
 function _deltaColor(n) { return n > 0 ? 'var(--green)' : n < 0 ? 'var(--red)' : 'var(--green-dim)'; }
 
+async function loadTodayActivity() {
+  try {
+    const r = await fetch(`${API}/api/trades/today`);
+    const d = await r.json();
+    const trades = d.trades || [];
+
+    const setText = (id, txt) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = txt;
+    };
+
+    // Count + P&L (executes only, not rejects)
+    const executed = trades.filter(t => t.action === 'EXECUTE');
+    const totalPnl = trades.reduce((s, t) => s + (t.pnl_usd || 0), 0);
+    setText('ta-count', String(executed.length));
+    setText('ta-pnl', `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toFixed(2)}`);
+    const pnlEl = document.getElementById('ta-pnl');
+    if (pnlEl) pnlEl.style.color = totalPnl > 0 ? 'var(--green)'
+      : totalPnl < 0 ? 'var(--red)' : 'var(--green-dim)';
+
+    // Last fire
+    const last = executed[0];  // get_today_trades returns DESC by default
+    if (last) {
+      const t = (last.timestamp || '').slice(11, 16);  // HH:MM
+      const sym = (last.symbol || '').replace('USDT', '').replace('USD', '').replace('.P', '');
+      const pnlPart = last.pnl_usd != null
+        ? ` ${last.pnl_usd >= 0 ? '+' : ''}$${last.pnl_usd.toFixed(2)}`
+        : '';
+      setText('ta-last', `${t} · ${last.signal_type} ${sym}${pnlPart}`);
+    } else {
+      setText('ta-last', 'no fires yet');
+    }
+
+    // Recent-trade chips (last 6 executes)
+    const recent = document.getElementById('ta-recent');
+    if (recent) {
+      recent.replaceChildren();
+      for (const t of executed.slice(0, 6)) {
+        const chip = document.createElement('span');
+        const sym = (t.symbol || '').replace('USDT', '').replace('USD', '').replace('.P', '');
+        const time = (t.timestamp || '').slice(11, 16);
+        const isEvm = (t.notes || '').includes('chain=arbitrum') || (t.tx_id || '').startsWith('0x');
+        const pnl = t.pnl_usd;
+        const pnlStr = pnl != null ? ` ${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)}` : '';
+        chip.textContent = `${time} ${t.signal_type} ${sym}${pnlStr}`;
+        chip.style.cssText = 'padding:3px 8px;border:1px solid var(--green-dark);'
+          + 'background:rgba(0,255,65,0.05);color:var(--green-dim);'
+          + 'border-radius:2px;letter-spacing:.5px;font-size:.55rem;';
+        if (pnl != null && pnl > 0)      chip.style.color = 'var(--green)';
+        else if (pnl != null && pnl < 0) chip.style.color = 'var(--red)';
+        if (isEvm) chip.style.borderLeft = '3px solid #a855f7';  // EVM marker
+        recent.appendChild(chip);
+      }
+    }
+  } catch(e) { console.warn('Today activity load failed:', e); }
+}
+
 async function loadPortfolio() {
   try {
     const r = await fetch(`${API}/api/portfolio`);
@@ -5717,7 +5796,9 @@ loadPortfolio();
 loadEquityChart();
 loadStrategyPnl();
 loadIndicatorPerf();
+loadTodayActivity();
 setInterval(loadPortfolio, 30000);
+setInterval(loadTodayActivity, 10000);   // every 10s — most live widget
 setInterval(loadEquityChart, 120000);
 setInterval(loadStrategyPnl, 120000);
 setInterval(loadIndicatorPerf, 60000);
