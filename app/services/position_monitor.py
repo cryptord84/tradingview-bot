@@ -40,6 +40,12 @@ class PositionMonitor:
         self.max_retries = cfg.get("max_close_retries", 3)
         self.enabled = cfg.get("enabled", True)
 
+        # Max-hold rule (added 2026-05-03 after position #74 sat 14 days un-closed
+        # because EMA Ribbon never produced an exit signal and SL was just barely
+        # missed). After max_hold_days, force-close regardless of trigger so
+        # capital doesn't sit indefinitely. Set to 0 to disable.
+        self.max_hold_days = float(cfg.get("max_hold_days", 7))
+
         # Trailing stop config
         trail_cfg = cfg.get("trailing_stop") or {}
         self.trail_enabled = trail_cfg.get("enabled", False)
@@ -118,7 +124,22 @@ class PositionMonitor:
             trigger = None
             effective_sl = pos["sl_price"]
 
-            if pos["direction"] == "long":
+            # Max-hold check: force-close if position older than configured days
+            if self.max_hold_days > 0 and pos.get("created_at"):
+                from datetime import datetime as _dt
+                try:
+                    created = _dt.fromisoformat(pos["created_at"].replace("Z", ""))
+                    age_days = (_dt.utcnow() - created).total_seconds() / 86400
+                    if age_days >= self.max_hold_days:
+                        logger.info(
+                            f"Position #{pos['id']} max-hold trigger: age "
+                            f"{age_days:.1f}d >= {self.max_hold_days}d threshold"
+                        )
+                        trigger = "manual"  # closed_manual status, not SL/TP
+                except Exception:
+                    pass
+
+            if not trigger and pos["direction"] == "long":
                 # Update trailing stop if enabled and ATR is available
                 if self.trail_enabled and pos.get("atr") and pos["atr"] > 0:
                     effective_sl = self._update_trailing_sl(pos, current_price)
@@ -127,7 +148,7 @@ class PositionMonitor:
                     trigger = "tp"
                 elif current_price <= effective_sl:
                     trigger = "trail_sl" if effective_sl > pos["sl_price"] else "sl"
-            else:  # short (future use)
+            elif not trigger:  # short (future use)
                 if current_price <= pos["tp_price"]:
                     trigger = "tp"
                 elif current_price >= pos["sl_price"]:
