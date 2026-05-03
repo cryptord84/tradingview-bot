@@ -42,7 +42,7 @@ ANALOG_WINDOWS = [
 ]
 
 TOKENS = ["BTC", "ETH", "SOL"]
-TIMEFRAMES = [("4h", "4H"), ("1d", "1D")]
+TIMEFRAMES = [("1h", "1H"), ("4h", "4H"), ("1d", "1D")]
 
 
 def run_window(df: pd.DataFrame, start: str, end: str, token: str,

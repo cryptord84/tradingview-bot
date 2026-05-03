@@ -22,13 +22,13 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 |---|---|---|---|---|
 | 4 | FVG v1.1 | `USER;3156f00306a244688b2d8de21cd03dbe` | 1.0 | `staged/indicator_fvg_v1.1.pine` |
 | 4 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 3.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
-| 1 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
+| 2 | Liquidity Sweep v1.0 | `USER;12e465c59f0941d2a4fef70e58003c45` | 3.0 | `staged/indicator_liq_sweep_v1.0.pine` |
 | 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 3.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
 | 7 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 10.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
 | 0 | Donchian Breakout v1.0 (not deployed) | `USER;6a0a490366d34845bed8071a79198cde` | 5.0 | `staged/indicator_donchian_v1.0.pine` |
 
-**Totals:** 20 alerts (20 active, 0 inactive), 5 indicators in production, 2 staged-but-unused.
+**Totals:** 21 alerts (21 active, 0 inactive), 5 indicators in production, 2 staged-but-unused.
 
 **EVM execution lane (Phase 3 deployed 2026-05-02):** the Liq Sweep / INJ.P / 4H alert routes through the EVM trade engine (OpenOcean on Arbitrum) instead of Jupiter. EVM wallet `0x74F29429...` funded with $100 USDC + ~$15 ETH for gas.
 
@@ -159,6 +159,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-05-03 | **Liq Sweep / SOL / 4H regime-bet deploy**: Created new alert (id `4608026983`, BINANCE:SOLUSDT 4H) on the dormant Liq Sweep slot. Combo showed up in 2 of 3 analog windows (post-FTX PF 1.29, mid-2023 PF 1.02). SOL is 40% similar to current regime (partial analog) — sized at Tier C 6% for lower-conviction regime bet. Total alerts 20 → 21. |
 | 2026-05-03 | **Regime-bet sizing for Stoch RSI / ETH / 4H**: regime_check.py ran 2026-05-03 02:44 UTC, ETH scored **80% similarity to the post-FTX (Nov 2022 - Mar 2023) analog window** where Stoch RSI / ETH / 4H ran PF 2.03 (vs 0.61 baseline). Existing alert (id `4454015121`, BINANCE:ETHUSDT 4H) is active and just fired 00:08 UTC. Added manual entry to `config_sizing_overrides.yaml` at Tier B (9% sizing, source=regime_analog) so the bot sizes it like a validated mid-PF combo. Persists across nightly runs (merge logic keeps higher-PF entry). Re-eval if regime drifts. |
 | 2026-05-02 | **EVM Phase 3 + INJ alert deploy**: trade_engine.py wired to route EVM symbols (INJ + 6 near-misses pre-mapped) through new EVMSwapExecutor → OpenOcean → Arbitrum. Encrypted EVM wallet at `0x74F29429...` funded with $100 USDC + ~$15 ETH. Created `Liq Sweep / INJ.P / 4H` alert (id `4606986738`) on `BINANCE:INJUSDT.P` symbol — first EVM-routed alert. Total alerts 19 → 20. Earlier $2 USDC → 16.31 ARB canary swap on Arbitrum proved the integration end-to-end. |
 | 2026-05-02 | **FOCUS_TOKENS expansion + PNUT deploy**: added 6 Jupiter-tradeable Solana tokens to backtest universe via 3 new exchange data fetchers (Coinbase: KMNO, DBR; OKX: ACT, GOAT, ZEUS; Binance.US: ME). 2 candidates dropped: WBTC (Coinbase data ended Dec 2024 — delisted), GRASS (only 49 OKX bars). New nightly tested 690 combos vs 460 prior. **0 of the 6 new tokens passed WF** (KMNO/DBR have only 30 days history; ACT/GOAT/ZEUS have history but no edge above PF 1.4; ME max PF 1.04 with ≥30 trades). However, PNUT (existing token) crossed WF gate this run at PF 1.52 — deployed `VWAP Dev / PNUT / 4H` (alert_id `4606392921`, Tier C 6%). 18 → 19 alerts. |
