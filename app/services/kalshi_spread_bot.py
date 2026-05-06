@@ -115,6 +115,11 @@ class KalshiSpreadBot:
         self.max_total_exposure_cents = spread_cfg.get("max_total_exposure_cents", 2000)
         self.inventory_skew_cents = spread_cfg.get("inventory_skew_cents", 2)
         self.stale_order_threshold_cents = spread_cfg.get("stale_order_threshold_cents", 3)
+        # Asymmetric-fill protection: only quote a side when its fill price would be
+        # in the balanced zone. On expensive YES strikes (mid > 60), the YES bid fills
+        # alone and leaves long YES at ~78¢ that pays $0 on NO settle.
+        self.quote_yes_max_cents = spread_cfg.get("quote_yes_max_cents", 60)
+        self.quote_no_max_cents = spread_cfg.get("quote_no_max_cents", 60)
         self.flatten_minutes_before_close = spread_cfg.get("flatten_minutes_before_close", 30)
         self.fee_per_contract_cents = spread_cfg.get("fee_per_contract_cents", 2)
         self.max_days_to_close = spread_cfg.get("max_days_to_close", 0)
@@ -674,6 +679,23 @@ class KalshiSpreadBot:
         # Check inventory limits
         yes_ok = state.yes_position < self.max_inventory_per_market
         no_ok = state.no_position < self.max_inventory_per_market
+
+        # Asymmetric-fill protection: skip the side that would fill alone on a lopsided
+        # market. If mid > quote_yes_max_cents (e.g., 60¢), YES bid would land too close
+        # to ask and fill while NO bid sits stale far from ask — building one-sided long
+        # YES that pays $0 on NO settle. Symmetric guard for cheap-YES markets.
+        if mid > self.quote_yes_max_cents and yes_ok:
+            yes_ok = False
+            logger.debug(
+                f"Skipping YES quote on {state.ticker}: mid={mid}¢ > "
+                f"quote_yes_max_cents={self.quote_yes_max_cents}¢ (one-sided fill risk)"
+            )
+        if (100 - mid) > self.quote_no_max_cents and no_ok:
+            no_ok = False
+            logger.debug(
+                f"Skipping NO quote on {state.ticker}: NO mid={100 - mid}¢ > "
+                f"quote_no_max_cents={self.quote_no_max_cents}¢ (one-sided fill risk)"
+            )
 
         # Cancel stale orders and place new ones
         if yes_stale and yes_ok:

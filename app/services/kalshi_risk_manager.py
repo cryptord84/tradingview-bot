@@ -115,8 +115,15 @@ class KalshiRiskManager:
         # Category exposure tracking (reset daily)
         self._category_exposure: dict[str, int] = defaultdict(int)
 
-        # Daily buy-notional cap (hard cap on churn)
-        self.max_daily_volume_cents = risk_cfg.get("max_daily_volume_cents", 20000)  # $200
+        # Active-exposure cap (real cash currently committed across all open positions).
+        # Reconciled from Kalshi's portfolio every check_interval — resting/cancelled orders
+        # don't count, fills do. This is the meaningful "money at risk on Kalshi" gate.
+        self.max_active_exposure_cents = risk_cfg.get("max_active_exposure_cents", 8000)  # $80
+
+        # Daily buy-notional cap (anti-churn only — catches runaway placement loops,
+        # not exposure). Higher default than active-exposure since unfilled placements
+        # are cheap; we just don't want thousands per day.
+        self.max_daily_volume_cents = risk_cfg.get("max_daily_volume_cents", 50000)  # $500
         self._daily_volume_cents: int = 0
 
         # Ticker-prefix allow-list — if non-empty, orders against other prefixes are blocked
@@ -464,12 +471,23 @@ class KalshiRiskManager:
                 logger.warning(f"[{bot_name}] {reason}")
                 return {"allowed": False, "reason": reason}
 
-        # Daily volume cap (anti-churn)
+        # Active-exposure cap (real cash committed in open Kalshi positions; reconciled).
+        active_exposure = sum(self._category_exposure.values())
+        if active_exposure + order_cost_cents > self.max_active_exposure_cents:
+            reason = (
+                f"Active exposure cap: ${(active_exposure + order_cost_cents)/100:.2f} "
+                f"would exceed ${self.max_active_exposure_cents/100:.2f} "
+                f"(committed: ${active_exposure/100:.2f}, order: ${order_cost_cents/100:.2f})"
+            )
+            logger.warning(f"[{bot_name}] {reason}")
+            return {"allowed": False, "reason": reason}
+
+        # Daily volume cap (anti-churn — catches runaway placement loops)
         if self._daily_volume_cents + order_cost_cents > self.max_daily_volume_cents:
             reason = (
                 f"Daily volume cap: ${(self._daily_volume_cents + order_cost_cents)/100:.2f} "
                 f"would exceed ${self.max_daily_volume_cents/100:.2f} "
-                f"(used: ${self._daily_volume_cents/100:.2f}, order: ${order_cost_cents/100:.2f})"
+                f"(placed today: ${self._daily_volume_cents/100:.2f}, order: ${order_cost_cents/100:.2f})"
             )
             logger.warning(f"[{bot_name}] {reason}")
             return {"allowed": False, "reason": reason}
@@ -713,6 +731,9 @@ class KalshiRiskManager:
             "trip_pnl_cents": self._trip_pnl_cents,
             "max_daily_loss_cents": self.max_daily_loss_cents,
             "max_daily_loss_usd": round(self.max_daily_loss_cents / 100, 2),
+            "max_active_exposure_cents": self.max_active_exposure_cents,
+            "active_exposure_cents": sum(self._category_exposure.values()),
+            "active_exposure_remaining_cents": max(0, self.max_active_exposure_cents - sum(self._category_exposure.values())),
             "max_daily_volume_cents": self.max_daily_volume_cents,
             "daily_volume_cents": self._daily_volume_cents,
             "daily_volume_remaining_cents": max(0, self.max_daily_volume_cents - self._daily_volume_cents),

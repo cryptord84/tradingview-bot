@@ -1044,10 +1044,27 @@ class TradeEngine:
             # for both chains. Signal-driven CLOSE webhooks ALSO route
             # correctly through process_signal for both chains.
             chain_for_position = result.get("chain", "solana")
-            if signal.signal_type.value == "BUY" and signal.atr and signal.atr > 0:
+            if signal.signal_type.value == "BUY":
+                # Use signal's ATR if present, otherwise fall back to a percentage of
+                # current price. Without this fallback, no-ATR alerts would execute the
+                # swap (real money spent) but skip position creation, leaving orphaned
+                # tokens in the wallet with no TP/SL monitoring (root cause of the
+                # April 19 FARTCOIN orphans + 5 other tokens).
+                effective_atr = signal.atr if (signal.atr and signal.atr > 0) else None
+                atr_is_fallback = effective_atr is None
+                if atr_is_fallback:
+                    pos_cfg = get("position_monitor") or {}
+                    fallback_pct = float(pos_cfg.get("fallback_atr_pct", 0.025))
+                    effective_atr = token_price * fallback_pct
+                    logger.warning(
+                        f"No ATR in {signal.strategy or 'unknown'} signal for {signal.symbol}; "
+                        f"using fallback ATR={effective_atr:.6f} ({fallback_pct*100:.1f}% of "
+                        f"price ${token_price:.4f}). Investigate Pine alert payload."
+                    )
+
                 tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy, signal.symbol, signal.timeframe)
-                tp_price = token_price + (signal.atr * tp_mult)
-                sl_price = token_price - (signal.atr * sl_mult)
+                tp_price = token_price + (effective_atr * tp_mult)
+                sl_price = token_price - (effective_atr * sl_mult)
 
                 risk_cfg = get("risk")
                 max_positions = risk_cfg.get("max_open_positions", 3)
@@ -1066,17 +1083,17 @@ class TradeEngine:
                         "entry_tx": swap_result["tx_signature"],
                         "timeframe": signal.timeframe or "",
                         "confidence": signal.confidence_score,
-                        "atr": signal.atr,
-                        "notes": f"TP=${tp_price:.2f} SL=${sl_price:.2f} ATR={signal.atr:.4f}",
+                        "atr": effective_atr,
+                        "notes": f"TP=${tp_price:.2f} SL=${sl_price:.2f} ATR={effective_atr:.4f}"
+                                 + (" [FALLBACK]" if atr_is_fallback else ""),
                     })
                     logger.info(
                         f"Position #{pos_id} opened: {token_qty:.4f} {token_symbol} @ ${token_price:.4f}, "
                         f"TP=${tp_price:.4f}, SL=${sl_price:.4f}"
+                        + (" (fallback ATR)" if atr_is_fallback else "")
                     )
                 else:
                     logger.warning(f"Max open positions ({max_positions}) reached, skipping position tracking")
-            elif signal.signal_type.value == "BUY":
-                logger.warning("No ATR in signal, cannot set TP/SL for position tracking")
 
             # Auto-deposit idle USDC back to Kamino after trade
             if self.kamino.enabled and self.kamino.auto_deposit:

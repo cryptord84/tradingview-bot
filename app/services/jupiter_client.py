@@ -258,22 +258,77 @@ class JupiterClient:
         resp.raise_for_status()
         return float(resp.json()["solana"]["usd"])
 
+    # Solana mint + decimals for Jupiter aggregator price quotes. Kept here
+    # (not imported from trade_engine) to avoid circular imports — jupiter_client
+    # is imported by trade_engine. Must stay aligned with TradeEngine._KNOWN_MINTS
+    # and TradeEngine._TOKEN_DECIMALS.
+    JUPITER_PRICE_TOKENS = {
+        # symbol: (mint, decimals)
+        "JTO":     ("jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL", 9),
+        "WIF":     ("EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm", 6),
+        "BONK":    ("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", 5),
+        "PYTH":    ("HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3", 6),
+        "RAY":     ("4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", 6),
+        "ETH":     ("7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs", 8),
+        "ORCA":    ("orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE", 6),
+        "RENDER":  ("rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", 8),
+        "W":       ("85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ", 6),
+        "DOG":     ("dog1viwbb2vWDpER5FrJ4YFG6gq6XuyFohUe9TXN65u", 5),
+        "JUP":     ("JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN", 6),
+        "PENGU":   ("2zMMhcVQEXDtdE6vsFS7S7D5oUodfJHE8vd1gnBouauv", 6),
+        "FARTCOIN":("9BB6NFEcjBCtnNLFko2FqVQBq8HHM13kCyYcdQbgpump", 6),
+        "POPCAT":  ("7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr", 9),
+        "MEW":     ("MEW1gQWJ3nEXg2qgERiKu7FAFj79PHvQVREQUzScPP5", 5),
+        "PNUT":    ("2qEHjDLDLbuBgRYvsxhc5D6uDWAivNFZGan56P1tpump", 6),
+        "MOODENG": ("ED5nyyWEzpPPiWimP8vYm7sD7TD3LAt3Q3gRTWHzPJBY", 6),
+        # SOL via Jupiter quote (cleaner fallback for get_token_price calls;
+        # get_sol_price() is still the preferred direct path)
+        "SOL":     ("So11111111111111111111111111111111111111112", 9),
+        # Tier 3 (2026-05-02 expansion)
+        "ME":      ("MEFNBXixkEbait3xn9bkm8WsJzXtVsaJEn4c8Sam21u", 6),
+        "KMNO":    ("KMNo3nJsBXfcpJTVhZcXLW7RmTwTt4GVFE7suUBo9sS", 6),
+        "DBR":     ("DBRiDgJAMsM95moTzJs7M9LnkGErpbv9v6CUR1DXnUu5", 6),
+        "ACT":     ("GJAFwWjJ3vnTsrQVabjBVK2TYB1YtRCQXRDfDgUnpump", 6),
+        "GOAT":    ("CzLSujWBLFsSjncfkh59rUFqvafWcY5tzedWJSuypump", 6),
+        "ZEUS":    ("ZEUS1aR7aX8DFFJf5QjWj2ftDDdNTroMNGo8YoQm3Gq", 6),
+    }
+
     async def get_token_price(self, symbol: str) -> float:
-        """Get price for any tracked token. Binance first, CoinGecko fallback."""
+        """Get current swap-able price for any tracked token.
+
+        Uses Jupiter aggregator quote as primary source — returns the price
+        the bot would actually receive on a real close, matching what
+        position_monitor needs for honest TP/SL decisions. CoinGecko fallback
+        if Jupiter is unreachable.
+
+        Binance.US deprecated 2026-05-06: zombie listings of Solana memecoins
+        carry disconnected prices (e.g., JUPUSDT at $0.10 vs real $0.19), which
+        previously fake-fired SLs on 4 manual_recovery positions.
+        """
         symbol = symbol.upper()
-        # Try Binance
-        binance_pair = self.BINANCE_SYMBOLS.get(symbol)
-        if binance_pair:
+
+        # Primary: Jupiter aggregator (1 token → USDC quote)
+        token_info = self.JUPITER_PRICE_TOKENS.get(symbol)
+        if token_info:
+            mint, decimals = token_info
             try:
+                in_amount = 10 ** decimals  # 1 token in atomic units
                 resp = await self._client.get(
-                    "https://api.binance.us/api/v3/ticker/price",
-                    params={"symbol": binance_pair},
+                    "https://lite-api.jup.ag/swap/v1/quote",
+                    params={
+                        "inputMint": mint,
+                        "outputMint": self.usdc_mint,
+                        "amount": in_amount,
+                        "slippageBps": 50,
+                    },
                 )
                 resp.raise_for_status()
-                return float(resp.json()["price"])
-            except Exception:
-                pass
-        # Fallback to CoinGecko
+                out_amount = int(resp.json()["outAmount"])
+                return out_amount / 1e6  # USDC has 6 decimals
+            except Exception as e:
+                logger.debug(f"Jupiter price quote failed for {symbol}: {e}")
+
+        # Fallback: CoinGecko
         cg_id = self.COINGECKO_IDS.get(symbol)
         if cg_id:
             resp = await self._client.get(
@@ -282,6 +337,7 @@ class JupiterClient:
             )
             resp.raise_for_status()
             return float(resp.json()[cg_id]["usd"])
+
         raise ValueError(f"Unknown token: {symbol}")
 
     async def get_multi_token_prices(self) -> dict:

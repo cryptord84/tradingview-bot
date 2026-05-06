@@ -49,6 +49,10 @@ Dashboard: http://localhost:8000  · API docs: `/docs`  · Webhook: `POST /webho
 
 7. **Don't `pine_save` during a backtest.** Use the compile-only pipeline (`backtesting/run.py`). Saving mid-backtest can corrupt live alerts bound to that slot.
 
+8. **Monitor price source must match swap execution source.** TP/SL decisions in `position_monitor.py` use `JupiterClient.get_token_price()` — which MUST resolve via the same DEX route the actual swap will use (Jupiter aggregator). Using a different oracle (Binance.US REST, CoinGecko polled prices, etc.) risks fake-fired triggers on prices the bot can't actually achieve. Lesson 2026-05-06: Binance.US zombie listing returned `JUPUSDT $0.10` while Solana spot was $0.19 → fake-SL'd 4 positions for $4.59 phantom loss. The real swap proceeds were correct; only the monitor's trigger price was wrong.
+
+9. **Position records must always have a TP/SL — never let a BUY swap execute without one.** `trade_engine.py:1047` falls back to a percentage-of-price ATR (`position_monitor.fallback_atr_pct`, default 2.5%) when the Pine alert payload lacks an `atr` field. The bot logs a warning so you can investigate which indicator regressed. **Don't change this to fail-closed (reject the BUY) without thinking through it** — the tokens were already swapped for USDC; rejecting after the fact strands them as orphans (the original 2026-04-19 → 2026-05-06 bug class). See `.claude/memory/feedback_no_atr_fail_closed.md`.
+
 ## Finding live state
 - **Indicator/alert deployment** → `Indicators/DEPLOYMENT.md` (which scripts, which slots, which alerts on which tokens). Update this file after any rebind / create / delete / version bump — it is the project's source of truth for "what is deployed right now."
 - **Strategy metrics, token lists, alert rollout status** → live in `.claude/memory/` (project memories), not here. Those change frequently; this file does not.

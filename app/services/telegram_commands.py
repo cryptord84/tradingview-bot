@@ -22,7 +22,7 @@ class TelegramCommandHandler:
     COMMANDS = {
         "/help": "List available commands",
         "/status": "Bot health, uptime, active state",
-        "/wallet": "SOL and USDC balances with USD value",
+        "/wallet": "Solana + Arbitrum balances: native, stables, all SPL/ERC20 holdings",
         "/vault": "Kamino vault balance, APY, and earnings",
         "/apis": "Check all API connections",
         "/trades": "Last 5 executed trades",
@@ -284,35 +284,74 @@ class TelegramCommandHandler:
             except Exception:
                 pass
 
-            total_usd = sol_usd + usdc_balance + tokens_usd + kamino_usdc
+            # ── EVM (Arbitrum) wallet — gracefully no-op if not configured ──
+            evm_lines: list[str] = []
+            evm_usd = 0.0
+            evm_addr = None
+            try:
+                from app.services.evm_wallet_service import EVMWalletService, ARBITRUM_TOKENS
+                evm = EVMWalletService()
+                evm_addr = evm.address
+                eth_bal = await evm.get_eth_balance()
+                evm_usdc = await evm.get_usdc_balance()
+                eth_price = (token_prices.get("ETH") or {}).get("price") if token_prices else None
+                eth_usd = (eth_bal * eth_price) if eth_price else 0.0
+                evm_token_balances = await evm.get_tracked_token_balances()
+                evm_lines.append("")
+                evm_lines.append("<b>🟣 ARBITRUM</b>")
+                evm_lines.append(f"  ETH: {eth_bal:.4f} ({'$%.2f' % eth_usd if eth_usd else '—'})")
+                evm_lines.append(f"  USDC: ${evm_usdc:.2f}")
+                evm_usd = eth_usd + evm_usdc
+                if evm_token_balances:
+                    for sym, amt in sorted(evm_token_balances.items()):
+                        price = (token_prices.get(sym) or {}).get("price") if token_prices else None
+                        usd = amt * price if price else 0.0
+                        evm_usd += usd
+                        amt_str = f"{amt:,.0f}" if amt >= 1000 else f"{amt:.4f}" if amt >= 1 else f"{amt:.6f}"
+                        val_str = f"${usd:.2f}" if usd >= 0.01 else "—"
+                        evm_lines.append(f"  {sym}: {amt_str} ({val_str})")
+                await evm.close()
+            except Exception:
+                pass  # EVM not configured or temporarily unreachable; skip section
+
+            total_usd = sol_usd + usdc_balance + tokens_usd + kamino_usdc + evm_usd
             addr = wallet.public_key
 
             lines = [
                 "<b>💰 WALLET BALANCES</b>",
                 "",
-                f"SOL: <b>{sol_balance:.4f}</b> (${sol_usd:.2f})",
-                f"USDC: <b>${usdc_balance:.2f}</b>",
-                f"Kamino Vault: <b>${kamino_usdc:.2f}</b>",
+                "<b>🟢 SOLANA</b>",
+                f"  SOL: <b>{sol_balance:.4f}</b> (${sol_usd:.2f})",
+                f"  USDC: <b>${usdc_balance:.2f}</b>",
+                f"  Kamino Vault: <b>${kamino_usdc:.2f}</b>",
             ]
 
-            # Only list tokens with non-zero holdings, sorted by USD value
-            held = [(s, h) for s, h in token_holdings.items() if (h.get("usd_value") or 0) > 0.01]
-            held.sort(key=lambda x: -x[1]["usd_value"])
+            # List ALL Solana tokens with non-zero holdings. Sort by USD value (priced first),
+            # then by amount for tokens whose price lookup failed. Tokens with missing
+            # prices still display so the user can see the holding even if value is unknown.
+            held = [(s, h) for s, h in token_holdings.items() if (h.get("amount") or 0) > 0]
+            held.sort(key=lambda x: (-x[1].get("usd_value", 0), -x[1].get("amount", 0)))
             if held:
-                lines.append("")
-                lines.append(f"<b>Tokens (${tokens_usd:.2f})</b>")
+                lines.append(f"  <i>SPL tokens (${tokens_usd:.2f}):</i>")
                 for sym, h in held:
                     amt = h["amount"]
                     amt_str = f"{amt:,.0f}" if amt >= 1000 else f"{amt:.4f}" if amt >= 1 else f"{amt:.6f}"
-                    lines.append(f"  {sym}: {amt_str} (${h['usd_value']:.2f})")
+                    usd = h.get("usd_value", 0)
+                    val_str = f"${usd:.2f}" if usd >= 0.01 else "—"
+                    lines.append(f"    {sym}: {amt_str} ({val_str})")
+
+            # Append EVM/Arbitrum section if configured
+            lines += evm_lines
 
             lines += [
                 "",
-                f"Total: <b>${total_usd:.2f} USD</b>",
+                f"<b>Total: ${total_usd:.2f} USD</b>",
                 f"SOL Price: ${sol_price:.2f}",
                 "",
-                f"<a href='https://solscan.io/account/{addr}'>View on Solscan ↗</a>",
+                f"<a href='https://solscan.io/account/{addr}'>Solscan ↗</a>",
             ]
+            if evm_addr:
+                lines.append(f"<a href='https://arbiscan.io/address/{evm_addr}'>Arbiscan ↗</a>")
             msg = "\n".join(lines)
 
             await jupiter.close()

@@ -95,8 +95,8 @@ class PositionMonitor:
         jupiter = JupiterClient()
 
         for pos in positions:
-            # Resolve the token symbol from the position (e.g. WIFUSDT → WIF)
-            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "")
+            # Resolve the token symbol from the position (e.g. WIFUSDT → WIF, FARTCOINUSDT.P → FARTCOIN)
+            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "").replace(".P", "")
 
             # Try real-time price feed first (instant, no network call)
             current_price = None
@@ -227,7 +227,7 @@ class PositionMonitor:
 
         try:
             # For long positions: sell target token for USDC
-            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "")
+            token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "").replace(".P", "")
             from app.services.trade_engine import TradeEngine
             input_mint = TradeEngine._KNOWN_MINTS.get(token_symbol, jupiter.sol_mint)
             output_mint = jupiter.usdc_mint
@@ -236,10 +236,16 @@ class PositionMonitor:
             # Pre-flight balance check: verify wallet holds sufficient tokens.
             # Uses actual wallet balance for the swap to handle small discrepancies
             # (fees, rounding) between the recorded position amount and real balance.
+            # SOL is the native Solana token, not an SPL token — querying SPL balances
+            # for "SOL" always returns 0 and falsely flags every SOL position as ghost.
+            # That bug abandoned 40+ legitimate SOL positions; now special-cased.
             swap_amount = pos["amount_sol"]
             try:
-                spl_balances = await wallet.get_spl_token_balances()
-                wallet_amount = spl_balances.get(token_symbol, 0.0)
+                if token_symbol == "SOL":
+                    wallet_amount = await wallet.get_balance_sol()
+                else:
+                    spl_balances = await wallet.get_spl_token_balances()
+                    wallet_amount = spl_balances.get(token_symbol, 0.0)
 
                 if wallet_amount < pos["amount_sol"] * 0.01:
                     # Wallet holds < 1% of expected — true ghost position
@@ -311,10 +317,25 @@ class PositionMonitor:
                     )
                     await asyncio.sleep(2)
 
-            # Calculate P&L
-            pnl_usdc = (current_price - pos["entry_price"]) * pos["amount_sol"]
+            # Calculate exit price + P&L from the ACTUAL swap output, not the
+            # monitor's trigger price. The monitor price comes from the oracle
+            # which can drift (e.g., Binance.US zombie listing returned $0.10
+            # for JUP when real spot was $0.19, fake-firing 4 SLs and recording
+            # phantom losses). The swap_result["output_amount"] is the literal
+            # USDC the bot received — that's the only honest exit basis.
+            usdc_received = swap_result.get("output_amount", 0) / 1e6  # USDC has 6 decimals
+            if usdc_received > 0 and pos["amount_sol"] > 0:
+                actual_exit_price = usdc_received / pos["amount_sol"]
+            else:
+                # Fall back to current_price if swap_result missing (older swap clients)
+                actual_exit_price = current_price
+                logger.warning(
+                    f"Position #{pos['id']}: swap_result missing output_amount; "
+                    f"falling back to monitor price ${current_price:.6f}"
+                )
+            pnl_usdc = (actual_exit_price - pos["entry_price"]) * pos["amount_sol"]
             pnl_percent = (
-                (current_price - pos["entry_price"]) / pos["entry_price"]
+                (actual_exit_price - pos["entry_price"]) / pos["entry_price"]
             ) * 100
 
             # Map trigger to status
@@ -329,7 +350,7 @@ class PositionMonitor:
             # Update position in database
             close_position(
                 position_id=pos["id"],
-                exit_price=current_price,
+                exit_price=actual_exit_price,
                 exit_tx=swap_result["tx_signature"],
                 status=status,
                 pnl_usdc=pnl_usdc,
@@ -344,15 +365,15 @@ class PositionMonitor:
                 "symbol": pos["symbol"],
                 "action": "EXECUTE",
                 "amount_sol": pos["amount_sol"],
-                "price_usd": current_price,
+                "price_usd": actual_exit_price,
                 "fees_sol": 0.000005,
                 "leverage": 1,
                 "wallet_address": wallet.public_key,
                 "confidence_score": pos["confidence"],
-                "claude_reasoning": f"Auto-close: {trigger.upper()} hit",
+                "claude_reasoning": f"Auto-close: {trigger.upper()} hit (trigger price ${current_price:.6f}, fill ${actual_exit_price:.6f})",
                 "pnl_usd": pnl_usdc,
                 "notes": f"Position #{pos['id']} {status} | "
-                         f"Entry=${pos['entry_price']:.2f} Exit=${current_price:.2f}",
+                         f"Entry=${pos['entry_price']:.2f} Exit=${actual_exit_price:.2f}",
                 "strategy": pos.get("strategy", ""),
                 "reason": TRIGGER_TO_REASON.get(trigger, TradeReason.MANUAL_CLOSE),
             })
