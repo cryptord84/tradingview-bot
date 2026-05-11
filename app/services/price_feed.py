@@ -36,6 +36,19 @@ class PriceData:
 
 
 # Mapping of token symbol -> Binance stream symbol (lowercase for stream names)
+#
+# Per CLAUDE.md hard rule #8 (monitor price source must match execution source):
+# - Binance.US-routed tokens (FLOKI): Binance.US WS = exact execution price ✓
+# - Solana-routed (most others): Binance.US WS as close-enough proxy. The 2026-05-06
+#   incident was a zombie-listing (JUPUSDT untraded on Binance.US) — actively traded
+#   tokens like BTC/ETH/DOGE/PNUT track Solana within bps. JupiterClient.get_token_price
+#   falls back via Jupiter aggregator for Solana SPL tokens if WS feed is missing them.
+# - EVM-routed (UNI/ARB/LDO/COMP/AAVE/LINK): Binance.US WS as close-enough proxy. Future
+#   improvement: route to OpenOcean quote for exact Arbitrum-side price, but high-volume
+#   Binance.US listings track Arbitrum closely.
+#
+# 2026-05-10: added 10 tokens (LINK/UNI/AAVE/COMP/LDO/ARB/FLOKI/BTC/OP/DOGE) after
+# audit found 9 of 19 alerted tokens had NO price source — TP/SL would never fire.
 BINANCE_TOKENS = {
     "SOL": "solusdt",
     "JTO": "jtousdt",
@@ -49,6 +62,17 @@ BINANCE_TOKENS = {
     "MEW": "mewusdt",
     "PNUT": "pnutusdt",
     "MOODENG": "moodengusdt",
+    # 2026-05-10 batch — covers all currently-alerted tokens
+    "BTC": "btcusdt",
+    "DOGE": "dogeusdt",
+    "OP": "opusdt",
+    "FLOKI": "flokiusdt",      # Binance.US-routed (exact execution price)
+    "UNI": "uniusdt",          # EVM-routed (close-enough proxy)
+    "ARB": "arbusdt",          # EVM-routed
+    "LDO": "ldousdt",          # EVM-routed
+    "COMP": "compusdt",        # EVM-routed
+    "AAVE": "aaveusdt",        # EVM-routed
+    "LINK": "linkusdt",        # EVM-routed
 }
 
 # Reverse lookup: Binance uppercase symbol -> our token symbol
@@ -156,6 +180,12 @@ class PriceFeed:
                 await asyncio.sleep(60)
             return
 
+        # Seed _prices via REST before opening the WS. Binance.US WS only pushes
+        # @ticker on actual trades, so low-volume listings (LDO/COMP/PNUT etc.)
+        # might never get an initial tick. Pre-seeding ensures every subscribed
+        # token has a baseline price + freshness from the moment the feed starts.
+        await self._seed_prices_via_rest()
+
         streams = "/".join(f"{s}@ticker" for s in BINANCE_TOKENS.values())
         url = f"{self._ws_base}/stream?streams={streams}"
         logger.info("Connecting to Binance WS: %s", url)
@@ -177,19 +207,63 @@ class PriceFeed:
                 except (json.JSONDecodeError, KeyError) as e:
                     logger.debug("WS parse error: %s", e)
 
+    async def _seed_prices_via_rest(self):
+        """Bootstrap _prices for all subscribed tokens via Binance.US REST.
+
+        WS @ticker events only fire on trades. Low-volume listings (LDO/COMP/
+        PNUT/JUP at $1-$500/24h on Binance.US) may go hours without a trade,
+        leaving _prices empty for them and the dashboard's per-token Feed dot
+        showing "—" even though we ARE subscribed. This REST seed gives every
+        token an initial baseline at WS-connect time. Subsequent WS ticks
+        refresh as trades fire.
+
+        One REST call (batch ticker), no per-token spam.
+        """
+        if self._http is None:
+            self._http = httpx.AsyncClient(timeout=15)
+        try:
+            symbols = [s.upper() for s in BINANCE_TOKENS.values()]
+            resp = await self._http.get(
+                "https://api.binance.us/api/v3/ticker/24hr",
+                params={"symbols": json.dumps(symbols, separators=(",", ":"))},
+            )
+            resp.raise_for_status()
+            data = resp.json() if not isinstance(resp.json(), dict) else [resp.json()]
+            seeded = 0
+            for ticker in data:
+                self._handle_ticker(ticker)  # reuses parsing + _BINANCE_SYMBOL_MAP
+                seeded += 1
+            logger.info(f"REST-seeded {seeded} tokens into price feed")
+        except Exception as e:
+            logger.warning(f"REST price seed failed: {e} — WS will populate as trades occur")
+
     def _handle_ticker(self, data: dict):
-        """Parse a Binance 24hrTicker event and update in-memory prices."""
-        binance_sym = data.get("s", "")  # e.g. "SOLUSDT"
-        token = _BINANCE_SYMBOL_MAP.get(binance_sym)
+        """Parse a Binance 24hrTicker event and update in-memory prices.
+
+        Accepts both WS @ticker payload shape (lowercase 1-letter keys) and
+        REST /ticker/24hr shape (camelCase keys). The REST seed re-uses this
+        method by mapping its fields to the same single-letter keys via the
+        equivalence: c=lastPrice, P=priceChangePercent, h=highPrice, l=lowPrice,
+        q=quoteVolume, s=symbol.
+        """
+        binance_sym = data.get("s") or data.get("symbol", "")  # e.g. "SOLUSDT"
+        token = _BINANCE_SYMBOL_MAP.get(binance_sym.upper())
         if not token:
             return
 
+        # REST shape uses camelCase; WS uses single letters. Read both.
+        last = data.get("c") or data.get("lastPrice", 0)
+        change = data.get("P") or data.get("priceChangePercent", 0)
+        high = data.get("h") or data.get("highPrice", 0)
+        low = data.get("l") or data.get("lowPrice", 0)
+        quote_vol = data.get("q") or data.get("quoteVolume", 0)
+
         self._prices[token] = PriceData(
-            price=float(data.get("c", 0)),          # last price
-            change_24h=float(data.get("P", 0)),      # 24h change %
-            high_24h=float(data.get("h", 0)),        # 24h high
-            low_24h=float(data.get("l", 0)),         # 24h low
-            volume_24h=float(data.get("q", 0)),      # 24h quote volume (USDT)
+            price=float(last or 0),
+            change_24h=float(change or 0),
+            high_24h=float(high or 0),
+            low_24h=float(low or 0),                 # 24h low
+            volume_24h=float(quote_vol or 0),         # 24h quote volume (USDT)
             updated_at=time.time(),
         )
 
