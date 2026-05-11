@@ -39,6 +39,7 @@ class ScoredMarket:
     fair_prob: float
     edge_cents: float  # fair_prob*100 - yes_ask_cents, positive = buy YES has edge
     volume: float
+    raw_fair_prob: float = 0.0  # parametric model output before calibration
 
 
 def _norm_cdf(x: float) -> float:
@@ -160,8 +161,14 @@ def hours_until(close_time_iso: str) -> float:
     return delta.total_seconds() / 3600.0
 
 
-def score_market(market: dict, spot: float, annual_vol: float) -> Optional[ScoredMarket]:
-    """Score a single Kalshi BTCD market. Returns None if unparseable."""
+def score_market(market: dict, spot: float, annual_vol: float,
+                 use_calibrator: bool = True) -> Optional[ScoredMarket]:
+    """Score a single Kalshi BTCD market. Returns None if unparseable.
+
+    `use_calibrator=True` applies the empirical calibration table on top of the
+    parametric model — corrects the bidirectional overdispersion documented in
+    project_btcd_audit_20260511.md. Set False to use raw parametric probs.
+    """
     ticker = market.get("ticker", "")
     subtitle = market.get("subtitle", "")
     title = market.get("title", "")
@@ -176,7 +183,11 @@ def score_market(market: dict, spot: float, annual_vol: float) -> Optional[Score
         return None
 
     hours = hours_until(market.get("close_time", "") or market.get("expected_expiration_time", ""))
-    prob = fair_prob(spot, strike, hours, annual_vol)
+    raw_prob = fair_prob(spot, strike, hours, annual_vol)
+    prob = raw_prob
+    if use_calibrator:
+        from app.services.btcd_calibrator import get_btcd_calibrator
+        prob = get_btcd_calibrator().apply(raw_prob)
     edge = prob * 100.0 - yes_ask
 
     try:
@@ -194,11 +205,14 @@ def score_market(market: dict, spot: float, annual_vol: float) -> Optional[Score
         fair_prob=prob,
         edge_cents=edge,
         volume=vol,
+        raw_fair_prob=raw_prob,
     )
 
 
-def score_markets(markets: list[dict], spot: float, annual_vol: float) -> list[ScoredMarket]:
+def score_markets(markets: list[dict], spot: float, annual_vol: float,
+                  use_calibrator: bool = True) -> list[ScoredMarket]:
     """Score a batch of markets. Skips unparseable ones. Sorted by edge descending."""
-    scored = [s for m in markets if (s := score_market(m, spot, annual_vol)) is not None]
+    scored = [s for m in markets
+              if (s := score_market(m, spot, annual_vol, use_calibrator)) is not None]
     scored.sort(key=lambda s: s.edge_cents, reverse=True)
     return scored

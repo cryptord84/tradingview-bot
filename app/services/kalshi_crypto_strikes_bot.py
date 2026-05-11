@@ -73,6 +73,11 @@ class KalshiCryptoStrikesBot:
         self.min_yes_ask_cents = strikes_cfg.get("min_yes_ask_cents", 3)
         self.max_yes_ask_cents = strikes_cfg.get("max_yes_ask_cents", 97)
         self.max_days_to_close = strikes_cfg.get("max_days_to_close", 2)
+        # Empirical calibration (2026-05-11): isotonic-regressed pred→actual mapping
+        # on top of the parametric model. Fixes the bidirectional overdispersion
+        # documented in project_btcd_audit_20260511.md. Disable to use raw parametric
+        # probs (for debugging or A/B).
+        self.use_calibrator = strikes_cfg.get("use_calibrator", True)
 
         self._scan_task: Optional[asyncio.Task] = None
         self._running = False
@@ -145,7 +150,8 @@ class KalshiCryptoStrikesBot:
                 f.write(json.dumps({
                     "ts": ts, "series": series, "spot": spot, "annual_vol": annual_vol,
                     "ticker": s.ticker, "strike": s.strike, "hours": s.hours_to_close,
-                    "fair_prob": s.fair_prob, "yes_ask": s.yes_ask_cents,
+                    "fair_prob": s.fair_prob, "raw_fair_prob": s.raw_fair_prob,
+                    "yes_ask": s.yes_ask_cents,
                     "yes_bid": s.yes_bid_cents, "edge": s.edge_cents, "volume": s.volume,
                 }) + "\n")
 
@@ -167,7 +173,7 @@ class KalshiCryptoStrikesBot:
         markets = await client.get_markets_full(
             status="open", limit=200, series_ticker=series,
         )
-        scored = score_markets(markets, spot, annual_vol)
+        scored = score_markets(markets, spot, annual_vol, use_calibrator=self.use_calibrator)
 
         if scored:
             self._log_calibration(series, spot, annual_vol, scored)

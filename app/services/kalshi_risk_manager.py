@@ -95,9 +95,31 @@ class KalshiRiskManager:
         risk_cfg = cfg.get("risk_manager", {})
 
         self.enabled = risk_cfg.get("enabled", True)
-        self.max_daily_loss_cents = risk_cfg.get("max_daily_loss_cents", 1000)  # $10
+        self.max_daily_loss_cents = risk_cfg.get("max_daily_loss_cents", 2000)  # $20
         self.check_interval = risk_cfg.get("check_interval_seconds", 30)
         self.telegram_alerts = risk_cfg.get("telegram_alerts", True)
+
+        # 2026-05-10: 75% warning Telegram (one-shot per day). Triggers when
+        # aggregate daily P&L crosses -warn_at_pct × max_daily_loss_cents, so
+        # the user gets a heads-up before the global breaker trips.
+        self.warn_at_pct = float(risk_cfg.get("warn_at_pct", 0.75))
+        self._warned_today = False
+
+        # 2026-05-10: per-category sub-breakers. Sub-cap evaluated against
+        # category-attributed realized P&L for the UTC day. When a category
+        # exceeds its sub-cap, only orders in THAT category are blocked —
+        # other categories keep running until they hit their own caps OR
+        # the global max_daily_loss_cents cap. Limits config in cents.
+        cat_loss_cfg = risk_cfg.get("category_loss_limits", {})
+        self.category_loss_limits = {
+            "crypto_strikes": cat_loss_cfg.get("crypto_strikes_cents", 1500),
+            "sports":         cat_loss_cfg.get("sports_cents",         800),
+            "esports":        cat_loss_cfg.get("esports_cents",        500),
+            "crypto":         cat_loss_cfg.get("crypto_cents",         500),
+            "finance":        cat_loss_cfg.get("finance_cents",        500),
+            "other":          cat_loss_cfg.get("other_cents",          500),
+        }
+        self._category_tripped: dict[str, bool] = {}
 
         # Category exposure limits (cents) — default $20 each ($60 balance)
         cat_limits = risk_cfg.get("category_limits", {})
@@ -187,6 +209,8 @@ class KalshiRiskManager:
             self._day_start = today
             self._category_exposure.clear()
             self._daily_volume_cents = 0
+            self._category_tripped.clear()  # per-cat sub-breakers reset daily
+            self._warned_today = False      # warning Telegram resets daily
             if self._tripped:
                 logger.info("New day — auto-resetting circuit breaker")
                 self._tripped = False
@@ -205,6 +229,24 @@ class KalshiRiskManager:
 
         total_pnl = self._get_aggregate_pnl()
 
+        # 75% warning Telegram (one-shot per day) — early heads-up before trip
+        warn_threshold = -int(self.max_daily_loss_cents * self.warn_at_pct)
+        if not self._warned_today and total_pnl <= warn_threshold:
+            await self._send_warning(total_pnl)
+            self._warned_today = True
+
+        # Per-category sub-breakers — block one category without halting others
+        try:
+            cat_pnl = self._get_category_pnl()
+            for cat, pnl in cat_pnl.items():
+                limit = self.category_loss_limits.get(cat, 1000)
+                if pnl <= -limit and not self._category_tripped.get(cat):
+                    self._category_tripped[cat] = True
+                    await self._send_cat_trip_telegram(cat, pnl, limit)
+        except Exception as e:
+            logger.debug(f"per-category trip check error: {e}")
+
+        # Global aggregate trip — last-resort halt for all bots
         if total_pnl <= -self.max_daily_loss_cents:
             await self._trip(total_pnl)
 
@@ -285,6 +327,85 @@ class KalshiRiskManager:
             pass
 
         return total
+
+    def _get_category_pnl(self) -> dict[str, int]:
+        """Per-category realized P&L (cents) for today's UTC day from settled positions.
+
+        Reads kalshi_positions table for rows closed today, groups by detected
+        category. Returns positive cents for net wins, negative for losses.
+        Categories without activity return 0 implicitly (defaultdict semantics).
+        """
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            from app.database import get_db
+            conn = get_db()
+            rows = conn.execute(
+                """SELECT ticker, title, COALESCE(pnl_cents, 0) AS pnl
+                   FROM kalshi_positions
+                   WHERE closed_at IS NOT NULL
+                     AND closed_at >= ?
+                     AND pnl_cents IS NOT NULL""",
+                (today,),
+            ).fetchall()
+            conn.close()
+        except Exception as e:
+            logger.debug(f"_get_category_pnl DB query error: {e}")
+            return {}
+
+        result: dict[str, int] = defaultdict(int)
+        for r in rows:
+            cat = detect_category(r["ticker"] or "", r["title"] or "")
+            result[cat] += int(r["pnl"] or 0)
+        return dict(result)
+
+    async def _send_warning(self, pnl_cents: int):
+        """One-shot daily Telegram when P&L crosses warn threshold (75% of cap)."""
+        if not self.telegram_alerts:
+            return
+        try:
+            from app.services.telegram_service import TelegramService
+            tg = TelegramService()
+            pct_of_cap = abs(pnl_cents) / self.max_daily_loss_cents * 100
+            cat_pnl = self._get_category_pnl()
+            top_loser = min(cat_pnl.items(), key=lambda x: x[1], default=(None, 0))
+            msg = (
+                f"⚠️ <b>KALSHI BREAKER WARNING</b>\n"
+                f"Daily P&amp;L: ${pnl_cents/100:.2f} "
+                f"({pct_of_cap:.0f}% of ${self.max_daily_loss_cents/100:.2f} cap)\n"
+            )
+            if top_loser[0]:
+                msg += f"Biggest loser: <b>{top_loser[0]}</b> ${top_loser[1]/100:.2f}\n"
+            msg += (
+                f"\nGlobal trip fires at -${self.max_daily_loss_cents/100:.2f}. "
+                f"Manual reset: <code>/api/kalshi/kalshi_reset</code>"
+            )
+            await tg.send_message(msg)
+            await tg.close()
+            logger.info(f"Warning Telegram sent (P&L ${pnl_cents/100:.2f})")
+        except Exception as e:
+            logger.debug(f"_send_warning failed: {e}")
+
+    async def _send_cat_trip_telegram(self, cat: str, pnl_cents: int, limit: int):
+        """Telegram when a single category sub-cap trips."""
+        if not self.telegram_alerts:
+            return
+        try:
+            from app.services.telegram_service import TelegramService
+            tg = TelegramService()
+            await tg.send_message(
+                f"🛑 <b>KALSHI CATEGORY SUB-BREAKER</b>\n"
+                f"Category <b>{cat}</b> halted at ${pnl_cents/100:.2f} "
+                f"(sub-cap: ${limit/100:.2f})\n\n"
+                f"Other categories unaffected — only {cat} orders are blocked.\n"
+                f"Resets at UTC midnight or via <code>/api/kalshi/kalshi_reset</code>."
+            )
+            await tg.close()
+            logger.warning(
+                f"Category '{cat}' sub-breaker tripped: ${pnl_cents/100:.2f} "
+                f"≤ -${limit/100:.2f}"
+            )
+        except Exception as e:
+            logger.debug(f"_send_cat_trip_telegram failed: {e}")
 
     async def _trip(self, pnl_cents: int):
         """Trip the circuit breaker — kill all bots."""
@@ -423,13 +544,26 @@ class KalshiRiskManager:
                                 ticker=ticker, side="yes", action="sell",
                                 yes_price=1, count=count, order_type="limit",
                             )
+                            _flat_side, _flat_qty = "yes", count
                         else:
                             # Long NO position — sell NO at 1c (aggressive exit)
                             await client.place_order(
                                 ticker=ticker, side="no", action="sell",
                                 no_price=1, count=abs(count), order_type="limit",
                             )
+                            _flat_side, _flat_qty = "no", abs(count)
                         positions_closed += 1
+                        try:
+                            from app.database import insert_kalshi_trade
+                            insert_kalshi_trade({
+                                "ticker": ticker, "title": pos.get("title", ""),
+                                "side": _flat_side, "action": "sell",
+                                "count": _flat_qty, "price_cents": 1,
+                                "total_cost_cents": _flat_qty,
+                                "status": "submitted", "notes": "emergency_flatten",
+                            })
+                        except Exception:
+                            pass
                     except Exception as e:
                         errors.append(f"close {ticker}: {e}")
                 logger.info(f"Emergency flatten: closed {positions_closed} positions")
@@ -505,9 +639,19 @@ class KalshiRiskManager:
             logger.warning(f"[{bot_name}] {reason}")
             return {"allowed": False, "reason": reason}
 
-        # Category exposure check
+        # Per-category sub-breaker (daily loss). Blocks just this category's
+        # orders without affecting other categories' bots.
         if ticker:
             category = detect_category(ticker, title)
+            if self._category_tripped.get(category):
+                reason = (
+                    f"Category '{category}' sub-breaker tripped today "
+                    f"(daily loss ≤ -${self.category_loss_limits.get(category, 1000)/100:.2f})"
+                )
+                logger.warning(f"[{bot_name}] {reason}")
+                return {"allowed": False, "reason": reason, "category": category}
+
+            # Category exposure check (existing) — open-cash committed per category
             cat_limit = self.category_limits.get(category, 1000)
             cat_current = self._category_exposure.get(category, 0)
 

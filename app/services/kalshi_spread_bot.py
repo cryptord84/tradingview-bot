@@ -135,6 +135,9 @@ class KalshiSpreadBot:
         self.active_max_markets = spread_cfg.get("max_markets", 3)
         self.quiet_hours_et = set(spread_cfg.get("quiet_hours_et", [8, 9, 10, 11, 12, 13, 14, 15]))
         self.quiet_max_markets = spread_cfg.get("quiet_hours_max_markets", 1)
+        # Capital floor: at low balance, max_total_exposure_cents can dwarf cash,
+        # so a single bad market overwhelms the budget. Refuse to start below this.
+        self.min_capital_cents = spread_cfg.get("min_capital_cents", 10000)
 
         # Runtime state
         self._markets: dict[str, MarketState] = {}
@@ -187,6 +190,23 @@ class KalshiSpreadBot:
 
     async def _run_loop(self):
         """Main polling loop."""
+        # Capital floor gate — abort if balance below min_capital_cents.
+        try:
+            from app.services.kalshi_client import get_async_kalshi_client
+            bal = (await get_async_kalshi_client().get_balance()).get("balance", 0) or 0
+            if int(bal) < self.min_capital_cents:
+                msg = (
+                    f"Spread bot refused to start: Kalshi balance ${bal/100:.2f} "
+                    f"< floor ${self.min_capital_cents/100:.2f}. "
+                    f"At low capital a single bad market exceeds the exposure budget."
+                )
+                logger.warning(msg)
+                await self._alert(f"⛔ {msg}")
+                self._running = False
+                return
+        except Exception as e:
+            logger.warning(f"Spread bot capital floor check failed (proceeding): {e}")
+
         # Cancel any orphaned orders from a previous run
         try:
             await self._cancel_all_orders()
@@ -607,6 +627,24 @@ class KalshiSpreadBot:
             state.realized_pnl_cents += realized
             self._total_pnl_cents += realized
 
+            # Log SELL to kalshi_trades so per-category P&L is queryable.
+            try:
+                from app.database import insert_kalshi_trade
+                insert_kalshi_trade({
+                    "ticker": state.ticker,
+                    "title": getattr(state, "title", ""),
+                    "side": side,
+                    "action": "sell",
+                    "count": qty,
+                    "price_cents": sell_price,
+                    "total_cost_cents": sell_price * qty,
+                    "client_order_id": client_id,
+                    "status": "submitted",
+                    "notes": f"spread_bot {reason} entry={entry:.1f} realized={realized}",
+                })
+            except Exception:
+                pass
+
             if side == "yes":
                 state.yes_position = 0
                 state.yes_avg_entry = 0.0
@@ -818,14 +856,26 @@ class KalshiSpreadBot:
         # Sell any YES inventory
         if state.yes_position > 0:
             try:
+                yes_sell_price = max(1, state.yes_bid - 1)
+                qty_yes = state.yes_position
                 await client.place_order(
                     ticker=ticker,
                     side="yes",
                     action="sell",
-                    yes_price=max(1, state.yes_bid - 1),  # Aggressive sell
-                    count=state.yes_position,
+                    yes_price=yes_sell_price,  # Aggressive sell
+                    count=qty_yes,
                 )
-                logger.info(f"Flattened {state.yes_position} YES on {ticker}")
+                logger.info(f"Flattened {qty_yes} YES on {ticker}")
+                try:
+                    from app.database import insert_kalshi_trade
+                    insert_kalshi_trade({
+                        "ticker": ticker, "side": "yes", "action": "sell",
+                        "count": qty_yes, "price_cents": yes_sell_price,
+                        "total_cost_cents": yes_sell_price * qty_yes,
+                        "status": "submitted", "notes": "spread_bot flatten",
+                    })
+                except Exception:
+                    pass
                 state.yes_position = 0
             except Exception as e:
                 logger.error(f"Failed to flatten YES on {ticker}: {e}")
@@ -833,14 +883,26 @@ class KalshiSpreadBot:
         # Sell any NO inventory
         if state.no_position > 0:
             try:
+                no_sell_price = max(1, state.no_bid - 1)
+                qty_no = state.no_position
                 await client.place_order(
                     ticker=ticker,
                     side="no",
                     action="sell",
-                    no_price=max(1, state.no_bid - 1),
-                    count=state.no_position,
+                    no_price=no_sell_price,
+                    count=qty_no,
                 )
-                logger.info(f"Flattened {state.no_position} NO on {ticker}")
+                logger.info(f"Flattened {qty_no} NO on {ticker}")
+                try:
+                    from app.database import insert_kalshi_trade
+                    insert_kalshi_trade({
+                        "ticker": ticker, "side": "no", "action": "sell",
+                        "count": qty_no, "price_cents": no_sell_price,
+                        "total_cost_cents": no_sell_price * qty_no,
+                        "status": "submitted", "notes": "spread_bot flatten",
+                    })
+                except Exception:
+                    pass
                 state.no_position = 0
             except Exception as e:
                 logger.error(f"Failed to flatten NO on {ticker}: {e}")

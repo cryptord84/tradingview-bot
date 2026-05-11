@@ -547,7 +547,36 @@ def compute_kamino_earnings(current_balance: Optional[float] = None) -> dict:
         current_balance = (latest or {}).get("deposited_usdc", 0.0) or 0.0
 
     raw = current_balance - baseline_balance + total_withdrawn - total_deposited
-    earnings = max(0.0, raw)
+
+    # Sanity-cap earnings: the raw reconciliation is vulnerable to retry
+    # double-counting in wallet_transactions (a single on-chain tx logged
+    # multiple times appears as inflated deposits-withdraws imbalance, which
+    # the formula misattributes to yield). Cap at a realistic ceiling so the
+    # display can't show more than plausible yield. Real Kamino USDC vault
+    # APY has sat in 2-6% range; we use 12% as a generous ceiling × 1.5x
+    # safety buffer = 18% effective cap.
+    import datetime as _dt
+    try:
+        baseline_dt = _dt.datetime.fromisoformat(baseline_ts.replace("Z", "+00:00"))
+        if baseline_dt.tzinfo is None:
+            baseline_dt = baseline_dt.replace(tzinfo=_dt.timezone.utc)
+        elapsed_days = max(
+            0.0,
+            (_dt.datetime.now(_dt.timezone.utc) - baseline_dt).total_seconds() / 86400.0,
+        )
+    except Exception:
+        elapsed_days = 0.0
+    CEILING_APY = 0.18  # 12% APY × 1.5 buffer — well above any realistic Kamino yield
+    realistic_max = max(0.0, (current_balance or 0.0) * CEILING_APY * elapsed_days / 365.0)
+
+    quality = "ok"
+    if raw < -1.0:
+        quality = "drift_detected"
+    elif realistic_max > 0 and raw > realistic_max:
+        quality = "capped"  # raw exceeds realistic yield — capping for display
+
+    earnings = max(0.0, min(raw, realistic_max)) if realistic_max > 0 else max(0.0, raw)
+
     return {
         "earnings_total": round(earnings, 4),
         "raw_earnings": round(raw, 4),
@@ -555,7 +584,9 @@ def compute_kamino_earnings(current_balance: Optional[float] = None) -> dict:
         "total_withdrawn": round(total_withdrawn, 4),
         "current_balance": round(current_balance, 4),
         "baseline_balance": round(baseline_balance, 4),
-        "data_quality": "ok" if raw >= -1.0 else "drift_detected",
+        "elapsed_days": round(elapsed_days, 2),
+        "realistic_max": round(realistic_max, 4),
+        "data_quality": quality,
         "first": baseline_ts,
         "last": last_row["last"] if last_row else None,
     }
@@ -1212,50 +1243,92 @@ def close_kalshi_position(
 
 
 def sync_kalshi_positions(positions: list[dict]) -> dict:
-    """Replace kalshi_positions rows with the live API snapshot.
+    """Idempotent merge of live Kalshi positions into kalshi_positions table.
 
-    positions: list of dicts from KalshiTradingClient.get_positions().
-    Returns counts of inserted / skipped rows.
+    - Open rows (position != 0): mirror current snapshot. Old open rows are
+      cleared and re-inserted each cycle.
+    - Closed rows (position == 0 with non-zero realized_pnl): persisted as
+      history so per-category sub-breakers can query realized P&L by day.
+      Upserted on realized_pnl change for the same ticker.
     """
     conn = get_db()
-    conn.execute("DELETE FROM kalshi_positions")
     inserted = 0
+    closed_new = 0
+    closed_updated = 0
+    now_iso = datetime.utcnow().isoformat()
+
+    # Wipe stale open rows only; preserve closed history.
+    conn.execute("DELETE FROM kalshi_positions WHERE status = 'open'")
+
     for p in positions:
         try:
+            ticker = p.get("ticker", "") or ""
+            if not ticker:
+                continue
             pos_count = int(p.get("position", 0) or 0)
-            if pos_count == 0:
-                continue  # Skip closed-out rows
-            side = "yes" if pos_count > 0 else "no"
-            abs_count = abs(pos_count)
             invested_cents = int(p.get("market_exposure", 0) or 0)
             traded = float(p.get("total_traded_dollars", 0) or 0)
-            avg_price_cents = int(round(traded * 100 / abs_count)) if abs_count > 0 else 0
             realized_cents = int(round(float(p.get("realized_pnl_dollars", 0) or 0) * 100))
-            conn.execute(
-                """INSERT INTO kalshi_positions
-                (opened_at, ticker, event_ticker, title, side, count,
-                 avg_price_cents, invested_cents, pnl_cents, status, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    p.get("last_updated_ts", datetime.utcnow().isoformat()),
-                    p.get("ticker", ""),
-                    p.get("event_ticker", ""),
-                    p.get("title", ""),
-                    side,
-                    abs_count,
-                    avg_price_cents,
-                    invested_cents,
-                    realized_cents,
-                    "open",
-                    "synced",
-                ),
-            )
-            inserted += 1
+            event_ticker = p.get("event_ticker", "") or ""
+            title = p.get("title", "") or ""
+            ts = p.get("last_updated_ts", now_iso)
+
+            if pos_count != 0:
+                side = "yes" if pos_count > 0 else "no"
+                abs_count = abs(pos_count)
+                avg_price_cents = int(round(traded * 100 / abs_count)) if abs_count > 0 else 0
+                conn.execute(
+                    """INSERT INTO kalshi_positions
+                    (opened_at, ticker, event_ticker, title, side, count,
+                     avg_price_cents, invested_cents, pnl_cents, status, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (ts, ticker, event_ticker, title, side, abs_count,
+                     avg_price_cents, invested_cents, realized_cents,
+                     "open", "synced"),
+                )
+                inserted += 1
+                continue
+
+            if realized_cents == 0:
+                continue  # never opened or zero-PnL settle — nothing to track
+
+            # Closed position with realized P&L — preserve as history.
+            existing = conn.execute(
+                "SELECT id, pnl_cents FROM kalshi_positions "
+                "WHERE ticker = ? AND status = 'closed' "
+                "ORDER BY closed_at DESC LIMIT 1",
+                (ticker,),
+            ).fetchone()
+            if existing and int(existing["pnl_cents"] or 0) == realized_cents:
+                continue
+            if existing:
+                conn.execute(
+                    """UPDATE kalshi_positions
+                       SET pnl_cents = ?, closed_at = ?, notes = ?
+                       WHERE id = ?""",
+                    (realized_cents, ts, "synced-closed", existing["id"]),
+                )
+                closed_updated += 1
+            else:
+                conn.execute(
+                    """INSERT INTO kalshi_positions
+                    (opened_at, closed_at, ticker, event_ticker, title, side, count,
+                     avg_price_cents, invested_cents, pnl_cents, status, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (ts, ts, ticker, event_ticker, title, "yes", 0,
+                     0, invested_cents, realized_cents, "closed", "synced-closed"),
+                )
+                closed_new += 1
         except Exception:
             continue
     conn.commit()
     conn.close()
-    return {"inserted": inserted, "total": len(positions)}
+    return {
+        "inserted": inserted,
+        "closed_new": closed_new,
+        "closed_updated": closed_updated,
+        "total": len(positions),
+    }
 
 
 def get_kalshi_stats() -> dict:
