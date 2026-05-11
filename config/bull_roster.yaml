@@ -1,0 +1,131 @@
+# Bull-roster alert manifest — 7 combos to deploy on BULL_CONFIRMED.
+# Source: backtesting/bull_period.py results (2026-05-08).
+#
+# Read by:
+#   - backtesting/regime_deploy.py (prints deploy/undeploy recipe)
+#   - claude session (uses MCP tools to createAlert + restartAlerts)
+#
+# When bull regime confirms, the regime_detector Telegram will instruct you to
+# run: `venv/bin/python -m backtesting.regime_deploy bull`
+# That script prints the deploy recipe; a Claude session executes it.
+
+webhook_secret: e4a01f966ff71dc5e192db6b9163a4c5d2d4894031e4ec25719e07d70aa038bb
+webhook_url: https://jarred-damoda-nonperiodically.ngrok-free.dev/webhook
+pine_features: '{"indicator":1,"plot":1,"str":1,"ta":1,"math":1,"alert":1,"alertcondition":1}'
+
+slots:
+  donchian_adx_v1:
+    pine_id: USER;bf538897546a48519a83e588ff562e72
+    pine_version: "1.0"
+    inputs_template:
+      __profile: false
+      in_0: "{{webhook_secret}}"
+      in_1: 20      # chPeriod
+      in_2: 20      # volLen
+      in_3: 1.5     # volMult
+      in_4: 14      # adxLen
+      in_5: 25.0    # adxThresh
+      in_6: true    # useSqueezeBlock
+      in_7: 20      # bbLen
+      in_8: 1.5     # kcMult
+      in_9: 70      # confidence
+      in_10: 2      # leverage
+      in_11: 15.0   # pos_size
+      in_12: false  # realtimeTrig (bar-close)
+      in_13: true   # showCh
+
+  ema_ribbon_adx_v1:
+    pine_id: USER;c0ffe8e0dd034504a05de359eb6d41bd
+    pine_version: "1.0"
+    inputs_template:
+      __profile: false
+      in_0: "{{webhook_secret}}"
+      in_1: 3       # len1
+      in_2: 8       # len2
+      in_3: 21      # len3
+      in_4: 55      # len4
+      in_5: 14      # adxLen
+      in_6: 25.0    # adxThresh
+      in_7: true    # useSqueezeBlock
+      in_8: 20      # bbLen
+      in_9: 1.5     # kcMult
+      in_10: 70     # confidence
+      in_11: 2      # leverage
+      in_12: 15.0   # pos_size
+      in_13: false  # realtimeTrig
+      in_14: true   # showRibbon
+
+  liq_sweep_v1:
+    pine_id: USER;12e465c59f0941d2a4fef70e58003c45
+    pine_version: "3.0"
+    inputs_template:   # mirrors active INJ.P alert
+      __profile: false
+      in_0: "{{webhook_secret}}"
+      in_1: 10
+      in_2: 20
+      in_3: 1.2
+      in_4: 65
+      in_5: 2
+      in_6: 15
+      in_7: true
+      in_8: true
+      in_9: true
+
+# 5 executable combos + 2 deferred (FLOKI). Phase 4 validation 2026-05-08:
+#   - UNI/ARB on Arbitrum dry-run swap quote SUCCEEDED via bot's EVMSwapExecutor
+#   - SOL routes via Jupiter (proven in production for FARTCOIN/JUP/MOODENG/PNUT)
+#   - FLOKI: no Arbitrum liquidity, would need BSC chain extension (Phase 5)
+combos:
+  - label: "Donch+ADX / SOL / 4H"
+    slot: donchian_adx_v1
+    symbol: BINANCE:SOLUSDT
+    timeframe: 4H
+    bull_pf: 1.36
+    bull_window: "2023-Q4 multi-strat SOL strength"
+    executable_now: true
+    lane: "Solana via Jupiter"
+
+  - label: "EMA+ADX / SOL / 4H"
+    slot: ema_ribbon_adx_v1
+    symbol: BINANCE:SOLUSDT
+    timeframe: 4H
+    bull_pf: 1.88
+    bull_window: "2023-Q4"
+    executable_now: true
+    lane: "Solana via Jupiter"
+
+  - label: "EMA+ADX / UNI / 4H"
+    slot: ema_ribbon_adx_v1
+    symbol: BINANCE:UNIUSDT
+    timeframe: 4H
+    bull_pf: 1.88
+    bull_window: "2024-Q4 (Δ +1.48 — biggest in family)"
+    executable_now: true
+    lane: "Arbitrum via OpenOcean (validated 2026-05-08)"
+
+  - label: "EMA+ADX / ARB / 4H"
+    slot: ema_ribbon_adx_v1
+    symbol: BINANCE:ARBUSDT
+    timeframe: 4H
+    bull_pf: 1.71
+    bull_window: "2023-Q4"
+    executable_now: true
+    lane: "Arbitrum via OpenOcean (validated 2026-05-08)"
+
+  - label: "Liq Sweep / UNI / 4H"
+    slot: liq_sweep_v1
+    symbol: BINANCE:UNIUSDT
+    timeframe: 4H
+    bull_pf: 2.74
+    bull_window: "2024-Q4 — highest absolute bull-window PF"
+    executable_now: true
+    lane: "Arbitrum via OpenOcean (validated 2026-05-08)"
+
+# Deferred — re-add when chain extension lands.
+deferred_combos:
+  - label: "Donch+ADX / FLOKI / 4H"
+    bull_pf: 2.31
+    defer_reason: "FLOKI has no Arbitrum liquidity (verified via OpenOcean tokenList + quote test). BSC has FLOKI liquidity ($15 → 405k FLOKI on bsc) but bot doesn't have BSC chain extension yet. Estimated Phase 5 work: ~2-4 hours (BSC wallet, BNB gas, OpenOceanClient already supports chain_id=56)."
+  - label: "Liq Sweep / FLOKI / 4H"
+    bull_pf: 1.45
+    defer_reason: "Same as Donch+ADX/FLOKI — needs BSC support."
