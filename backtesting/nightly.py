@@ -95,12 +95,22 @@ FOCUS_TOKENS = (
 )
 
 # ── Timeframes to test ───────────────────────────────────────────────────────
-FOCUS_TIMEFRAMES = ["15m", "1H", "4H"]
+# Pruned 2026-05-09 (kitchen-sink analysis): dropped 15m and 1H — 0 WF passers
+# across 1600 tests, 15m averaged PF 0.06 (worse than noise).
+# 4H is the established workhorse; 1D unlocked BTC/DOGE/ETH/SOL/OP/AAVE/ARB/LDO.
+FOCUS_TIMEFRAMES = ["4H", "1D"]
 
-# ── Core strategies (skip regime-filtered duplicates in nightly — they rarely help)
+# ── Core strategies ──────────────────────────────────────────────────────────
+# Pruned 2026-05-09 (kitchen-sink analysis):
+#   - Dropped Supertrend, MACD Vol, RSI Div, Ichimoku — 0 WF passers, max
+#     trade count too low to ever qualify (Ichimoku/RSI Div fire 5-17 times,
+#     MACD Vol 8.8 trades avg).
+#   - Dropped 4 of 5 ADX regime variants (ST+ADX, Donch+ADX, VWAP+ADX,
+#     StRSI+ADX) — base versions outperform; only EMA+ADX produced a near-miss.
+# 8 surviving strategies own all 16 WF passers + every PF≥1.4/30-trade combo.
 CORE_STRATEGIES = [
-    "Supertrend", "Donchian", "EMA Ribbon", "VWAP Dev", "Stoch RSI",
-    "FVG", "MACD Vol", "Liq Sweep", "RSI Div", "Mean Rev",
+    "VWAP Dev", "Donchian", "Stoch RSI", "EMA Ribbon", "Liq Sweep",
+    "FVG", "Mean Rev", "EMA+ADX",
 ]
 
 
@@ -286,14 +296,16 @@ def run_nightly(
 
 
 # ── Tiered position sizing — regenerates config_sizing_overrides.yaml ────────
-# Conservative tiers (2026-05-02): scaled to ~62% of original (1.5x/2.4x ratio
-# from perps memory) while WF-validated data accumulates post-gate-fix.
-# Re-evaluate 2026-05-11 after 10 nights of clean data; consider promoting back
-# toward original A=20/B=15/C=10 if Tier A composition is stable.
+# 2026-05-08: bumped from A=12/B=9/C=6 → A=18/B=13/C=9 after Phase 6 audit.
+# Driver: 7d realized PF=5.15 with 52% WR (26 positions) but avg trade size
+# only $10–15 because of small tradeable balance + conservative tiers; total
+# 7d net was just $+3.61. Bumping tiers ~50% (still under original A=20/B=15
+# /C=10) combined with kamino.reserve_usdc 150→250 should ~3× per-trade size
+# without changing max_position_size_percent (50%) or correlation caps.
 SIZING_TIERS = [
-    (3.0, "A", 12.0),
-    (2.0, "B",  9.0),
-    (1.5, "C",  6.0),
+    (3.0, "A", 18.0),
+    (2.0, "B", 13.0),
+    (1.5, "C",  9.0),
 ]
 
 

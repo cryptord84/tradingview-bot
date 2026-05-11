@@ -18,14 +18,14 @@ BINANCE_TOKENS = {
     "JTO":      "JTOUSDT",
     "WIF":      "WIFUSDT",
     "BONK":     "BONKUSDT",
-    "ORCA":     "ORCAUSDT",
+    # ORCA dropped 2026-05-09 — kitchen-sink: 0 combos with ≥30 trades across 64 tests.
     "RENDER":   "RENDERUSDT",
     # Tier 1 additions — Solana-native, Jupiter-tradeable, Binance US data
     "JUP":      "JUPUSDT",
     "PENGU":    "PENGUUSDT",
     "FARTCOIN": "FARTCOINUSDT",
     "POPCAT":   "POPCATUSDT",
-    "MEW":      "MEWUSDT",
+    # MEW dropped 2026-05-09 — kitchen-sink: 0 combos with ≥30 trades across 64 tests.
     "PNUT":     "PNUTUSDT",
     "MOODENG":  "MOODENGUSDT",
     # Tier 3 additions (2026-05-02) — Jupiter-tradeable Solana tokens with Binance US data
@@ -45,13 +45,29 @@ BINANCE_TOKENS = {
     "NEAR":     "NEARUSDT",   # L1
     "ARB":      "ARBUSDT",    # L2
     "OP":       "OPUSDT",     # L2
-    "MATIC":    "MATICUSDT",  # L2
+    # MATIC removed 2026-05-09 — delisted on Binance.US (data fetches were silently
+    # returning empty). Replaced with POL (rebranded MATIC).
+    "POL":      "POLUSDT",    # L2 (rebranded MATIC)
     "SHIB":     "SHIBUSDT",   # Established meme
     "PEPE":     "PEPEUSDT",   # Established meme
     "FLOKI":    "FLOKIUSDT",  # Established meme
     # Cosmos research additions (2026-05-02) — Binance.US-listed Cosmos ecosystem
     "TIA":      "TIAUSDT",    # Celestia (modular blockchain)
     "KAVA":     "KAVAUSDT",   # Kava (Cosmos DeFi)
+    # ── Phase 2 expansion (2026-05-09): Binance.US-tradeable additions ──────
+    # After Binance.US Phase 2 lane shipped, we have 56 listed tokens not yet
+    # in the backtest universe. Adding the 8 highest-conviction by liquidity +
+    # narrative. Compute cost: ~5–10 min added to nightly. Routes through
+    # Binance.US for any combo that crosses WF (add to TradeEngine.BINANCE_TOKENS
+    # in trade_engine.py for routing).
+    "BTC":      "BTCUSDT",    # King — surprised it was missing
+    "XRP":      "XRPUSDT",    # Major payments
+    "DOGE":     "DOGEUSDT",   # Established meme
+    "SUI":      "SUIUSDT",    # Modern L1, active ecosystem
+    "ADA":      "ADAUSDT",    # Major L1
+    "HYPE":     "HYPEUSDT",   # Hyperliquid token, hot
+    "ONDO":     "ONDOUSDT",   # RWA narrative
+    "ASTER":    "ASTERUSDT",  # User-flagged DeFi token
 }
 
 # Coinbase Advanced — used for Solana tokens not on Binance US.
@@ -60,8 +76,8 @@ BINANCE_TOKENS = {
 # Note: tokens here have limited Coinbase history (~30-60 days). WBTC was removed
 # 2026-05-02 — Coinbase data ended Dec 2024 (delisted/stale).
 COINBASE_TOKENS = {
-    "KMNO": "KMNO-USD",
-    "DBR":  "DBR-USD",
+    # KMNO + DBR dropped 2026-05-09 — kitchen-sink: 0 combos with ≥30 trades.
+    # Coinbase history caps at ~30-60 days for these, walk-forward never qualifies.
     # EVM research addition (2026-05-02) — Binance.US doesn't list INJ
     "INJ":  "INJ-USD",
 }
@@ -82,7 +98,7 @@ COINGECKO_TOKENS = {
     "RAY":   "raydium",
     "W":     "wormhole",
     # Tier 2 additions — Jupiter-tradeable, CoinGecko data only
-    "HNT":   "helium",
+    # HNT dropped 2026-05-09 — kitchen-sink: 0 combos with ≥30 trades (only 16 tests fired)
     "DRIFT": "drift-protocol",
     "TNSR":  "tensor",
     # DOG (dog-go-to-the-moon-rune) — CoinGecko OHLC not available for Runes tokens

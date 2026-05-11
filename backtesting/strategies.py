@@ -8,7 +8,7 @@ with boolean columns: entry_long, exit_long, entry_short, exit_short.
 import pandas as pd
 
 from backtesting.indicators import (
-    adx, atr, bollinger_squeeze, donchian, ema, macd, rolling_vwap, sma,
+    adx, atr, bollinger_squeeze, donchian, ema, ichimoku, macd, rolling_vwap, sma,
     stoch_rsi, supertrend, rsi, swing_highs_lows,
 )
 
@@ -478,6 +478,44 @@ def strategy_mean_reversion(df: pd.DataFrame, enable_short: bool = True) -> pd.D
     return sig
 
 
+# ── Ichimoku Cloud ────────────────────────────────────────────────────────────
+
+def strategy_ichimoku(df: pd.DataFrame, enable_short: bool = True) -> pd.DataFrame:
+    """
+    Ichimoku Kinko Hyo trend-following with cloud confirmation.
+
+    Long entry:  Tenkan crosses above Kijun (TK bull cross) AND close above the
+                 cloud top (max(span_a, span_b)). Volume confirmation required.
+    Long exit:   Tenkan crosses below Kijun OR close falls below cloud bottom.
+    Short entry: TK bear cross AND close below cloud bottom.
+    Short exit:  TK bull cross OR close rises above cloud top.
+
+    Designed for slower-moving instruments (BTC, majors) where short-horizon
+    mean-reversion / breakout strategies struggle. Standard params 9/26/52.
+    """
+    tenkan, kijun, span_a, span_b = ichimoku(df["high"], df["low"])
+    cloud_top = pd.concat([span_a, span_b], axis=1).max(axis=1)
+    cloud_bot = pd.concat([span_a, span_b], axis=1).min(axis=1)
+
+    tk_bull = (tenkan > kijun) & (tenkan.shift(1) <= kijun.shift(1))
+    tk_bear = (tenkan < kijun) & (tenkan.shift(1) >= kijun.shift(1))
+    above_cloud = df["close"] > cloud_top
+    below_cloud = df["close"] < cloud_bot
+    vol_ok = _vol_filter(df["volume"])
+
+    long_entry  = tk_bull & above_cloud & vol_ok
+    long_exit   = tk_bear | below_cloud
+    short_entry = tk_bear & below_cloud & vol_ok & enable_short
+    short_exit  = tk_bull | above_cloud
+
+    sig = _signals(len(df), df.index)
+    sig["entry_long"]  = long_entry
+    sig["exit_long"]   = long_exit
+    sig["entry_short"] = short_entry
+    sig["exit_short"]  = short_exit
+    return sig
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────
 
 STRATEGIES = {
@@ -499,4 +537,6 @@ STRATEGIES = {
     # Ported from live TradingView indicators
     "RSI Div":      strategy_rsi_divergence,
     "Mean Rev":     strategy_mean_reversion,
+    # Long-horizon trend (added 2026-05-09 for BTC/SUI/POL coverage)
+    "Ichimoku":     strategy_ichimoku,
 }

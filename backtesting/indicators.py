@@ -124,6 +124,27 @@ def donchian(
     return upper, mid, lower
 
 
+def ichimoku(
+    high: pd.Series,
+    low: pd.Series,
+    tenkan_period: int = 9,
+    kijun_period: int = 26,
+    senkou_b_period: int = 52,
+) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
+    """Returns (tenkan, kijun, senkou_span_a, senkou_span_b).
+
+    Spans are returned UNSHIFTED — the consumer is responsible for any forward
+    projection (the classic Ichimoku display shifts them +kijun_period bars).
+    For signal evaluation we typically use unshifted spans (price vs current
+    cloud), which avoids look-ahead.
+    """
+    tenkan = (high.rolling(tenkan_period).max() + low.rolling(tenkan_period).min()) / 2
+    kijun = (high.rolling(kijun_period).max() + low.rolling(kijun_period).min()) / 2
+    span_a = (tenkan + kijun) / 2
+    span_b = (high.rolling(senkou_b_period).max() + low.rolling(senkou_b_period).min()) / 2
+    return tenkan, kijun, span_a, span_b
+
+
 def macd(
     close: pd.Series,
     fast: int = 12,
