@@ -1,0 +1,34 @@
+# Secrets — env files & encrypted wallet store
+# `.env*` catches `.env`, `.env_bk`, `.env.staging`, etc.
+# `.env.example` is the only one we explicitly track (template).
+.env*
+!.env.example
+config.yaml
+keys/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Data — runtime SQLite, calibration jsonl, etc.
+data/
+logs/
+
+# Backtest outputs — regenerated nightly via crons
+backtesting/results/
+
+# Backup files (e.g., config_sizing_overrides.yaml.bak_pre_wipe_*)
+*.bak*
+*_bk
+
+# IDE / MCP / tooling state
+.claude/
+.firecrawl/
+.mcp.json
+
+# OS
+.DS_Store
+*.swp
