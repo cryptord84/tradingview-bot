@@ -39,6 +39,29 @@ def _get_wallet() -> WalletService:
 _evm_wallet = None
 _evm_wallet_unavailable = False  # cache "no config" state to skip retries
 
+# Module-level Binance.US client singleton (lazy — only loads if config has binance_us block)
+_binance_us = None
+_binance_us_unavailable = False
+
+def _get_binance_us():
+    """Lazy-load the Binance.US client. Returns None if config missing or disabled."""
+    global _binance_us, _binance_us_unavailable
+    if _binance_us_unavailable:
+        return None
+    if _binance_us is None:
+        try:
+            from app.services.binance_us_client import BinanceUSClient
+            client = BinanceUSClient()
+            if not client.enabled:
+                _binance_us_unavailable = True
+                return None
+            _binance_us = client
+        except Exception as e:
+            logger.info(f"Binance.US client unavailable: {e}")
+            _binance_us_unavailable = True
+            return None
+    return _binance_us
+
 def _get_evm_wallet():
     """Lazy-load the EVM wallet. Returns None if config missing — dashboard
     should gracefully render an EVM section as 'not configured' in that case."""
@@ -145,6 +168,85 @@ async def get_evm_balance():
     return out
 
 
+@router.get("/binance_us/balance")
+async def get_binance_us_balance():
+    """Binance.US CEX balances + recent trade P&L.
+
+    Returns USDT and any non-zero held tokens (INJ, KAVA, etc.) with USD
+    valuations from latest ticker prices. Mirrors /evm/balance shape so the
+    dashboard can render a third wallet card.
+    """
+    bn = _get_binance_us()
+    if bn is None:
+        return {
+            "configured": False,
+            "subtotal_usd": 0.0,
+            "errors": {"config": "binance_us disabled or .env vars missing"},
+        }
+
+    out = {
+        "configured": True,
+        "venue": "binance_us",
+        "usdt": 0.0,
+        "token_holdings": {},
+        "tokens_usd": 0.0,
+        "subtotal_usd": 0.0,
+        "errors": {},
+    }
+
+    try:
+        bals = await bn.get_balances()
+        if not bals.get("success"):
+            out["errors"]["balance"] = bals.get("error", "unknown")
+            return out
+
+        bal_data = bals["data"]
+        # USDT-equivalent stables → treated as USDT for display
+        for asset in ("USDT", "USD", "USDC"):
+            out["usdt"] += bal_data.get(asset, {}).get("free", 0.0)
+
+        # Token holdings — fetch ticker price for each non-stable
+        for asset, amts in bal_data.items():
+            if asset in ("USDT", "USD", "USDC"):
+                continue
+            qty = amts.get("free", 0.0) + amts.get("locked", 0.0)
+            if qty <= 0:
+                continue
+            ticker_symbol = f"{asset}USDT"
+            price = await bn.get_ticker_price(ticker_symbol) or 0.0
+            usd_value = qty * price
+            out["token_holdings"][asset] = {
+                "qty": qty,
+                "free": amts.get("free", 0.0),
+                "locked": amts.get("locked", 0.0),
+                "price_usd": price,
+                "usd_value": usd_value,
+            }
+            out["tokens_usd"] += usd_value
+
+        out["subtotal_usd"] = out["usdt"] + out["tokens_usd"]
+    except Exception as e:
+        logger.warning(f"/binance_us/balance fetch error: {e}")
+        out["errors"]["balance"] = str(e)[:200]
+
+    return out
+
+
+@router.get("/binance_us/trades")
+async def get_binance_us_trades(symbol: str = "INJUSDT", limit: int = 50):
+    """Recent fills on Binance.US for a symbol — used for trade history rendering."""
+    bn = _get_binance_us()
+    if bn is None:
+        return {"configured": False, "trades": []}
+    try:
+        r = await bn.get_my_trades(symbol, limit=limit)
+        if not r.get("success"):
+            return {"configured": True, "trades": [], "error": r.get("error")}
+        return {"configured": True, "trades": r["data"]}
+    except Exception as e:
+        return {"configured": True, "trades": [], "error": str(e)[:200]}
+
+
 @router.get("/stats")
 async def get_dashboard_stats():
     """Get live dashboard statistics."""
@@ -206,6 +308,75 @@ async def get_dashboard_stats():
             today_pnl_usd=db_stats["today_pnl_usd"],
             bot_status="error",
         )
+
+
+def _compute_chain_pnl() -> dict:
+    """P&L grouped by chain (solana / arbitrum / binance), derived from trades.
+
+    Symbol normalization strips USDT/USDC/USD/.P suffixes to get the base
+    asset, then routes via TradeEngine.EVM_TOKENS / BINANCE_TOKENS membership
+    (everything else = solana). Historic ETHUSDT trades resolve to solana
+    because ETH is in the Solana wrapper-token universe, not EVM_TOKENS.
+    """
+    from datetime import date as _date
+    try:
+        from app.services.trade_engine import TradeEngine
+        from app.database import get_db as _get_db
+    except Exception:
+        return {}
+
+    today_iso = _date.today().isoformat()
+    conn = _get_db()
+    try:
+        rows = conn.execute(
+            """SELECT symbol,
+                      COALESCE(SUM(pnl_usd), 0) as total_pnl,
+                      COALESCE(SUM(CASE WHEN timestamp >= ? THEN pnl_usd ELSE 0 END), 0) as today_pnl
+               FROM trades
+               WHERE action = 'EXECUTE'
+                 AND NULLIF(strategy, '') IS NOT NULL""",
+            (today_iso,),
+        ).fetchall()
+        if not rows:
+            return {}
+        rows = conn.execute(
+            """SELECT symbol,
+                      COALESCE(SUM(pnl_usd), 0) as total_pnl,
+                      COALESCE(SUM(CASE WHEN timestamp >= ? THEN pnl_usd ELSE 0 END), 0) as today_pnl
+               FROM trades
+               WHERE action = 'EXECUTE'
+                 AND NULLIF(strategy, '') IS NOT NULL
+               GROUP BY symbol""",
+            (today_iso,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    def _base(s: str) -> str:
+        s = (s or "").upper()
+        if s.endswith(".P"):
+            s = s[:-2]
+        for q in ("USDT", "USDC", "USD"):
+            if s.endswith(q) and len(s) > len(q):
+                return s[:-len(q)]
+        return s
+
+    pnl: dict = {
+        "solana":   {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0},
+        "arbitrum": {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0},
+        "binance":  {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0},
+    }
+    for r in rows:
+        base = _base(r["symbol"])
+        if base in TradeEngine.EVM_TOKENS:
+            chain = "arbitrum"
+        elif base in TradeEngine.BINANCE_TOKENS:
+            chain = "binance"
+        else:
+            chain = "solana"
+        pnl[chain]["total_pnl_usd"] += float(r["total_pnl"] or 0.0)
+        pnl[chain]["today_pnl_usd"] += float(r["today_pnl"] or 0.0)
+    return pnl
 
 
 @router.get("/portfolio")
@@ -358,6 +529,20 @@ async def get_unified_portfolio():
     try:
         evm_data = await get_evm_balance()
         if evm_data.get("configured"):
+            # Pull Aave V3 supplied balance so it reflects in the EVM wallet total.
+            # aUSDC isn't in the ERC20 token scan (intentionally — it's a yield
+            # position, not a holding), so we add it here to the subtotal.
+            aave_usd = 0.0
+            try:
+                from app.services.aave_v3_client import AaveV3Client
+                aave_client = AaveV3Client()
+                if aave_client.enabled:
+                    aave_usd = await aave_client.get_supply_balance()
+            except Exception as e:
+                logger.debug(f"/portfolio aave-in-evm error: {e}")
+
+            wallet_subtotal = float(evm_data.get("subtotal_usd", 0.0))
+            evm_total = wallet_subtotal + aave_usd
             out["evm"] = {
                 "address":     evm_data.get("address"),
                 "configured":  True,
@@ -367,18 +552,59 @@ async def get_unified_portfolio():
                 "usdc":        evm_data.get("usdc", 0.0),
                 "tokens_usd":  evm_data.get("tokens_usd", 0.0),
                 "token_holdings": evm_data.get("token_holdings", {}),
-                "subtotal_usd": evm_data.get("subtotal_usd", 0.0),
+                "wallet_subtotal_usd": wallet_subtotal,  # ETH + USDC + tokens (no aUSDC)
+                "aave_usd": aave_usd,                    # USDC supplied to Aave V3
+                "subtotal_usd": evm_total,               # full EVM exposure
             }
-            evm_usd = evm_data.get("subtotal_usd", 0.0)
+            evm_usd = evm_total
     except Exception as e:
         logger.warning(f"/portfolio evm error: {e}")
         out["errors"]["evm"] = str(e)[:160]
+
+    # --- Binance.US (CEX) ---
+    binance_us_usd = 0.0
+    try:
+        bn_data = await get_binance_us_balance()
+        if bn_data.get("configured"):
+            out["binance_us"] = {
+                "configured":   True,
+                "venue":        "binance_us",
+                "usdt":         bn_data.get("usdt", 0.0),
+                "tokens_usd":   bn_data.get("tokens_usd", 0.0),
+                "token_holdings": bn_data.get("token_holdings", {}),
+                "subtotal_usd": bn_data.get("subtotal_usd", 0.0),
+            }
+            binance_us_usd = bn_data.get("subtotal_usd", 0.0)
+        else:
+            out["binance_us"] = {"configured": False, "subtotal_usd": 0.0}
+    except Exception as e:
+        logger.warning(f"/portfolio binance_us error: {e}")
+        out["errors"]["binance_us"] = str(e)[:160]
+
+    # --- Per-chain P&L (from trades, base-asset normalized) ---
+    try:
+        chain_pnl = _compute_chain_pnl()
+        if isinstance(out.get("crypto"), dict):
+            out["crypto"]["pnl"] = chain_pnl.get("solana", {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0})
+        if isinstance(out.get("evm"), dict):
+            out["evm"]["pnl"] = chain_pnl.get("arbitrum", {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0})
+        if isinstance(out.get("binance_us"), dict):
+            out["binance_us"]["pnl"] = chain_pnl.get("binance", {"total_pnl_usd": 0.0, "today_pnl_usd": 0.0})
+    except Exception as e:
+        logger.debug(f"/portfolio chain_pnl error: {e}")
 
     # --- Totals ---
     crypto_usd = out["crypto"]["subtotal_usd"]
     # Kalshi contribution = cash + live market value of open contracts
     kalshi_usd = kalshi_cash_usd + kalshi_open_value_usd
-    total_usd = crypto_usd + evm_usd + kamino_usd + kalshi_usd
+    # Split Aave out of evm_usd so the allocation bar can show yield separately
+    # (parallel to Kamino vs Solana wallet split). evm_wallet_only is the cash side.
+    evm_wallet_only = evm_usd
+    aave_usd = 0.0
+    if isinstance(out.get("evm"), dict) and out["evm"].get("aave_usd") is not None:
+        aave_usd = float(out["evm"].get("aave_usd") or 0.0)
+        evm_wallet_only = evm_usd - aave_usd  # subtract aave so segments don't double-count
+    total_usd = crypto_usd + evm_usd + binance_us_usd + kamino_usd + kalshi_usd
     db_stats = get_stats()
     all_time_pnl = db_stats.get("total_pnl_usd", 0.0) + out["kalshi"].get("pnl_usd", 0.0)
     today_pnl = db_stats.get("today_pnl_usd", 0.0)
@@ -405,7 +631,10 @@ async def get_unified_portfolio():
     out["totals"] = {
         "total_usd": total_usd,
         "crypto_usd": crypto_usd,
-        "evm_usd": evm_usd,
+        "evm_usd": evm_usd,                 # full EVM exposure (cash + Aave) — for sub-card
+        "evm_wallet_usd": evm_wallet_only,  # cash side only — for allocation bar
+        "aave_usd": aave_usd,               # Aave V3 supply — for allocation bar
+        "binance_us_usd": binance_us_usd,
         "kamino_usd": kamino_usd,
         "kalshi_usd": kalshi_usd,
         "today_pnl_usd": today_pnl,
@@ -478,10 +707,23 @@ async def get_wallet_tokens():
     targets = get("rebalancer", "targets", {}) or {}
 
     # --- Cost basis from open positions (per symbol, weighted avg entry) ---
-    cost_basis: dict = {}
+    # Positions are stored in trading-pair format (ETHUSDT, BONKUSDT, FARTCOINUSDT.P)
+    # but the dashboard wallet rows use bare base assets (ETH, BONK, FARTCOIN).
+    # Normalize so cost_basis keys match the row symbols.
+    def _base_asset(s: str) -> str:
+        s = (s or "").upper()
+        if s.endswith(".P"):
+            s = s[:-2]
+        for q in ("USDT", "USDC", "USD"):
+            if s.endswith(q) and len(s) > len(q):
+                return s[:-len(q)]
+        return s
+
+    cost_basis: dict = {}        # from currently-open positions
+    historical_basis: dict = {}  # from closed positions (fallback for dust residue)
     try:
         for p in get_open_positions():
-            sym = p.get("symbol")
+            sym = _base_asset(p.get("symbol"))
             amt_usdc = float(p.get("amount_usdc") or 0)
             entry = float(p.get("entry_price") or 0)
             if sym and amt_usdc > 0 and entry > 0:
@@ -491,6 +733,35 @@ async def get_wallet_tokens():
                 cb["total_tokens"] += tokens
     except Exception as e:
         logger.debug(f"/wallet/tokens cost-basis error: {e}")
+
+    # Historical fallback: weighted-avg entry from closed positions, used when
+    # a token is held in the wallet but has no current open position record
+    # (e.g. dust residue from rounding on a closed swap, or pre-bot deposits
+    # that were later traded). Closed P&L was already realized; this avg is a
+    # rough "what did I pay for what I still hold" reference.
+    try:
+        from app.database import get_db
+        conn = get_db()
+        rows = conn.execute(
+            """
+            SELECT symbol, amount_usdc, entry_price
+            FROM positions
+            WHERE status != 'open'
+              AND entry_price > 0
+              AND amount_usdc > 0
+            """
+        ).fetchall()
+        for r in rows:
+            sym = _base_asset(r["symbol"] if hasattr(r, "keys") else r[0])
+            amt_usdc = float((r["amount_usdc"] if hasattr(r, "keys") else r[1]) or 0)
+            entry = float((r["entry_price"] if hasattr(r, "keys") else r[2]) or 0)
+            if sym and amt_usdc > 0 and entry > 0:
+                tokens = amt_usdc / entry
+                hb = historical_basis.setdefault(sym, {"total_usd": 0.0, "total_tokens": 0.0})
+                hb["total_usd"] += amt_usdc
+                hb["total_tokens"] += tokens
+    except Exception as e:
+        logger.debug(f"/wallet/tokens historical-basis error: {e}")
 
     # --- Universe: held + targeted + priced (skip USDC; shown separately on dashboard) ---
     sol_holding = {
@@ -555,6 +826,94 @@ async def get_wallet_tokens():
     except Exception:
         pass
 
+    # --- Binance.US wallet holdings — merge into the same universe ---
+    try:
+        bn = _get_binance_us()
+        if bn is not None:
+            bals = await bn.get_balances()
+            if bals.get("success"):
+                for asset, amts in (bals.get("data") or {}).items():
+                    if asset in ("USDT", "USD", "USDC"):
+                        continue
+                    qty = float(amts.get("free", 0.0) or 0.0) + float(amts.get("locked", 0.0) or 0.0)
+                    if qty <= 0:
+                        continue
+                    price = await bn.get_ticker_price(f"{asset}USDT") or 0.0
+                    if asset in all_holdings and all_holdings[asset].get("chain") in ("solana", "arbitrum"):
+                        key = f"{asset}.BUS"
+                    else:
+                        key = asset
+                    all_holdings[key] = {
+                        "amount": qty,
+                        "price": price,
+                        "usd_value": qty * price,
+                        "chain": "binance",
+                    }
+    except Exception as e:
+        logger.warning(f"/wallet/tokens Binance merge error: {e}")
+        out["errors"]["binance"] = str(e)[:160]
+
+    # Always include the bot's tracked Binance.US tokens (zero-balance OK) so
+    # the user sees the full active universe — FLOKI etc. show as watched-but-
+    # unfilled rows until the alert fires.
+    try:
+        from app.services.trade_engine import TradeEngine
+        for sym in TradeEngine.BINANCE_TOKENS:
+            if sym not in all_holdings:
+                all_holdings[sym] = {"amount": 0.0, "price": 0.0,
+                                     "usd_value": 0.0, "chain": "binance"}
+    except Exception:
+        pass
+
+    # Always include the full backtest universe so tokens being scanned for
+    # signals are visible even if not yet held / not yet deployed. Per-row
+    # `is_backtested` flag below distinguishes these from live-execution
+    # tokens (EVM_TOKENS / BINANCE_TOKENS).
+    backtest_universe: set = set()
+    try:
+        from backtesting.data import (
+            BINANCE_TOKENS as BT_BINANCE,
+            COINBASE_TOKENS as BT_COINBASE,
+            OKX_TOKENS as BT_OKX,
+            COINGECKO_TOKENS as BT_CG,
+        )
+        backtest_universe = (
+            set(BT_BINANCE.keys()) | set(BT_COINBASE.keys())
+            | set(BT_OKX.keys()) | set(BT_CG.keys())
+        )
+        for sym in backtest_universe:
+            if sym not in all_holdings:
+                all_holdings[sym] = {"amount": 0.0, "price": 0.0,
+                                     "usd_value": 0.0, "chain": "backtest"}
+    except Exception as e:
+        logger.debug(f"/wallet/tokens backtest universe import error: {e}")
+
+    # Load active TV alerts snapshot (file-driven; refreshed manually when
+    # alerts are deployed/changed). Used to flag tokens with live alerts.
+    alerts_snapshot = _load_active_alerts()
+    alerts_by_token = alerts_snapshot.get("by_token") or {}
+
+    # Snapshot of in-memory price feed state — used to render the Feed dot
+    # per token. Reading PriceFeed._prices is in-memory only, no API hit.
+    # Uses the module-level get_price_feed import (line 16); declaring the
+    # import locally would shadow it and trigger UnboundLocalError because
+    # earlier code in this function already calls get_price_feed().
+    import time as _time
+    feed_data: dict = {}
+    feed_running = False
+    try:
+        _feed = get_price_feed()
+        feed_running = _feed.is_running
+        if feed_running and _feed._prices:
+            now_ts = _time.time()
+            for _sym, _pd in _feed._prices.items():
+                feed_data[_sym] = {
+                    "age_s": max(0.0, now_ts - (_pd.updated_at or 0)),
+                    "price": _pd.price,
+                }
+    except Exception as e:
+        logger.debug(f"/wallet/tokens feed snapshot error: {e}")
+
     universe = set(all_holdings.keys()) | set(targets.keys()) | set(token_prices.keys())
     universe.discard("USDC")
 
@@ -572,9 +931,21 @@ async def get_wallet_tokens():
         drift_pct = (current_pct - float(target_pct)) if target_pct is not None else None
 
         cb = cost_basis.get(sym)
+        cb_source = "open" if cb else None
+        if cb is None:
+            cb = historical_basis.get(sym)
+            if cb:
+                cb_source = "historical"
         avg_entry = (cb["total_usd"] / cb["total_tokens"]) if cb and cb["total_tokens"] > 0 else None
         if avg_entry and amount > 0 and price > 0:
-            tokens_in_position = min(amount, cb["total_tokens"])
+            # For "open" source, cap tokens-in-position by recorded position size
+            # (we know exactly how many we still hold from this position).
+            # For "historical" source, use full wallet amount × (current − avg_entry)
+            # since the cost basis is approximate anyway.
+            if cb_source == "open":
+                tokens_in_position = min(amount, cb["total_tokens"])
+            else:
+                tokens_in_position = amount
             unrealized_pnl_usd = (price - avg_entry) * tokens_in_position
             unrealized_pnl_pct = ((price / avg_entry) - 1) * 100
         else:
@@ -587,10 +958,22 @@ async def get_wallet_tokens():
         is_tracked = False
         try:
             from app.services.trade_engine import TradeEngine
-            if sym in TradeEngine.EVM_TOKENS:
+            if sym in TradeEngine.EVM_TOKENS or sym in TradeEngine.BINANCE_TOKENS:
                 is_tracked = True
         except Exception:
             pass
+
+        token_alerts = alerts_by_token.get(sym) or []
+        # Per-token feed status. "live" = WS got an update within 60s; "stale"
+        # = > 60s ago; None = not in the WS subscription set (polled on-demand
+        # via Jupiter/OpenOcean/CoinGecko at TP/SL check time).
+        feed_entry = feed_data.get(sym)
+        if feed_entry is None:
+            feed_status = None
+            feed_age_s = None
+        else:
+            feed_age_s = feed_entry["age_s"]
+            feed_status = "stale" if feed_age_s > 60 else "live"
 
         rows.append({
             "symbol": sym,
@@ -602,19 +985,35 @@ async def get_wallet_tokens():
             "current_pct": current_pct,
             "drift_pct": drift_pct,
             "avg_entry": avg_entry,
+            "avg_entry_source": cb_source,  # "open" | "historical" | None
             "unrealized_pnl_usd": unrealized_pnl_usd,
             "unrealized_pnl_pct": unrealized_pnl_pct,
             "has_position": amount > 0 and usd_value > 0.01,
             "is_tracked": is_tracked,
+            "is_backtested": sym in backtest_universe,
+            "has_alert": len(token_alerts) > 0,
+            "alert_count": len(token_alerts),
+            "alert_strategies": [a.get("strategy") for a in token_alerts if a.get("strategy")],
+            "feed_status": feed_status,    # "live" | "stale" | None (on-demand)
+            "feed_age_s": round(feed_age_s, 1) if feed_age_s is not None else None,
             "chain": all_holdings.get(sym, {}).get("chain", "solana"),
         })
 
-    # Sort: targeted first by target desc, then untargeted by current % desc
-    rows.sort(key=lambda r: (
-        0 if r["target_pct"] is not None else 1,
-        -(r["target_pct"] or 0),
-        -r["current_pct"],
-    ))
+    # Sort priority (top → bottom):
+    #   1. Tokens with live TV alerts (most actionable — bot can fire signals on these)
+    #   2. Tokens with open/historical positions (currently held)
+    #   3. Tokens with a live execution lane configured (EVM/Binance.US)
+    #   4. Backtest watchlist (research only)
+    # Within each tier, sort by USD value desc, then alphabetically by symbol.
+    def _sort_key(r):
+        tier = (
+            0 if r["has_alert"]
+            else 1 if r["has_position"]
+            else 2 if r["is_tracked"]
+            else 3
+        )
+        return (tier, -float(r.get("usd_value") or 0.0), r["symbol"])
+    rows.sort(key=_sort_key)
     out["tokens"] = rows
     return out
 
@@ -1160,6 +1559,136 @@ async def kamino_withdraw(body: dict):
         await wallet.close()
 
 
+# ── Aave V3 (Arbitrum USDC supply yield) ─────────────────────────────────
+
+@router.get("/aave/status")
+async def aave_status():
+    """Aave V3 USDC supply status — balance, APY, yield estimates.
+
+    Mirrors /api/kamino but for the EVM lane. Returns enabled=False if the
+    config block is missing or the EVM wallet isn't configured.
+    """
+    try:
+        from app.services.aave_v3_client import AaveV3Client
+        client = AaveV3Client()
+        return await client.get_status()
+    except Exception as e:
+        logger.warning(f"/aave/status error: {e}")
+        return {
+            "enabled": False,
+            "configured": False,
+            "error": str(e)[:200],
+        }
+
+
+@router.post("/aave/deposit")
+async def aave_deposit(body: dict):
+    """Supply USDC to Aave V3.
+
+    Body: {"amount": 50.0, "dry_run": false} or
+          {"percent": 80, "dry_run": false} or
+          {"type": "amount"|"percent"|"all", "value": float, "dry_run": false}
+
+    By default dry_run=False (real broadcast). Set dry_run=true for preview.
+    """
+    try:
+        from app.services.aave_v3_client import AaveV3Client
+        client = AaveV3Client()
+        if not client.enabled or client.wallet is None:
+            raise HTTPException(503, "Aave V3 client not enabled or EVM wallet missing")
+
+        dry_run = bool(body.get("dry_run", False))
+
+        # Resolve amount from various input shapes (matches Kamino UX:
+        # percent = percent-of-wallet, then clamp to wallet - reserve).
+        amount = None
+        type_ = body.get("type")
+        value = body.get("value")
+        if type_ == "amount" or "amount" in body:
+            amount = float(value if type_ == "amount" else body["amount"])
+        elif type_ == "percent" or "percent" in body:
+            wallet_usdc = await client.wallet.get_erc20_balance(
+                "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals=6
+            )
+            pct = float(value if type_ == "percent" else body["percent"])
+            amount = wallet_usdc * pct / 100.0  # percent of full wallet
+        elif type_ == "all" or body.get("all"):
+            wallet_usdc = await client.wallet.get_erc20_balance(
+                "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals=6
+            )
+            amount = wallet_usdc  # try full wallet, clamp below to reserve
+        else:
+            raise HTTPException(400, "Provide 'amount', 'percent', 'all', or {type, value}")
+
+        # Clamp so the deposit can't pull wallet below the reserve floor.
+        # Always evaluate against current wallet (not the percent computation).
+        wallet_usdc_now = await client.wallet.get_erc20_balance(
+            "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals=6
+        )
+        max_safe = max(0.0, wallet_usdc_now - client.reserve_usdc)
+        if amount > max_safe:
+            amount = max_safe
+
+        if amount is None or amount <= 0:
+            raise HTTPException(400,
+                f"deposit amount ${amount:.2f} <= 0 (reserve floor ${client.reserve_usdc:.2f}, "
+                f"wallet ${wallet_usdc_now:.2f}). Lower reserve_usdc or wait for a trade close.")
+        if amount < client.min_deposit_usd:
+            raise HTTPException(400,
+                f"amount ${amount:.2f} below min_deposit_usd ${client.min_deposit_usd}")
+
+        return await client.supply_usdc(amount, dry_run=dry_run)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"/aave/deposit error: {e}")
+        raise HTTPException(500, str(e)[:200])
+
+
+@router.post("/aave/withdraw")
+async def aave_withdraw(body: dict):
+    """Withdraw USDC from Aave V3.
+
+    Body: {"amount": 50.0, "dry_run": false} or
+          {"percent": 100, "dry_run": false} or
+          {"all": true, "dry_run": false} or
+          {"type": "amount"|"percent"|"all", "value": float, "dry_run": false}
+    """
+    try:
+        from app.services.aave_v3_client import AaveV3Client
+        client = AaveV3Client()
+        if not client.enabled or client.wallet is None:
+            raise HTTPException(503, "Aave V3 client not enabled or EVM wallet missing")
+
+        dry_run = bool(body.get("dry_run", False))
+        type_ = body.get("type")
+        value = body.get("value")
+
+        # "all" takes precedence — withdraw entire aUSDC balance via MAX_UINT256
+        if type_ == "all" or body.get("all"):
+            return await client.withdraw_usdc(None, dry_run=dry_run)
+
+        amount = None
+        if type_ == "amount" or "amount" in body:
+            amount = float(value if type_ == "amount" else body["amount"])
+        elif type_ == "percent" or "percent" in body:
+            supplied = await client.get_supply_balance()
+            pct = float(value if type_ == "percent" else body["percent"])
+            amount = supplied * pct / 100.0
+        else:
+            raise HTTPException(400, "Provide 'amount', 'percent', 'all', or {type, value}")
+
+        if amount is None or amount <= 0:
+            raise HTTPException(400, f"computed withdraw amount ${amount} <= 0")
+
+        return await client.withdraw_usdc(amount, dry_run=dry_run)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"/aave/withdraw error: {e}")
+        raise HTTPException(500, str(e)[:200])
+
+
 @router.get("/scout")
 async def get_scout_report():
     """Get latest scout report and recent history."""
@@ -1271,6 +1800,121 @@ async def position_analytics():
 async def indicator_performance():
     """Per-indicator performance: trades, open positions, P&L, timeline."""
     return get_indicator_performance()
+
+
+_ACTIVE_ALERTS_PATH = "data/active_alerts.json"
+
+def _load_active_alerts() -> dict:
+    """Load snapshot of TV active alerts. Empty dict if file missing.
+
+    The snapshot is written by Claude after any TV alert deploy/change via
+    the MCP `alert_list` flow — the bot has no direct TV REST API access.
+    """
+    import json, os
+    if not os.path.exists(_ACTIVE_ALERTS_PATH):
+        return {"by_token": {}, "alert_count": 0, "token_count": 0, "snapshot_at": None}
+    try:
+        with open(_ACTIVE_ALERTS_PATH) as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"_load_active_alerts read error: {e}")
+        return {"by_token": {}, "alert_count": 0, "token_count": 0, "snapshot_at": None}
+
+
+@router.get("/alerts/active")
+async def active_alerts():
+    """Snapshot of currently-deployed TV alerts (from data/active_alerts.json)."""
+    return _load_active_alerts()
+
+
+@router.get("/price_feed/status")
+async def price_feed_status():
+    """Real-time health snapshot of the in-memory price feed.
+
+    Reads PriceFeed._prices directly — zero external API calls. Every token
+    that's been streamed at least once shows up with its last-seen price and
+    age in seconds. Stale = age > 60s; tokens streaming normally are <5s old.
+
+    Used by the dashboard PRICE FEED pill so the user catches WS-reconnect
+    failures within a minute. Polling cadence: every 30s from the frontend.
+    """
+    import time as _t
+    try:
+        from app.services.price_feed import get_price_feed, BINANCE_TOKENS as PF_BINANCE
+        feed = get_price_feed()
+        now = _t.time()
+        tokens = []
+        for sym, pd in (feed._prices or {}).items():
+            age = max(0.0, now - (pd.updated_at or 0))
+            tokens.append({
+                "symbol": sym,
+                "price": pd.price,
+                "age_s": round(age, 1),
+                "stale": age > 60,
+            })
+        tokens.sort(key=lambda t: t["age_s"], reverse=True)  # stalest first
+        ages = [t["age_s"] for t in tokens]
+        stale_count = sum(1 for t in tokens if t["stale"])
+        # Tokens we EXPECT to see streaming (the WS-eligible set). If a token
+        # is in BINANCE_TOKENS but not in _prices, the WS hasn't sent it yet —
+        # could be normal (just connected) or could be a routing problem.
+        expected = set(PF_BINANCE.keys())
+        streaming = set(feed._prices.keys()) if feed._prices else set()
+        missing = sorted(expected - streaming)
+        return {
+            "running": feed.is_running,
+            "tokens_count": len(tokens),
+            "expected_count": len(expected),
+            "missing_count": len(missing),
+            "missing": missing[:10],  # cap to keep payload small
+            "stale_count": stale_count,
+            "oldest_age_seconds": max(ages) if ages else None,
+            "newest_age_seconds": min(ages) if ages else None,
+            "tokens": tokens,
+        }
+    except Exception as e:
+        logger.warning(f"/price_feed/status error: {e}")
+        return {
+            "running": False,
+            "error": str(e)[:200],
+            "tokens_count": 0,
+            "tokens": [],
+        }
+
+
+@router.get("/backtest/matrix")
+async def backtest_matrix():
+    """Active backtest matrix snapshot for the dashboard.
+
+    Returns the live config from backtesting/nightly.py + data.py — the
+    strategies, timeframes, and token universe currently being run by the
+    nightly job. Lets the dashboard surface "what we're scanning" as a
+    one-glance status line.
+    """
+    try:
+        from backtesting.nightly import CORE_STRATEGIES, FOCUS_TIMEFRAMES
+        from backtesting.data import (
+            BINANCE_TOKENS as BT_BINANCE,
+            COINBASE_TOKENS as BT_COINBASE,
+            OKX_TOKENS as BT_OKX,
+            COINGECKO_TOKENS as BT_CG,
+        )
+        token_count = len(BT_BINANCE) + len(BT_COINBASE) + len(BT_OKX) + len(BT_CG)
+        return {
+            "strategies": list(CORE_STRATEGIES),
+            "timeframes": list(FOCUS_TIMEFRAMES),
+            "token_count": token_count,
+            "tests_per_run": len(CORE_STRATEGIES) * len(FOCUS_TIMEFRAMES) * token_count,
+            "tokens_by_source": {
+                "binance": sorted(BT_BINANCE.keys()),
+                "coinbase": sorted(BT_COINBASE.keys()),
+                "okx": sorted(BT_OKX.keys()),
+                "coingecko": sorted(BT_CG.keys()),
+            },
+        }
+    except Exception as e:
+        logger.warning(f"/backtest/matrix error: {e}")
+        return {"error": str(e)[:200]}
 
 
 # ── Backtest Tracker ──────────────────────────────────────────────

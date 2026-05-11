@@ -71,6 +71,7 @@ async def receive_webhook(request: Request):
     logger.info(
         f"Webhook received: {signal.signal_type.value} {signal.symbol} "
         f"confidence={signal.confidence_score}"
+        + (f" strategy={signal.strategy}" if signal.strategy else "")
     )
 
     # Enqueue signal for background processing — return immediately so

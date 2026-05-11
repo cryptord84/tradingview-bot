@@ -27,6 +27,11 @@ class WebhookSignal(BaseModel):
     atr: Optional[float] = None
     timeframe: Optional[str] = None
     strategy: Optional[str] = None  # Alert/indicator name e.g. "BB Squeeze v1.0"
+    # 2026-05-10: when True, process_signal runs the full pre-execution pipeline
+    # (correlation, sizing, risk gates, lane routing) but returns before any
+    # swap broadcast. Used by backtesting/webhook_preflight.py to catch
+    # UnboundLocalError-class bugs without spending real money.
+    dry_run: Optional[bool] = False
 
 
 class ClaudeDecision(str, Enum):

@@ -89,32 +89,27 @@ class PositionMonitor:
             return
 
         from app.services.jupiter_client import JupiterClient
-        from app.services.price_feed import get_price_feed
+        from app.services.price_router import get_monitor_price
 
-        feed = get_price_feed()
+        # JupiterClient kept for the close path (_close_position passes it down).
+        # Price lookup itself goes through the chain-aware router.
         jupiter = JupiterClient()
 
         for pos in positions:
             # Resolve the token symbol from the position (e.g. WIFUSDT → WIF, FARTCOINUSDT.P → FARTCOIN)
             token_symbol = pos.get("symbol", "SOLUSDT").replace("USDT", "").replace("USD", "").replace(".P", "")
 
-            # Try real-time price feed first (instant, no network call)
-            current_price = None
-            if feed.is_running:
-                pd = feed.get_price(token_symbol)
-                if pd and pd.price > 0:
-                    current_price = pd.price
-
-            # Fall back to Jupiter HTTP if feed unavailable
-            if current_price is None:
-                try:
-                    if token_symbol == "SOL":
-                        current_price = await jupiter.get_sol_price()
-                    else:
-                        current_price = await jupiter.get_token_price(token_symbol)
-                except Exception as e:
-                    logger.warning(f"Price fetch failed for {token_symbol}, skipping: {e}")
-                    continue
+            # Chain-aware price routing (per CLAUDE.md hard rule #8): the source
+            # MUST match the execution venue. Solana → Jupiter, EVM → OpenOcean,
+            # Binance.US → Binance.US WS/REST. CoinGecko is last-resort fallback.
+            # Avoids the 2026-05-06 zombie-listing fake-SL incident class.
+            current_price = await get_monitor_price(token_symbol)
+            if current_price is None or current_price <= 0:
+                logger.warning(
+                    f"Price fetch failed for {token_symbol} on all sources, "
+                    f"skipping position #{pos.get('id')} (TP/SL won't fire this cycle)"
+                )
+                continue
 
             logger.debug(
                 f"Position #{pos['id']} {token_symbol} @ ${current_price:.6f} "
@@ -211,11 +206,15 @@ class PositionMonitor:
         from app.services.kamino_client import KaminoClient
         from app.services.trade_engine import TradeEngine
 
-        # ── EVM close path ──────────────────────────────────────────────────
+        # ── Lane routing ────────────────────────────────────────────────────
         token_symbol_norm = (pos.get("symbol", "") or "").upper()\
             .replace("USDT", "").replace("USD", "").replace(".P", "")
+        # EVM takes precedence over Binance (matches trade_engine._is_binance_symbol)
         if token_symbol_norm in TradeEngine.EVM_TOKENS:
             await self._close_position_evm(pos, current_price, trigger, token_symbol_norm)
+            return
+        if token_symbol_norm in TradeEngine.BINANCE_TOKENS:
+            await self._close_position_binance(pos, current_price, trigger, token_symbol_norm)
             return
 
         own_jupiter = jupiter is None
@@ -581,10 +580,156 @@ class PositionMonitor:
                 f"P&L=${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)"
             )
 
+            # Auto-deposit recovered USDC to Aave V3 (mirrors Kamino's hook
+            # in the Solana close path). Wallet just gained ~exit_value USDC;
+            # park excess above reserve.
+            try:
+                from app.services.aave_v3_client import AaveV3Client
+                aave = AaveV3Client()
+                if aave.enabled and aave.auto_deposit:
+                    await asyncio.sleep(3)  # let chain state settle
+                    dep = await aave.deposit_idle(dry_run=False)
+                    if dep.get("success") and not dep.get("skipped"):
+                        amt = dep.get("amount_usdc", 0)
+                        await telegram.send_message(
+                            f"Aave Deposit: ${amt:.2f} USDC supplied to earn yield"
+                        )
+            except Exception as e:
+                logger.warning(f"Aave auto-deposit after EVM close failed: {e}")
+
         finally:
             await telegram.close()
             await executor.close()
             await wallet.close()
+
+    async def _close_position_binance(
+        self, pos: dict, current_price: float, trigger: str, token_symbol: str
+    ):
+        """Close a Binance.US CEX position via market sell.
+
+        Pre-flight balance check: read free balance directly from Binance,
+        clamp recorded position size to actual on-exchange balance (in case
+        of dust loss from prior partial fills). Update DB with realized P&L.
+        """
+        from app.services.binance_us_client import BinanceUSClient
+        from app.services.telegram_service import TelegramService
+        from app.services.trade_engine import TradeEngine
+
+        bn_symbol = TradeEngine.BINANCE_TOKENS[token_symbol]
+        bn = BinanceUSClient()
+        telegram = TelegramService()
+
+        try:
+            recorded_amt = float(pos.get("amount_sol", 0) or 0)  # token units (column name is legacy)
+
+            # Pre-flight: actual free balance on Binance
+            free_balance = await bn.get_balance(token_symbol)
+            if free_balance <= 0:
+                logger.warning(
+                    f"Position #{pos['id']} ({token_symbol}): no Binance.US balance to sell. Marking abandoned."
+                )
+                close_position(
+                    position_id=pos["id"], exit_price=current_price,
+                    exit_tx="", status="closed_abandoned",
+                    pnl_usdc=0, pnl_percent=0,
+                )
+                await telegram.send_message(
+                    f"⚠️ Position #{pos['id']} ({token_symbol}) — no Binance.US balance, marked abandoned."
+                )
+                return
+
+            # Get symbol filters for stepSize quantization
+            sym_info = await bn.get_symbol_info(bn_symbol)
+            step_size = sym_info.get("step_size", 0) if sym_info.get("success") else 0
+
+            # Sell min(recorded, free) — protect against over-sell
+            sell_amount_raw = min(recorded_amt, free_balance) if recorded_amt > 0 else free_balance
+            sell_amount = bn.quantize_qty(sell_amount_raw, step_size) if step_size > 0 else sell_amount_raw
+
+            if sell_amount * current_price < (sym_info.get("min_notional", 0) if sym_info.get("success") else 0):
+                logger.warning(
+                    f"Position #{pos['id']}: sell qty {sell_amount} {token_symbol} below min notional, marking abandoned"
+                )
+                close_position(
+                    position_id=pos["id"], exit_price=current_price,
+                    exit_tx="", status="closed_abandoned",
+                    pnl_usdc=0, pnl_percent=0,
+                )
+                return
+
+            order_result = await bn.place_market_sell_base(bn_symbol, sell_amount)
+            if not order_result.get("success"):
+                logger.error(
+                    f"Binance.US sell failed for #{pos['id']}: {order_result.get('error')}"
+                )
+                await telegram.send_message(
+                    f"❌ Binance.US close FAILED for #{pos['id']} ({token_symbol})\n"
+                    f"Error: {(order_result.get('error') or 'unknown')[:200]}"
+                )
+                return
+
+            order = order_result["data"]
+            order_id = order.get("orderId")
+            exec_qty = float(order.get("executedQty", 0))
+            cum_quote = float(order.get("cummulativeQuoteQty", 0))
+            avg_fill_price = (cum_quote / exec_qty) if exec_qty > 0 else current_price
+
+            # Compute P&L using actual fill price
+            entry = float(pos.get("entry_price", 0) or 0)
+            entry_qty = float(pos.get("amount_sol", 0) or 0)
+            entry_usdc = entry_qty * entry if entry_qty > 0 else float(pos.get("amount_usdc", 0) or 0)
+            pnl_usdc = cum_quote - entry_usdc
+            pnl_percent = (pnl_usdc / entry_usdc * 100) if entry_usdc > 0 else 0
+            status_map = {
+                "tp": "closed_tp", "sl": "closed_sl",
+                "trail_sl": "closed_trail", "manual": "closed_manual",
+            }
+            status = status_map.get(trigger, "closed_manual")
+
+            close_position(
+                position_id=pos["id"], exit_price=avg_fill_price,
+                exit_tx=f"binance:{order_id}", status=status,
+                pnl_usdc=pnl_usdc, pnl_percent=pnl_percent,
+            )
+            insert_trade({
+                "tx_id": f"binance:{order_id}",
+                "signal_type": "CLOSE",
+                "symbol": pos["symbol"],
+                "action": "EXECUTE",
+                "amount_sol": exec_qty,
+                "amount_usd": cum_quote,
+                "price_usd": avg_fill_price,
+                "leverage": 1,
+                "wallet_address": "binance_us",
+                "pnl_usd": pnl_usdc,
+                "notes": f"Position #{pos['id']} {status} | Binance.US | "
+                         f"Entry=${entry:.4f} Exit=${avg_fill_price:.4f} | chain=binance",
+                "strategy": pos.get("strategy", ""),
+                "reason": TRIGGER_TO_REASON.get(trigger, TradeReason.MANUAL_CLOSE),
+            })
+
+            trigger_labels = {
+                "tp": ("Take Profit", "🎯"),
+                "sl": ("Stop Loss", "🛑"),
+                "trail_sl": ("Trailing Stop", "📉"),
+                "manual": ("Manual Close", "✅"),
+            }
+            label, emoji = trigger_labels.get(trigger, ("Close", "✅"))
+            pnl_emoji = "📈" if pnl_usdc >= 0 else "📉"
+            await telegram.send_message(
+                f"{emoji} <b>{label} (Binance.US)</b>: {pos['symbol']}\n"
+                f"Sold {exec_qty:.6f} @ ${avg_fill_price:.4f} for "
+                f"{pnl_emoji} ${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)\n"
+                f"Order: <code>{order_id}</code>"
+            )
+            logger.info(
+                f"Binance.US position #{pos['id']} closed via {trigger}: "
+                f"P&L=${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)"
+            )
+
+        finally:
+            await telegram.close()
+            await bn.close()
 
 
 # Singleton

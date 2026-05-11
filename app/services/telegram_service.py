@@ -110,6 +110,36 @@ class TelegramService:
             msg += f"\n\nContext: {context}"
         await self.send_message(msg, parse_mode="HTML")
 
+    async def notify_swap_failed(
+        self,
+        symbol: str,
+        action: str,
+        trade_usd: float,
+        error_summary: str,
+        strategy: str = "",
+    ):
+        """Focused notification when a Jupiter/EVM swap fails before any tokens move.
+
+        Distinct from notify_error: tells the user clearly that a SIGNAL was
+        received, accepted, but the swap simulation/broadcast was rejected so
+        no position was opened. Avoids the giant Solana program log dump that
+        notify_error tends to produce for these.
+        """
+        if not self.send_on.get("errors", True):
+            return
+        token = symbol.replace("USDT", "").replace("USD", "").replace(".P", "") if symbol else "?"
+        # Truncate the error to keep the message readable
+        err_short = error_summary[:280] + ("…" if len(error_summary) > 280 else "")
+        msg = (
+            f"<b>❌ Swap FAILED — no position opened</b>\n\n"
+            f"Action: <b>{action} {token}</b>\n"
+            f"Size: ${trade_usd:.2f}\n"
+            f"Strategy: {strategy or 'unknown'}\n\n"
+            f"Reason: <code>{err_short}</code>\n\n"
+            f"Signal accepted but DEX rejected the swap. Bot will not retry."
+        )
+        await self.send_message(msg, parse_mode="HTML")
+
     async def notify_daily_summary(self, stats: dict):
         if not self.send_on.get("daily_summary", True):
             return

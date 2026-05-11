@@ -13,7 +13,7 @@ import yaml
 
 from app.config import get
 from app.database import insert_trade, get_stats, log_signal, insert_position, get_position_count, get_open_position_for_signal, get_open_positions, TradeReason
-from app.models import WebhookSignal, ClaudeDecision
+from app.models import WebhookSignal, ClaudeDecision, ClaudeResponse
 from app.services.claude_decision import get_claude_decision
 from app.services.jupiter_client import JupiterClient
 from app.services.news_service import NewsService
@@ -38,6 +38,7 @@ _close_filter_stats = {
     "ignored": 0,           # CLOSE arrived but no open position matches
     "blocked_too_new": 0,   # matched but position younger than min_hold_seconds
     "blocked_low_move": 0,  # matched but price hasn't moved enough to clear fees
+    "ignored_by_config": 0, # webhook.ignore_close_signals=true blanket drop
     "last_summary_total": 0,
 }
 _CLOSE_FILTER_SUMMARY_EVERY = 25  # emit summary INFO line every N filtered signals
@@ -51,13 +52,15 @@ def _bump_close_filter(reason: str) -> None:
         _close_filter_stats["ignored"]
         + _close_filter_stats["blocked_too_new"]
         + _close_filter_stats["blocked_low_move"]
+        + _close_filter_stats["ignored_by_config"]
     )
     if total - _close_filter_stats["last_summary_total"] >= _CLOSE_FILTER_SUMMARY_EVERY:
         logger.info(
             f"CLOSE filter summary (since startup): "
             f"{_close_filter_stats['ignored']} ignored (no position), "
             f"{_close_filter_stats['blocked_too_new']} blocked (too new), "
-            f"{_close_filter_stats['blocked_low_move']} blocked (low move)"
+            f"{_close_filter_stats['blocked_low_move']} blocked (low move), "
+            f"{_close_filter_stats['ignored_by_config']} ignored by config"
         )
         _close_filter_stats["last_summary_total"] = total
 
@@ -149,6 +152,12 @@ _STRATEGY_NAME_ALIASES = {
     "liquidity sweep": "Liq Sweep",
     "donchian": "Donchian",
     "donchian breakout": "Donchian",
+    # Bull-roster regime-filtered variants (deployed 2026-05-08).
+    # Match nightly.py's STRATEGIES dict short keys so `Donch+ADX`/`EMA+ADX`
+    # entries in config_sizing_overrides.yaml map cleanly. The detector
+    # writes/removes entries under these keys on BULL_CONFIRMED/BULL_LOST.
+    "donchian + adx": "Donch+ADX",
+    "ema ribbon + adx": "EMA+ADX",
 }
 
 
@@ -376,6 +385,67 @@ def get_signal_queue() -> SignalQueue:
     return _signal_queue
 
 
+# Known Solana program "Custom" error decode for friendlier swap-failure
+# summaries. Keep small — the goal is "tell the user what kind of failure"
+# not "decode every Anchor enum". Add entries as we learn.
+_SOLANA_CUSTOM_ERRORS = {
+    29: "InvalidInput / pool state stale (Raydium AMM rejected — likely slippage exceeded mid-block)",
+    1:  "InvalidArgument",
+    6:  "Slippage tolerance exceeded",
+    24: "InsufficientFunds",
+}
+
+
+def _summarize_swap_error(err_text: str) -> str:
+    """Pull a short, actionable reason out of a Solana/EVM swap error blob.
+
+    Solana RPC errors often include 4KB+ of program logs. We only want the
+    actionable bit — what failed and why. Returns ≤300 chars.
+    """
+    import re
+
+    # Look for Solana custom program errors first (most common case)
+    # Format: "custom program error: 0xNN" or "Custom: NN"
+    m = re.search(r"['\"]?Custom['\"]?\s*:\s*(\d+)", err_text)
+    if not m:
+        m = re.search(r"custom program error:\s*0x([0-9a-fA-F]+)", err_text)
+        if m:
+            code = int(m.group(1), 16)
+        else:
+            code = None
+    else:
+        code = int(m.group(1))
+
+    # Try to find which program failed
+    prog_match = re.search(r"Program (\w{32,44}) failed", err_text)
+    failed_program = prog_match.group(1) if prog_match else None
+
+    if code is not None:
+        decoded = _SOLANA_CUSTOM_ERRORS.get(code, f"Custom error {code}")
+        out = f"DEX rejected swap: {decoded}"
+        if failed_program:
+            out += f" (program {failed_program[:8]}…)"
+        return out[:300]
+
+    # EVM revert
+    if "swap reverted" in err_text:
+        m = re.search(r"tx=(\w+)", err_text)
+        return f"EVM swap reverted on-chain. Tx: {m.group(1) if m else 'unknown'}"[:300]
+
+    # OpenOcean
+    if "OpenOcean" in err_text:
+        m = re.search(r"OpenOcean[^:]*:\s*(.{0,200})", err_text)
+        return f"OpenOcean error: {m.group(1) if m else err_text[:200]}"[:300]
+
+    # Generic Transaction failed — first 250 chars after the marker
+    m = re.search(r"Transaction failed[^:]*:\s*(.{0,250})", err_text)
+    if m:
+        return f"Transaction failed: {m.group(1).strip()}"[:300]
+
+    # Last resort
+    return err_text[:300]
+
+
 class TradeEngine:
     """Main trade orchestration engine."""
 
@@ -390,6 +460,7 @@ class TradeEngine:
         # block is missing or the EVM wallet is unfunded.
         self._evm_wallet = None
         self._evm_executor = None
+        self._binance_us = None  # Phase 2 (2026-05-09) — lazy-init Binance.US client
         self._running = True
 
     # ── EVM execution lane (Phase 3) ─────────────────────────────────────────
@@ -398,21 +469,55 @@ class TradeEngine:
     # 2026-05-02; others are research-only until they cross WF thresholds.
     EVM_TOKENS = {
         # symbol → (Arbitrum ERC20 contract, decimals)
-        "INJ":   ("0x97ad75064b20fb2B2447feD4fa953bF7F007a706", 18),
-        # Near-misses worth pre-mapping in case they cross WF later:
+        # INJ removed 2026-05-08 — Phase 4 audit found canonical Injective token
+        # has ZERO Arbitrum liquidity (only Ethereum mainnet pools exist). Old
+        # registry address 0x97ad75… was bogus. Liq Sweep / INJ.P alert culled.
+        # Validated 2026-05-08 via dry-run swap (Phase 4):
+        "UNI":   ("0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", 18),  # ✓
+        "ARB":   ("0x912CE59144191C1204E64559FE8253a0e49E6548", 18),  # ✓
+        # Near-misses pre-mapped in case they cross WF later (UNVERIFIED):
         "LDO":   ("0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60", 18),
         "COMP":  ("0x354A6dA3fcde098F8389cad84b0182725c6C91dE", 18),
         "AAVE":  ("0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", 18),
         "LINK":  ("0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18),
-        "UNI":   ("0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", 18),
-        "ARB":   ("0x912CE59144191C1204E64559FE8253a0e49E6548", 18),
     }
     EVM_USDC_CONTRACT = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
     EVM_USDC_DECIMALS = 6
 
+    # ── Binance.US execution lane (Phase 2, 2026-05-09) ──────────────────
+    # Symbols that route to the Binance.US CEX instead of Solana/EVM DEX.
+    #
+    # Initial roster (added after exchangeInfo probe 2026-05-09):
+    # - FLOKI: bull-roster combos that were "deferred" to BSC chain extension —
+    #   FLOKI is on Binance.US ($5171 max market order) so we can now run
+    #   Donch+ADX/FLOKI (PF 2.31) and Liq Sweep/FLOKI (PF 1.45) without
+    #   building BSC support.
+    #
+    # NOT included:
+    # - INJ: not listed on Binance.US (US regulatory). Liq Sweep/INJ/4H
+    #   remains executable only if we build a Cosmos lane (Keplr/Helix).
+    # - KAVA: listed but MARKET_LOT_SIZE caps single market order at $2.56,
+    #   below any meaningful Phase 6 trade size. Limit orders could work
+    #   but we don't have that path yet. Mean Rev/KAVA stays untradeable.
+    # - MOODENG: also has tight $2.42 cap. Currently routes through Solana.
+    #
+    # The value is the Binance.US trading symbol (USDT-quoted by default).
+    BINANCE_TOKENS = {
+        "FLOKI": "FLOKIUSDT",
+    }
+
     def _is_evm_symbol(self, symbol: str) -> bool:
         """Return True if the given token symbol routes to EVM execution."""
         return symbol.upper() in self.EVM_TOKENS
+
+    def _is_binance_symbol(self, symbol: str) -> bool:
+        """Return True if the given token symbol routes to Binance.US CEX."""
+        # Match precedence: EVM > Binance — a symbol mapped to EVM stays there
+        # to avoid double-execution. Move out of EVM_TOKENS first if you want
+        # to migrate it to Binance.
+        if self._is_evm_symbol(symbol):
+            return False
+        return symbol.upper() in self.BINANCE_TOKENS
 
     def _get_evm_wallet(self):
         """Lazy-init the EVM wallet on first use. Raises if config missing."""
@@ -427,6 +532,13 @@ class TradeEngine:
             from app.services.evm_swap_executor import EVMSwapExecutor
             self._evm_executor = EVMSwapExecutor(self._get_evm_wallet())
         return self._evm_executor
+
+    def _get_binance_us(self):
+        """Lazy-init the Binance.US client on first use."""
+        if self._binance_us is None:
+            from app.services.binance_us_client import BinanceUSClient
+            self._binance_us = BinanceUSClient()
+        return self._binance_us
 
     def is_duplicate(self, signal: WebhookSignal) -> bool:
         """Check if this signal is a duplicate within the configured window."""
@@ -464,6 +576,23 @@ class TradeEngine:
 
             # 1. Log raw signal
             log_signal(signal.model_dump_json(), source_ip)
+
+            # 1a. Blanket CLOSE filter — webhook.ignore_close_signals is the
+            # tier-0 drop. Audit 2026-05-10 showed indicator CLOSEs closed
+            # positions at +1.4% avg vs +8.0% TP avg — they're too eager.
+            # Exits now flow only through TP/SL/trailing-stop in position_monitor.
+            # This filter runs BEFORE duplicate detection and any heavy work
+            # (Telegram, Claude, market data) so spam is dropped cheaply.
+            if (signal.signal_type.value == "CLOSE"
+                    and bool(get("webhook", "ignore_close_signals", False))):
+                _bump_close_filter("ignored_by_config")
+                logger.debug(
+                    f"CLOSE ignored by config: {signal.symbol} "
+                    f"(strategy={strategy_label or '?'}) — "
+                    f"exits handled by TP/SL/trail in position_monitor"
+                )
+                result["status"] = "close_ignored_by_config"
+                return result
 
             # 2. Check duplicate
             if self.is_duplicate(signal):
@@ -530,16 +659,33 @@ class TradeEngine:
                 except Exception as e:
                     logger.warning(f"Could not check Kamino balance: {e}")
 
+            # Resolve token symbol (e.g. FLOKIUSDT → FLOKI). MUST come before
+            # any code that uses it — the Phase 2 Binance.US block below used
+            # token_symbol before this assignment, throwing UnboundLocalError
+            # on every BUY signal (caught 2026-05-10 when FLOKI BUY didn't fire).
+            token_symbol = signal.symbol.replace("USDT", "").replace("USD", "").replace(".P", "")
+
             # Total purchasing power = USDC in wallet + Kamino deposits + SOL value
             sol_usd_value = balance_sol * sol_price
-            total_usd = usdc_balance + kamino_usdc + sol_usd_value
-            # Tradeable USDC = wallet USDC + Kamino, minus reserve for future trades
+            # Binance.US USDT — only counted when routing to Binance lane to avoid
+            # over-sizing Solana/EVM trades that can't access CEX funds. Phase 2
+            # added 2026-05-09.
+            binance_usdt = 0.0
+            if self._is_binance_symbol(token_symbol):
+                try:
+                    bn = self._get_binance_us()
+                    if bn.enabled:
+                        binance_usdt = await bn.get_total_usdt_value()
+                except Exception as e:
+                    logger.warning(f"Binance.US balance fetch failed: {e}")
+
+            total_usd = usdc_balance + kamino_usdc + sol_usd_value + binance_usdt
+            # Tradeable USDC = wallet USDC + Kamino + (Binance if routing there), minus reserve
             kamino_cfg = get("kamino") or {}
             usdc_reserve = kamino_cfg.get("reserve_usdc", 0.0)
-            tradeable_usd = max(0, usdc_balance + kamino_usdc - usdc_reserve)
+            tradeable_usd = max(0, usdc_balance + kamino_usdc + binance_usdt - usdc_reserve)
 
             # Get actual token price (use Jupiter price lookup, fall back to signal estimate)
-            token_symbol = signal.symbol.replace("USDT", "").replace("USD", "").replace(".P", "")
             if token_symbol == "SOL":
                 token_price = sol_price
             else:
@@ -590,20 +736,29 @@ class TradeEngine:
                 "total_usd": total_usd,
             }
 
-            # 7. Get Claude decision
-            logger.info(
-                f"Requesting Claude decision for {signal.signal_type.value} {signal.symbol} "
-                f"(tradeable: ${tradeable_usd:.2f}, total: ${total_usd:.2f})"
-            )
-            claude_resp = await get_claude_decision(
-                signal=signal,
-                wallet_balance_sol=balance_sol,
-                wallet_balance_usd=total_usd,
-                sol_price=sol_price,
-                market_data=market_data,
-                news_headlines=headlines,
-                risk_params=risk_params,
-            )
+            # 7. Get Claude decision (skip in dry-run — Claude is slow + costly,
+            # not needed to verify pre-execution routing logic).
+            if getattr(signal, "dry_run", False):
+                # Synthetic accept so downstream sizing/route code still runs
+                claude_resp = ClaudeResponse(
+                    decision=ClaudeDecision.EXECUTE,
+                    reasoning="dry_run synthetic — Claude bypass for pre-flight",
+                    risk_score=5,
+                )
+            else:
+                logger.info(
+                    f"Requesting Claude decision for {signal.signal_type.value} {signal.symbol} "
+                    f"(tradeable: ${tradeable_usd:.2f}, total: ${total_usd:.2f})"
+                )
+                claude_resp = await get_claude_decision(
+                    signal=signal,
+                    wallet_balance_sol=balance_sol,
+                    wallet_balance_usd=total_usd,
+                    sol_price=sol_price,
+                    market_data=market_data,
+                    news_headlines=headlines,
+                    risk_params=risk_params,
+                )
 
             result["decision"] = claude_resp.model_dump()
             await self.telegram.notify_claude_decision(result["decision"], signal.signal_type.value)
@@ -897,8 +1052,101 @@ class TradeEngine:
                 # Resolve target token mint address (Solana SPL)
                 target_mint = self._resolve_token_mint(token_symbol)
 
-            # ── Branch by chain: EVM (Arbitrum via OpenOcean) vs Solana (Jupiter)
-            if self._is_evm_symbol(token_symbol):
+            # ── DRY-RUN EXIT: pre-execution validation complete, swap NOT broadcast.
+            # If the signal flagged dry_run=true (webhook pre-flight validator), we
+            # bail before any chain-specific swap. All correlation, sizing, risk
+            # gates, route detection ran successfully — meaning the function won't
+            # blow up on real signals of this shape. Catches UnboundLocalError /
+            # routing-dispatch bugs before live money moves.
+            if getattr(signal, "dry_run", False):
+                result["status"] = "dry_run_pass"
+                result["dry_run"] = True
+                result["lane"] = (
+                    "binance_us" if self._is_binance_symbol(token_symbol)
+                    else "evm" if self._is_evm_symbol(token_symbol)
+                    else "solana"
+                )
+                result["tradeable_usd"] = tradeable_usd
+                result["trade_usd"] = trade_usd
+                result["token_price"] = token_price
+                logger.info(
+                    f"DRY-RUN pass: {signal.signal_type.value} {token_symbol} "
+                    f"lane={result['lane']} tradeable=${tradeable_usd:.2f} "
+                    f"trade=${trade_usd:.2f}"
+                )
+                return result
+
+            # ── Branch by chain: Binance.US CEX (Phase 2) vs EVM (Arbitrum via OpenOcean) vs Solana (Jupiter)
+            if self._is_binance_symbol(token_symbol):
+                # Binance.US CEX execution path (added 2026-05-09 Phase 2)
+                bn = self._get_binance_us()
+                bn_symbol = self.BINANCE_TOKENS[token_symbol]
+
+                # Pre-flight: get symbol info for filters + last price
+                sym_info = await bn.get_symbol_info(bn_symbol)
+                if not sym_info.get("success"):
+                    raise RuntimeError(f"Binance.US symbol info fetch failed: {sym_info.get('error')}")
+                if sym_info.get("status") != "TRADING":
+                    raise RuntimeError(f"Binance.US symbol {bn_symbol} status={sym_info.get('status')} (not TRADING)")
+                min_notional = sym_info.get("min_notional", 0)
+                step_size = sym_info.get("step_size", 0)
+
+                if signal.signal_type.value == "BUY":
+                    if trade_usd < min_notional:
+                        raise RuntimeError(
+                            f"Trade size ${trade_usd:.2f} below {bn_symbol} min notional ${min_notional}"
+                        )
+                    logger.info(
+                        f"Executing BUY {token_symbol} on Binance.US: ${trade_usd:.2f} USDT market order"
+                    )
+                    order_result = await bn.place_market_buy_quote(bn_symbol, trade_usd)
+                else:
+                    # SELL: use base-asset quantity from positions table; quantize to stepSize
+                    bn_balance = await bn.get_balance(token_symbol)
+                    qty = bn.quantize_qty(bn_balance, step_size) if step_size > 0 else bn_balance
+                    if qty <= 0:
+                        raise RuntimeError(f"No {token_symbol} balance on Binance.US to sell")
+                    if qty * token_price < min_notional:
+                        raise RuntimeError(
+                            f"Sell size {qty} {token_symbol} (~${qty*token_price:.2f}) below min notional ${min_notional}"
+                        )
+                    logger.info(
+                        f"Executing SELL {qty} {token_symbol} on Binance.US (~${qty*token_price:.2f}) market order"
+                    )
+                    order_result = await bn.place_market_sell_base(bn_symbol, qty)
+
+                if not order_result.get("success"):
+                    raise RuntimeError(
+                        f"Binance.US order failed: {order_result.get('error')}"
+                    )
+                order = order_result["data"]
+                # Extract weighted-avg fill price from fills array
+                fills = order.get("fills", [])
+                exec_qty = float(order.get("executedQty", 0))
+                cum_quote = float(order.get("cummulativeQuoteQty", 0))
+                avg_price = (cum_quote / exec_qty) if exec_qty > 0 else 0
+                # Map to Jupiter-shaped result so downstream code reuses
+                swap_result = {
+                    "tx_signature": f"binance:{order.get('orderId')}",
+                    "price_impact": "n/a",
+                    "executed_qty": exec_qty,
+                    "avg_price": avg_price,
+                    "cum_quote_usdt": cum_quote,
+                }
+                # Override token_price with actual fill price for downstream sizing/TP-SL math
+                if avg_price > 0:
+                    token_price = avg_price
+                result["status"] = "executed"
+                result["tx_signature"] = swap_result["tx_signature"]
+                result["chain"] = "binance"
+                # Override token_qty with what actually filled (for position record)
+                if signal.signal_type.value == "BUY":
+                    token_qty = exec_qty
+                else:
+                    # On sell, "filled" is in token but we record cum_quote (USDC received)
+                    token_qty = exec_qty
+
+            elif self._is_evm_symbol(token_symbol):
                 # EVM execution path
                 evm_executor = self._get_evm_executor()
                 evm_wallet = self._get_evm_wallet()
@@ -920,6 +1168,35 @@ class TradeEngine:
                     return result
 
                 evm_token_addr, evm_token_decimals = self.EVM_TOKENS[token_symbol]
+
+                # Aave V3 JIT auto-withdraw (Phase 3.4)
+                # If this is a BUY and wallet USDC < trade_usd + reserve, pull
+                # the gap from Aave so the swap doesn't run out of USDC mid-flight.
+                if signal.signal_type.value == "BUY":
+                    try:
+                        from app.services.aave_v3_client import AaveV3Client
+                        aave = AaveV3Client()
+                        if aave.enabled:
+                            wd = await aave.withdraw_for_trade(trade_usd, dry_run=False)
+                            if wd.get("success") and not wd.get("skipped"):
+                                amt = wd.get("amount_usdc", 0)
+                                logger.info(
+                                    f"Aave JIT withdraw: ${amt:.2f} USDC pulled "
+                                    f"(wallet was ${wd.get('wallet_usdc_before', 0):.2f}, "
+                                    f"needed ${wd.get('needed', 0):.2f}) — "
+                                    f"tx={wd.get('withdraw_tx', {}).get('tx_hash', '?')[:14]}…"
+                                )
+                                await self.telegram.send_message(
+                                    f"Aave Withdraw: ${amt:.2f} USDC pulled to fund "
+                                    f"{token_symbol} BUY"
+                                )
+                            elif not wd.get("skipped") and not wd.get("success"):
+                                logger.warning(
+                                    f"Aave JIT withdraw could not cover gap: "
+                                    f"{wd.get('reason', 'unknown')}"
+                                )
+                    except Exception as e:
+                        logger.warning(f"Aave JIT withdraw failed: {e}")
 
                 if signal.signal_type.value == "BUY":
                     src_addr, src_dec = self.EVM_USDC_CONTRACT, self.EVM_USDC_DECIMALS
@@ -1018,8 +1295,12 @@ class TradeEngine:
                 "leverage": leverage,
                 "confidence_score": signal.confidence_score,
                 "claude_reasoning": claude_resp.reasoning,
-                "wallet_address": (self._evm_wallet.address if chain_label == "arbitrum"
-                                   else self.wallet.public_key),
+                "wallet_address": (
+                    "binance_us"  # CEX has no on-chain wallet; sentinel for dashboard chain-detection
+                    if chain_label == "binance"
+                    else (self._evm_wallet.address if chain_label == "arbitrum"
+                          else self.wallet.public_key)
+                ),
                 "notes": trade_notes,
                 "strategy": strategy_label,
                 "reason": TradeReason.WEBHOOK,
@@ -1095,7 +1376,7 @@ class TradeEngine:
                 else:
                     logger.warning(f"Max open positions ({max_positions}) reached, skipping position tracking")
 
-            # Auto-deposit idle USDC back to Kamino after trade
+            # Auto-deposit idle USDC back to Kamino after trade (Solana lane)
             if self.kamino.enabled and self.kamino.auto_deposit:
                 try:
                     await asyncio.sleep(3)  # Wait for balances to settle
@@ -1109,13 +1390,98 @@ class TradeEngine:
                 except Exception as e:
                     logger.warning(f"Kamino auto-deposit after trade failed: {e}")
 
+            # Auto-deposit idle USDC back to Aave V3 after trade (EVM lane)
+            # Only fires when this trade routed through the EVM lane.
+            if result.get("chain") == "arbitrum":
+                try:
+                    from app.services.aave_v3_client import AaveV3Client
+                    aave = AaveV3Client()
+                    if aave.enabled and aave.auto_deposit:
+                        await asyncio.sleep(3)  # Wait for balances to settle
+                        dep = await aave.deposit_idle(dry_run=False)
+                        if dep.get("success") and not dep.get("skipped"):
+                            amt = dep.get("amount_usdc", 0)
+                            tx_hash = dep.get("supply_tx", {}).get("tx_hash", "?")
+                            logger.info(f"Aave auto-deposit: ${amt:.2f} USDC supplied (tx={tx_hash[:14]}…)")
+                            await self.telegram.send_message(
+                                f"Aave Deposit: ${amt:.2f} USDC supplied to earn yield"
+                            )
+                except Exception as e:
+                    logger.warning(f"Aave auto-deposit after trade failed: {e}")
+
             return result
 
         except Exception as e:
             logger.exception(f"Trade engine error: {e}")
             result["status"] = "error"
             result["error"] = str(e)
-            await self.telegram.notify_error(str(e), f"Signal: {signal.signal_type.value} {signal.symbol}")
+
+            # Detect swap-execution failures vs generic engine errors so we can
+            # log them to the trades DB + send a focused Telegram. Without this,
+            # silent swap failures look like missing webhooks (see PNUT/Raydium
+            # 0x1d incident 2026-05-07: signal received → Claude approved → swap
+            # rejected → no DB record → user thought webhook was lost).
+            err_text = str(e)
+            is_swap_failure = any(marker in err_text for marker in (
+                "Transaction failed",       # Jupiter/Solana RPC error
+                "swap reverted",            # EVM on-chain revert
+                "InstructionError",         # Solana program error
+                "custom program error",     # Solana program error
+                "OpenOceanError",           # OpenOcean aggregator error
+                "AlertsRestApiError",       # rare, but possible
+            ))
+
+            if is_swap_failure:
+                # Pull a short, human-readable reason from the noise. Solana
+                # RPC errors often dump 4KB+ of program logs; we want just the
+                # actionable bit.
+                reason = _summarize_swap_error(err_text)
+
+                # Best-effort variable extraction — the swap call lives well
+                # after these bindings (line 985+), so they should all be
+                # available. Defensive defaults for early-exit edge cases.
+                _trade_usd = locals().get("trade_usd", 0.0) or 0.0
+                _token_price = locals().get("token_price", 0.0) or 0.0
+                _strategy = locals().get("strategy_label", signal.strategy or "")
+
+                # Insert a failed-trade record so the dashboard transaction log
+                # shows it instead of the signal looking like it vanished.
+                try:
+                    insert_trade({
+                        "signal_type": signal.signal_type.value,
+                        "symbol": signal.symbol,
+                        "action": f"{signal.signal_type.value}_FAILED",
+                        "amount_sol": 0,
+                        "amount_usd": _trade_usd,
+                        "price_usd": _token_price,
+                        "fees_sol": 0,
+                        "leverage": locals().get("leverage", 1),
+                        "wallet_address": (self._evm_wallet.address if self._is_evm_symbol(
+                            signal.symbol.replace("USDT", "").replace("USD", "").replace(".P", "")
+                        ) and self._evm_wallet else self.wallet.public_key),
+                        "confidence_score": signal.confidence_score,
+                        "claude_reasoning": locals().get("claude_resp", None) and getattr(
+                            locals().get("claude_resp"), "reasoning", "") or "",
+                        "notes": f"SWAP FAILED — no position opened. Reason: {reason[:500]}",
+                        "strategy": _strategy,
+                        "reason": "swap_failed",
+                    })
+                except Exception as db_err:
+                    logger.warning(f"Failed to record swap failure to trades DB: {db_err}")
+
+                # Focused Telegram notification (not the giant program-log dump)
+                await self.telegram.notify_swap_failed(
+                    symbol=signal.symbol,
+                    action=signal.signal_type.value,
+                    trade_usd=_trade_usd,
+                    error_summary=reason,
+                    strategy=_strategy,
+                )
+            else:
+                # Non-swap engine error — fall back to the generic notifier
+                await self.telegram.notify_error(
+                    str(e), f"Signal: {signal.signal_type.value} {signal.symbol}"
+                )
             return result
 
     # Well-known Solana token mints
