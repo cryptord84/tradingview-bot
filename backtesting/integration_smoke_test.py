@@ -440,6 +440,67 @@ async def test_calibrator_integrity() -> list[TestResult]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Test 5: Sizing tier assertions
+# ─────────────────────────────────────────────────────────────────────────────
+# Known slots and their expected size_pct at trading time. Mix of auto-tier
+# passers (combined PF clears the threshold) and manual promotions (size
+# justified by OOS_PF that combined PF underweights). If any slot returns a
+# different size_pct, either the auto-tier shifted or the override file was
+# wiped — both are actionable.
+#
+# To add a new known slot: append (strategy_label, symbol, timeframe, expected_pct).
+# Strategy label matches what Pine writes into webhook.strategy (e.g.
+# "Stoch RSI v1.0", not "Stoch RSI"). get_sizing_override normalizes both.
+_EXPECTED_TIERS = [
+    # FARTCOIN — both strategies hit A on combined PF alone (high-PF auto-passers)
+    ("Stoch RSI v1.0",      "FARTCOINUSDT.P",  "4H", 18.0),  # PF 4.79 → A auto
+    ("VWAP Deviation v1.0", "FARTCOINUSDT.P",  "4H", 18.0),  # PF 4.18 → A auto
+    # Manual promotions — preserve `source: manual_promotion` across nightly regens
+    ("VWAP Deviation v1.0", "MOODENGUSDT",     "4H", 18.0),  # PF 2.13 → A manual (OOS 4.94)
+    ("Stoch RSI v1.0",      "OPUSDT",          "1D", 18.0),  # PF 2.03 → A manual (OOS 3.87) — added 2026-05-12
+    ("VWAP Deviation v1.0", "JUPUSDT",         "4H", 18.0),  # PF 2.51 → A manual (OOS 4.14) — added 2026-05-12
+    ("VWAP Deviation v1.0", "LDOUSDT",         "1D", 13.0),  # PF 1.96 → B manual (OOS 2.22) — added 2026-05-12
+    ("VWAP Deviation v1.0", "PNUTUSDT",        "4H", 13.0),  # PF 1.52 → B manual (OOS 2.21)
+    # Auto-tier sanity baselines — should sit at C (9%) on combined PF alone
+    ("Stoch RSI v1.0",      "ARBUSDT",         "1D", 9.0),   # PF 1.59 → C auto
+    ("Donchian Breakout v1.0", "DOGEUSDT",     "1D", 9.0),   # PF 1.78 → C auto
+]
+
+
+async def test_tier_assertions() -> list[TestResult]:
+    """Each known slot must return its expected size_pct from get_sizing_override.
+
+    Catches the failure mode where a nightly regen accidentally drops a manual
+    promotion, OR a high-PF combined auto-passer slips below its threshold and
+    silently demotes itself.
+    """
+    from app.services.trade_engine import get_sizing_override
+    results: list[TestResult] = []
+
+    for strat, sym, tf, expected_pct in _EXPECTED_TIERS:
+        slot = get_sizing_override(strat, sym, tf)
+        if slot is None:
+            results.append(TestResult(
+                f"tier[{strat}/{sym}/{tf}]", False,
+                f"override missing entirely — expected size_pct={expected_pct}",
+            ))
+            continue
+        got = slot.get("size_pct")
+        if got != expected_pct:
+            results.append(TestResult(
+                f"tier[{strat}/{sym}/{tf}]", False,
+                f"size_pct={got}, expected={expected_pct}; "
+                f"tier={slot.get('tier')} source={slot.get('source')}",
+            ))
+        else:
+            results.append(TestResult(
+                f"tier[{strat}/{sym}/{tf}]", True,
+                f"{slot.get('tier')}={got}% (source={slot.get('source')})",
+            ))
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Runner
 # ─────────────────────────────────────────────────────────────────────────────
 def _print_results(group: str, results: list[TestResult]):
@@ -508,6 +569,16 @@ async def main():
     except Exception as e:
         msg = f"calibrator harness raised: {e}"
         all_results.append(TestResult("calibrator", False, msg))
+        print(f"  ✗ {msg}")
+
+    # Test 5 — tier assertions
+    try:
+        r5 = await test_tier_assertions()
+        _print_results("Sizing tier assertions", r5)
+        all_results.extend(r5)
+    except Exception as e:
+        msg = f"tier_assertions harness raised: {e}"
+        all_results.append(TestResult("tier_assertions", False, msg))
         print(f"  ✗ {msg}")
 
     # Summary
