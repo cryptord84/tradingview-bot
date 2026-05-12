@@ -679,11 +679,49 @@ class TradeEngine:
                 except Exception as e:
                     logger.warning(f"Binance.US balance fetch failed: {e}")
 
-            total_usd = usdc_balance + kamino_usdc + sol_usd_value + binance_usdt
-            # Tradeable USDC = wallet USDC + Kamino + (Binance if routing there), minus reserve
+            # EVM lane funds — only fetched when the trade is actually going to
+            # Arbitrum so we don't pay RPC roundtrips on every Solana signal.
+            # Aave V3 USDC counts as tradeable since the executor will JIT auto-
+            # withdraw before the swap if wallet USDC is short.
+            # Bug fix 2026-05-12 LDO: sizing previously omitted EVM lane funds
+            # entirely, so an EVM signal arriving right after a Solana BUY drained
+            # the shared sizing pool to $0 → swap_quote called with amount=0.
+            evm_usdc = 0.0
+            evm_aave_usdc = 0.0
+            evm_reserve = 0.0
+            if self._is_evm_symbol(token_symbol):
+                try:
+                    evm_w = self._get_evm_wallet()
+                    evm_usdc = await evm_w.get_usdc_balance()
+                except Exception as e:
+                    logger.warning(f"EVM USDC balance fetch failed: {e}")
+                try:
+                    from app.services.aave_v3_client import AaveV3Client
+                    aave = AaveV3Client()
+                    if aave.enabled:
+                        evm_aave_usdc = await aave.get_supply_balance() or 0.0
+                except Exception as e:
+                    logger.warning(f"Aave V3 supply balance fetch failed: {e}")
+                evm_reserve = float(get("aave_v3", "reserve_usdc", 0.0) or 0.0)
+
+            total_usd = (
+                usdc_balance + kamino_usdc + sol_usd_value
+                + binance_usdt + evm_usdc + evm_aave_usdc
+            )
+
+            # Tradeable USDC is LANE-ISOLATED: a trade can only spend funds on
+            # its own execution lane. Pre-fix this unioned Solana + Binance into
+            # one pool, which silently undersized cross-lane trades when one
+            # lane was depleted by a recent fill. Now each lane sizes against
+            # its own pool minus its reserve.
             kamino_cfg = get("kamino") or {}
             usdc_reserve = kamino_cfg.get("reserve_usdc", 0.0)
-            tradeable_usd = max(0, usdc_balance + kamino_usdc + binance_usdt - usdc_reserve)
+            if self._is_evm_symbol(token_symbol):
+                tradeable_usd = max(0.0, evm_usdc + evm_aave_usdc - evm_reserve)
+            elif self._is_binance_symbol(token_symbol):
+                tradeable_usd = max(0.0, binance_usdt)
+            else:
+                tradeable_usd = max(0.0, usdc_balance + kamino_usdc - usdc_reserve)
 
             # Get actual token price (use Jupiter price lookup, fall back to signal estimate)
             if token_symbol == "SOL":
