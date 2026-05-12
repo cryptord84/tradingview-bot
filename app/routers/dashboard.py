@@ -148,12 +148,18 @@ async def get_evm_balance():
         # USD valuation for held tokens — best-effort via price_feed (Solana feed
         # may have wrapped versions of some EVM tokens, e.g. RENDER, JTO).
         # Tokens without prices show as 0 USD value but their amounts still display.
+        #
+        # EVM symbol aliases: ARBITRUM_TOKENS uses chain-native names (WETH for
+        # wrapped ETH) while price_feed is keyed on Binance.US symbols (ETH).
+        # Without the alias, WETH holdings showed price_usd=0 on the dashboard.
+        _EVM_PRICE_ALIAS = {"WETH": "ETH"}
         try:
             feed = get_price_feed()
             if feed.is_running:
                 all_prices = feed.get_all_prices()
                 for sym, info in out["token_holdings"].items():
-                    p = (all_prices.get(sym) or {}).get("price", 0.0)
+                    price_key = _EVM_PRICE_ALIAS.get(sym, sym)
+                    p = (all_prices.get(price_key) or {}).get("price", 0.0)
                     if p > 0:
                         info["price_usd"] = p
                         info["usd_value"] = info["amount"] * p
@@ -793,8 +799,12 @@ async def get_wallet_tokens():
                     "chain": "arbitrum",
                 }
                 evm_chain_map["ETH"] = "arbitrum"
+            # ARBITRUM_TOKENS uses chain-native names (WETH for wrapped ETH);
+            # price_feed is keyed on Binance.US symbols (ETH). Alias for lookup.
+            _EVM_PRICE_ALIAS = {"WETH": "ETH"}
             for sym, amt in evm_holdings.items():
-                price = (token_prices.get(sym) or {}).get("price", 0.0)
+                price_key = _EVM_PRICE_ALIAS.get(sym, sym)
+                price = (token_prices.get(price_key) or {}).get("price", 0.0)
                 # If symbol already exists from Solana, prefer the larger holding
                 # but keep the EVM one with a different key suffix to avoid collisions.
                 # For now, EVM-only symbols (INJ, ARB, LDO, etc.) won't collide.

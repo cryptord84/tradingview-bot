@@ -8,7 +8,7 @@ strategy_token_tf_sizes:
   Donchian:
     BTC:
       1D:
-        pf: 2.38
+        pf: 2.39
         size_pct: 13.0
         source: main
         tier: B

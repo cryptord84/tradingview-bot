@@ -79,9 +79,17 @@ _tg_handler = None
 
 
 async def _kalshi_positions_sync_loop():
-    """Periodically sync live Kalshi positions into the kalshi_positions table."""
+    """Periodically sync Kalshi positions + settlements into the DB.
+
+    Two API paths because positions and settlements live in different state:
+    - get_positions() carries currently-open + recently-closed (with non-zero
+      realized_pnl) tickers. GCs them shortly after they fully settle.
+    - get_settlements() keeps a rolling window of historical settlements,
+      including tickers already dropped from get_positions(). This is what
+      captures full overnight realized P&L for crypto_strikes.
+    """
     from app.services.kalshi_client import get_async_kalshi_client
-    from app.database import sync_kalshi_positions
+    from app.database import sync_kalshi_positions, sync_kalshi_settlements
 
     client = get_async_kalshi_client()
     if not (client.enabled and client.api_key_id):
@@ -92,13 +100,28 @@ async def _kalshi_positions_sync_loop():
     while True:
         try:
             positions = await client.get_positions()
-            result = sync_kalshi_positions(positions or [])
+            pos_result = sync_kalshi_positions(positions or [])
             logger.debug(
-                f"Kalshi positions sync: {result.get('inserted', 0)}/"
-                f"{result.get('total', 0)} rows"
+                f"Kalshi positions sync: {pos_result.get('inserted', 0)} open, "
+                f"{pos_result.get('closed_new', 0)} new closed, "
+                f"{pos_result.get('closed_updated', 0)} closed-updates "
+                f"(total {pos_result.get('total', 0)})"
             )
         except Exception as e:
             logger.warning(f"Kalshi positions sync failed: {e}")
+
+        try:
+            settlements = await client.get_settlements(limit=100)
+            set_result = sync_kalshi_settlements(settlements or [])
+            if set_result.get("inserted", 0) > 0:
+                logger.info(
+                    f"Kalshi settlements sync: {set_result.get('inserted', 0)} new "
+                    f"closed rows (skipped {set_result.get('skipped', 0)} already-recorded, "
+                    f"{set_result.get('no_holdings', 0)} no-holdings)"
+                )
+        except Exception as e:
+            logger.warning(f"Kalshi settlements sync failed: {e}")
+
         await asyncio.sleep(120)
 
 

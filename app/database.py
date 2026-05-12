@@ -1331,6 +1331,106 @@ def sync_kalshi_positions(positions: list[dict]) -> dict:
     }
 
 
+def sync_kalshi_settlements(settlements: list[dict]) -> dict:
+    """Upsert settlement records from Kalshi's /portfolio/settlements endpoint.
+
+    Necessary complement to sync_kalshi_positions because Kalshi's
+    get_positions() garbage-collects tickers once they fully settle and
+    drain from the account. If sync runs even a few minutes late we lose
+    the realized P&L. The /settlements endpoint keeps a window of history
+    we can reconcile against.
+
+    Each settlement record: {ticker, revenue, settled_time}.
+    - revenue == 0 → NO side won (we held YES, so payout = 0)
+    - revenue > 0  → YES side won (per-contract value in cents; reconciled
+      against cash flow on 2026-05-12 — multi-contract holdings produced
+      cash deltas matching `revenue * held_count`).
+
+    Cost basis is derived from kalshi_trades buys minus sells for the ticker.
+
+    Idempotent — skips tickers that already have a closed kalshi_positions
+    row, so re-running can't double-count.
+    """
+    if not settlements:
+        return {"inserted": 0, "skipped": 0, "no_holdings": 0, "total": 0}
+
+    conn = get_db()
+    inserted = 0
+    skipped = 0
+    no_holdings = 0
+
+    for s in settlements:
+        try:
+            ticker = s.get("ticker", "") or ""
+            if not ticker:
+                continue
+            revenue_per_contract = int(s.get("revenue", 0) or 0)
+            settled_time = s.get("settled_time")
+            if hasattr(settled_time, "isoformat"):
+                settled_iso = settled_time.isoformat()
+            else:
+                settled_iso = str(settled_time or "")
+
+            # Skip if we've already recorded this ticker's closure
+            existing = conn.execute(
+                "SELECT id FROM kalshi_positions WHERE ticker = ? AND status = 'closed' LIMIT 1",
+                (ticker,),
+            ).fetchone()
+            if existing:
+                skipped += 1
+                continue
+
+            # Cost basis from kalshi_trades (sum BUYs, subtract SELLs)
+            buys = conn.execute(
+                "SELECT COALESCE(SUM(count), 0) AS qty, COALESCE(SUM(total_cost_cents), 0) AS cost "
+                "FROM kalshi_trades WHERE ticker = ? AND action = 'buy'",
+                (ticker,),
+            ).fetchone()
+            sells = conn.execute(
+                "SELECT COALESCE(SUM(count), 0) AS qty, COALESCE(SUM(total_cost_cents), 0) AS rev "
+                "FROM kalshi_trades WHERE ticker = ? AND action = 'sell'",
+                (ticker,),
+            ).fetchone()
+
+            buy_qty = int(buys["qty"] or 0)
+            buy_cost = int(buys["cost"] or 0)
+            sell_qty = int(sells["qty"] or 0)
+            sell_rev = int(sells["rev"] or 0)
+
+            held_at_settle = buy_qty - sell_qty
+            if held_at_settle <= 0:
+                # No outstanding contracts at settlement (likely manually
+                # closed before settle, or trades not logged) — skip rather
+                # than fabricate a P&L row.
+                no_holdings += 1
+                continue
+
+            net_cost = buy_cost - sell_rev
+            payout_cents = revenue_per_contract * held_at_settle
+            pnl_cents = payout_cents - net_cost
+            avg_price = int(round(buy_cost / buy_qty)) if buy_qty > 0 else 0
+
+            conn.execute(
+                """INSERT INTO kalshi_positions
+                (opened_at, closed_at, ticker, event_ticker, title, side, count,
+                 avg_price_cents, invested_cents, pnl_cents, settled_payout_cents,
+                 status, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (settled_iso, settled_iso, ticker, "", "", "yes", held_at_settle,
+                 avg_price, net_cost, pnl_cents, payout_cents,
+                 "closed", "settlement_api"),
+            )
+            inserted += 1
+        except Exception as e:
+            logger.debug(f"Settlement sync error for {ticker}: {e}")
+            continue
+
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "skipped": skipped,
+            "no_holdings": no_holdings, "total": len(settlements)}
+
+
 def get_kalshi_stats() -> dict:
     """Get aggregated Kalshi trading stats."""
     conn = get_db()

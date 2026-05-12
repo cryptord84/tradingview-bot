@@ -111,6 +111,23 @@ class PositionMonitor:
                 )
                 continue
 
+            # Sanity gate: reject prices wildly off from entry. Lesson 2026-05-11
+            # PENGU #177: Jupiter returned outAmount corresponding to $39.75 for
+            # 1 PENGU (entry $0.0103) — 3800× off — fake-fired TP and we closed
+            # for -0.5%. Real market moves rarely exceed 10× entry intraday;
+            # anything bigger is almost certainly a feed glitch. Skip and retry
+            # next cycle. False-negative cost: one cycle of unmonitored TP/SL.
+            # False-positive cost: fake-fired exit at the actual swap price.
+            entry = pos.get("entry_price") or 0
+            if entry > 0 and (current_price > entry * 10 or current_price < entry * 0.1):
+                logger.warning(
+                    f"Position #{pos['id']} {token_symbol}: rejected price "
+                    f"${current_price:.6f} as out-of-band vs entry ${entry:.6f} "
+                    f"(ratio {current_price/entry:.2f}x). Skipping this cycle — "
+                    f"feed glitch suspected."
+                )
+                continue
+
             logger.debug(
                 f"Position #{pos['id']} {token_symbol} @ ${current_price:.6f} "
                 f"(TP=${pos['tp_price']:.6f} SL=${pos['sl_price']:.6f})"
