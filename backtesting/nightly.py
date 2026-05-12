@@ -347,6 +347,16 @@ def write_sizing_overrides(passing: list, htf: bool = False) -> None:
             continue
         tier, size_pct = tier_info
         prior = merged.get(r.strategy, {}).get(r.token, {}).get(r.timeframe)
+        # Preserve manual promotions — these are intentional overrides based on
+        # OOS_PF strength or other factors that combined PF doesn't capture.
+        # Auto-tier shouldn't silently overwrite them just because a later
+        # nightly produces a higher combined PF.
+        if prior and prior.get("source") == "manual_promotion":
+            # Still refresh the PF field so we can track how the slot is doing,
+            # but keep the manual tier + size_pct intact.
+            if pf > prior.get("pf", 0):
+                prior["pf"] = round(pf, 2)
+            continue
         if prior and prior.get("pf", 0) >= pf:
             continue  # existing entry has better/equal PF — keep it
         merged.setdefault(r.strategy, {}).setdefault(r.token, {})[r.timeframe] = {
