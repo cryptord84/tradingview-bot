@@ -504,6 +504,14 @@ class TradeEngine:
     # The value is the Binance.US trading symbol (USDT-quoted by default).
     BINANCE_TOKENS = {
         "FLOKI": "FLOKIUSDT",
+        # 2026-05-12: BTC/DOGE/OP have deployed 1D alerts (Donchian, Stoch RSI)
+        # but were absent from this registry — a BUY signal would have routed
+        # to Solana → JupiterClient.get_token_price → "Unknown token" → silent
+        # drop. Caught by the integration smoke test before any real fire.
+        # All three are listed on Binance.US with healthy market depth.
+        "BTC":   "BTCUSDT",
+        "DOGE":  "DOGEUSDT",
+        "OP":    "OPUSDT",
     }
 
     def _is_evm_symbol(self, symbol: str) -> bool:
@@ -1071,8 +1079,18 @@ class TradeEngine:
             if self._is_evm_symbol(token_symbol):
                 target_mint = None  # not used on EVM path
             else:
-                # Withdraw from Kamino if needed (auto-withdraw before trade)
-                if self.kamino.enabled and self.kamino.auto_withdraw and kamino_usdc > 0:
+                # Withdraw from Kamino if needed (auto-withdraw before trade).
+                # GATE on not-dry_run: synthetic preflight signals would otherwise
+                # broadcast a real on-chain withdraw_all every time the smoke test
+                # ran, draining Kamino and racing subsequent sizing fetches.
+                # (Caught 2026-05-12 when PENGU preflight reported tradeable=$0
+                # because SOL preflight 60s earlier had withdrawn the full pool.)
+                if (
+                    self.kamino.enabled
+                    and self.kamino.auto_withdraw
+                    and kamino_usdc > 0
+                    and not getattr(signal, "dry_run", False)
+                ):
                     try:
                         logger.info(f"Withdrawing {kamino_usdc:.2f} USDC from Kamino before trade")
                         withdraw_result = await self.kamino.withdraw_all(self.wallet.get_keypair())
