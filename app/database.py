@@ -202,6 +202,26 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_kalshi_trades_ts ON kalshi_trades(timestamp);
         CREATE INDEX IF NOT EXISTS idx_kalshi_positions_status ON kalshi_positions(status);
 
+        -- Whale flow capture (2026-05-12). Whale tracker has been scanning
+        -- Kalshi fills for weeks but only logging to bot.log. Persisting now
+        -- so we can backtest "whale-aware crypto_strikes gate" hypothesis at
+        -- the 2026-05-19 Stage 1 retro.
+        CREATE TABLE IF NOT EXISTS kalshi_whales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,                 -- Kalshi trade timestamp (created_time)
+            ticker TEXT NOT NULL,             -- e.g. KXBTCD-26MAY1216-T80499.99
+            event_ticker TEXT,                -- e.g. KXBTCD-26MAY1216
+            side TEXT NOT NULL,               -- 'yes' or 'no'
+            count INTEGER NOT NULL,
+            price_cents INTEGER NOT NULL,
+            cost_cents INTEGER NOT NULL,
+            trade_id TEXT NOT NULL UNIQUE,    -- dedup on re-scan
+            detected_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_kalshi_whales_ts ON kalshi_whales(ts);
+        CREATE INDEX IF NOT EXISTS idx_kalshi_whales_event_ts ON kalshi_whales(event_ticker, ts);
+        CREATE INDEX IF NOT EXISTS idx_kalshi_whales_ticker_ts ON kalshi_whales(ticker, ts);
+
         CREATE TABLE IF NOT EXISTS paper_trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT NOT NULL,
@@ -1329,6 +1349,42 @@ def sync_kalshi_positions(positions: list[dict]) -> dict:
         "closed_updated": closed_updated,
         "total": len(positions),
     }
+
+
+def insert_kalshi_whale(whale: dict) -> bool:
+    """Persist a detected whale trade. Returns True if a new row was inserted,
+    False if it was a duplicate (dedupe on trade_id). Silent on DB errors so
+    the live whale tracker keeps scanning even if persistence breaks.
+
+    Expected fields: ts, ticker, event_ticker, side, count, price_cents,
+    cost_cents, trade_id. Caller supplies detected_at or it defaults to now.
+    """
+    try:
+        conn = get_db()
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO kalshi_whales
+            (ts, ticker, event_ticker, side, count, price_cents, cost_cents,
+             trade_id, detected_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(whale.get("ts", "")),
+                whale["ticker"],
+                whale.get("event_ticker", ""),
+                whale["side"],
+                int(whale.get("count", 0) or 0),
+                int(whale.get("price_cents", 0) or 0),
+                int(whale.get("cost_cents", 0) or 0),
+                whale["trade_id"],
+                whale.get("detected_at", datetime.utcnow().isoformat()),
+            ),
+        )
+        inserted = cur.rowcount > 0
+        conn.commit()
+        conn.close()
+        return inserted
+    except Exception as e:
+        logger.debug(f"insert_kalshi_whale failed: {e}")
+        return False
 
 
 def sync_kalshi_settlements(settlements: list[dict]) -> dict:

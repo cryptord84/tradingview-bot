@@ -136,6 +136,27 @@ class KalshiWhaleTracker:
                     logger.info(
                         f"WHALE: {count}x {side.upper()} @{price_cents}c = ${cost_cents/100:.2f} on {ticker}"
                     )
+                    # Persist for the 2026-05-19 whale-gate retro. event_ticker
+                    # = ticker stripped of the strike suffix (e.g. T80499.99) so
+                    # we can aggregate flow within an event family.
+                    try:
+                        from app.database import insert_kalshi_whale
+                        event_ticker = ticker
+                        if "-T" in ticker:
+                            event_ticker = ticker.rsplit("-T", 1)[0]
+                        insert_kalshi_whale({
+                            "ts": str(t.get("created_time", "")),
+                            "ticker": ticker,
+                            "event_ticker": event_ticker,
+                            "side": side,
+                            "count": count,
+                            "price_cents": price_cents,
+                            "cost_cents": cost_cents,
+                            "trade_id": str(trade_id),
+                            "detected_at": whale.detected_at,
+                        })
+                    except Exception:
+                        pass
 
                 self._seen_trade_ids.add(trade_id)
 
