@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import get
-from app.database import insert_kalshi_trade
+from app.database import insert_kalshi_trade, get_whale_flow_by_ticker
 from app.services.kalshi_client import AsyncKalshiClient, get_async_kalshi_client
 from app.services.kalshi_crypto_strikes import (
     ScoredMarket, ewma_realized_vol, fetch_binance_hourly_closes,
@@ -79,6 +79,15 @@ class KalshiCryptoStrikesBot:
         # probs (for debugging or A/B).
         self.use_calibrator = strikes_cfg.get("use_calibrator", True)
 
+        wf = strikes_cfg.get("whale_follow", {})
+        self.whale_follow_enabled = wf.get("enabled", False)
+        self.whale_follow_lookback_min = wf.get("lookback_minutes", 120)
+        self.whale_follow_min_yes_contracts = wf.get("min_yes_contracts", 100)
+        self.whale_follow_max_price_cents = wf.get("max_price_cents", 40)
+        self.whale_follow_min_yes_ratio = wf.get("min_yes_ratio", 0.70)
+        self.whale_follow_contracts = wf.get("contracts_per_follow", 1)
+        self._whale_followed_tickers: set[str] = set()
+
         self._scan_task: Optional[asyncio.Task] = None
         self._running = False
         self._scan_count = 0
@@ -106,11 +115,12 @@ class KalshiCryptoStrikesBot:
         self._running = True
         self._scan_task = asyncio.create_task(self._scan_loop())
         mode = "DRY-RUN" if self.dry_run else "LIVE"
+        wf_status = f"whale_follow={'ON' if self.whale_follow_enabled else 'OFF'}"
         logger.info(
             f"Kalshi crypto strikes bot started [{mode}] "
             f"series={self.series} interval={self.scan_interval}s "
             f"min_edge={self.min_edge_cents}c min_fair_prob={self.min_fair_prob:.2f} "
-            f"kelly={self.kelly_fraction:.2f}"
+            f"kelly={self.kelly_fraction:.2f} {wf_status}"
         )
         return self._scan_task
 
@@ -286,6 +296,79 @@ class KalshiCryptoStrikesBot:
                 if not self.dry_run:
                     self._bot_held_tickers.add(s.ticker)
                 slots_left -= 1
+
+        await self._whale_follow_scan(client, held, balance_cents)
+
+    async def _whale_follow_scan(self, client: AsyncKalshiClient, held_tickers: set[str], balance_cents: int):
+        """Check DB for recent heavy whale YES flow on cheap strikes and follow with 1 contract."""
+        if not self.whale_follow_enabled:
+            return
+
+        series_prefixes = [s.replace("KX", "") for s in self.series]
+        prefixes = [f"KX{p}" for p in series_prefixes]
+        flows = get_whale_flow_by_ticker(prefixes, self.whale_follow_lookback_min)
+        if not flows:
+            return
+
+        for f in flows:
+            ticker = f["ticker"]
+            if ticker in held_tickers or ticker in self._whale_followed_tickers:
+                continue
+
+            yes_c = f["yes_contracts"] or 0
+            no_c = f["no_contracts"] or 0
+            total = yes_c + no_c
+            if total == 0 or yes_c < self.whale_follow_min_yes_contracts:
+                continue
+            yes_ratio = yes_c / total
+            if yes_ratio < self.whale_follow_min_yes_ratio:
+                continue
+            avg_price = int(f["avg_yes_price_cents"] or 99)
+            if avg_price > self.whale_follow_max_price_cents:
+                continue
+
+            cost = avg_price * self.whale_follow_contracts
+            if not self.dry_run and cost > balance_cents:
+                continue
+
+            logger.info(
+                f"WHALE-FOLLOW: {ticker} — {yes_c} YES contracts ({yes_ratio:.0%}) "
+                f"avg {avg_price}c in last {self.whale_follow_lookback_min}min"
+            )
+
+            if self.dry_run:
+                self._dry_run_signals += 1
+                logger.info(f"[DRY-RUN] WOULD WHALE-FOLLOW BUY {self.whale_follow_contracts}× {ticker} @ ~{avg_price}c")
+                continue
+
+            try:
+                result = await client.buy_yes(ticker, avg_price, self.whale_follow_contracts)
+                order = result.get("order", {}) if isinstance(result, dict) else {}
+                self._trades_placed += 1
+                self._bot_held_tickers.add(ticker)
+                self._whale_followed_tickers.add(ticker)
+                insert_kalshi_trade({
+                    "order_id": order.get("order_id", ""),
+                    "ticker": ticker,
+                    "title": ticker,
+                    "side": "yes",
+                    "action": "buy",
+                    "count": self.whale_follow_contracts,
+                    "price_cents": avg_price,
+                    "total_cost_cents": cost,
+                    "status": order.get("status", "placed"),
+                    "notes": (
+                        f"Whale-follow: {yes_c} YES/{no_c} NO contracts, "
+                        f"ratio={yes_ratio:.2f}, avg_price={avg_price}c"
+                    ),
+                })
+                balance_cents -= cost
+            except Exception as e:
+                logger.error(f"Whale-follow order failed for {ticker}: {e}")
+
+        stale = self._whale_followed_tickers - held_tickers
+        if stale:
+            self._whale_followed_tickers -= stale
 
     async def _scan_loop(self):
         while self._running:

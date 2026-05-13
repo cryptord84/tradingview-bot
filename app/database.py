@@ -1562,6 +1562,39 @@ def insert_kalshi_whale(whale: dict) -> bool:
         return False
 
 
+def get_whale_flow_by_ticker(series_prefixes: list[str], lookback_minutes: int = 120) -> list[dict]:
+    """Aggregate recent whale flow per ticker for whale-follow signals.
+
+    Returns rows sorted by total YES contracts descending:
+    [{ticker, event_ticker, yes_contracts, no_contracts, yes_cost_cents,
+      no_cost_cents, avg_yes_price_cents, trade_count}]
+    """
+    try:
+        conn = get_db()
+        placeholders = " OR ".join(f"ticker LIKE ?" for _ in series_prefixes)
+        like_args = [f"{p}%" for p in series_prefixes]
+        rows = conn.execute(
+            f"""SELECT ticker, event_ticker,
+                SUM(CASE WHEN side='yes' THEN count ELSE 0 END) as yes_contracts,
+                SUM(CASE WHEN side='no'  THEN count ELSE 0 END) as no_contracts,
+                SUM(CASE WHEN side='yes' THEN cost_cents ELSE 0 END) as yes_cost_cents,
+                SUM(CASE WHEN side='no'  THEN cost_cents ELSE 0 END) as no_cost_cents,
+                AVG(CASE WHEN side='yes' THEN price_cents END) as avg_yes_price_cents,
+                COUNT(*) as trade_count
+            FROM kalshi_whales
+            WHERE ({placeholders})
+              AND detected_at >= datetime('now', ?)
+            GROUP BY ticker
+            ORDER BY yes_contracts DESC""",
+            (*like_args, f"-{lookback_minutes} minutes"),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.debug(f"get_whale_flow_by_ticker failed: {e}")
+        return []
+
+
 def sync_kalshi_settlements(settlements: list[dict]) -> dict:
     """Upsert settlement records from Kalshi's /portfolio/settlements endpoint.
 
