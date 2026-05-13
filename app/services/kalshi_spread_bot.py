@@ -125,6 +125,12 @@ class KalshiSpreadBot:
         self.max_days_to_close = spread_cfg.get("max_days_to_close", 0)
         self.telegram_alerts = spread_cfg.get("telegram_alerts", True)
         self.target_tickers = spread_cfg.get("target_tickers", [])
+        # Series whitelist (2026-05-13 Stage 1 tightening). When non-empty,
+        # auto-select restricts to markets whose ticker starts with one of these
+        # prefixes — kills the sports/MLB-style markets that bled $5+ overnight
+        # since we have zero edge in info-asymmetric venues. Empty = current
+        # behavior (broad auto-select with LOW_EDGE_PREFIXES exclusion only).
+        self.series_whitelist = tuple(spread_cfg.get("series_whitelist", []) or [])
         # Exit rules for unpaired inventory (added 2026-04-27)
         self.take_profit_cents = spread_cfg.get("take_profit_cents", 88)
         self.stop_loss_cents = spread_cfg.get("stop_loss_cents", 15)
@@ -364,6 +370,10 @@ class KalshiSpreadBot:
 
             # Category filtering (ticker prefix + title keyword)
             ticker = m.get("ticker", "")
+            # Whitelist gate: when configured, ONLY allow listed series prefixes.
+            # Overrides everything below — strict scope control.
+            if self.series_whitelist and not ticker.startswith(self.series_whitelist):
+                continue
             if ticker.startswith(self.LOW_EDGE_PREFIXES):
                 continue
             title = (m.get("title", "") + " " + m.get("subtitle", "")).lower()
