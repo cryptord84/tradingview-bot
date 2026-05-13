@@ -183,7 +183,7 @@ strategy_token_tf_overrides:
         atr_tp_mult: 2.0
     JUP:
       4H:
-        atr_sl_mult: 1.0
+        atr_sl_mult: 2.0
         atr_tp_mult: 5.0
     PENGU:
       1H:

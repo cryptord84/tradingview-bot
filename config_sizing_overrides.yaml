@@ -14,16 +14,19 @@ strategy_token_tf_sizes:
         tier: B
     DOGE:
       1D:
-        pf: 1.78
+        pf: 1.86
         size_pct: 9.0
         source: main
         tier: C
     ETH:
       1D:
+        note: "2026-05-13 promoted C→B. Combined PF 1.89 just under B threshold\
+          \ (2.0), but OOS_PF 2.66 on 30 trades with Ret 172% justifies the bump.\
+          \ Reverse if OOS_PF degrades below 1.5."
         pf: 1.89
-        size_pct: 9.0
-        source: main
-        tier: C
+        size_pct: 13.0
+        source: manual_promotion
+        tier: B
     RENDER:
       4H:
         pf: 1.81
@@ -39,7 +42,7 @@ strategy_token_tf_sizes:
   EMA Ribbon:
     SOL:
       1D:
-        pf: 1.85
+        pf: 1.87
         size_pct: 9.0
         source: main
         tier: C
@@ -94,9 +97,9 @@ strategy_token_tf_sizes:
         tier: A
     OP:
       1D:
-        note: 2026-05-12 promoted B→A. Combined PF 2.03 holds auto-tier at B,
-          but OOS_PF 3.87 (Ret 273% on 46 trades) makes this a high-conviction
-          slot. Reverse if OOS_PF degrades below 2.0 in a future nightly.
+        note: "2026-05-12 promoted B\u2192A. Combined PF 2.03 holds auto-tier at B,\
+          \ but OOS_PF 3.87 (Ret 273% on 46 trades) makes this a high-conviction slot.\
+          \ Reverse if OOS_PF degrades below 2.0 in a future nightly."
         pf: 2.03
         size_pct: 18.0
         source: manual_promotion
@@ -116,19 +119,19 @@ strategy_token_tf_sizes:
         tier: A
     JUP:
       4H:
-        note: 2026-05-12 promoted B→A. Combined PF 2.51 falls short of A
-          threshold (3.0), but OOS_PF 4.14 over 59 trades (Ret 252%) is the
-          deepest sample in the EVM-passer roster. Reverse if OOS_PF degrades
-          below 2.0 in a future nightly.
+        note: "2026-05-12 promoted B\u2192A. Combined PF 2.51 falls short of A threshold\
+          \ (3.0), but OOS_PF 4.14 over 59 trades (Ret 252%) is the deepest sample\
+          \ in the EVM-passer roster. Reverse if OOS_PF degrades below 2.0 in a future\
+          \ nightly."
         pf: 2.51
         size_pct: 18.0
         source: manual_promotion
         tier: A
     LDO:
       1D:
-        note: 2026-05-12 promoted C→B. Combined PF 1.96 sits just under B
-          threshold (2.0), but OOS_PF 2.22 with 43 trades and Ret 131%
-          justifies the bump. Reverse if OOS_PF degrades below 1.5.
+        note: "2026-05-12 promoted C\u2192B. Combined PF 1.96 sits just under B threshold\
+          \ (2.0), but OOS_PF 2.22 with 43 trades and Ret 131% justifies the bump.\
+          \ Reverse if OOS_PF degrades below 1.5."
         pf: 1.96
         size_pct: 13.0
         source: manual_promotion
