@@ -558,7 +558,7 @@ class PositionMonitor:
 
         telegram = TelegramService()
         try:
-            secret = cfg_get("webhook_secret")
+            secret = cfg_get("webhook", "secret", "")
             signal = WebhookSignal(
                 secret=secret,
                 signal_type=SignalType.BUY,
