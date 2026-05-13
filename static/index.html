@@ -1046,7 +1046,7 @@ footer a:hover { color: var(--green); }
     <div style="overflow-x:auto;max-height:150px;overflow-y:auto;">
       <table id="positions-table">
         <thead style="position:sticky;top:0;background:#000500;"><tr>
-          <th>Symbol</th><th>Strategy</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
+          <th>Symbol</th><th>Opened</th><th>Strategy</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
         </tr></thead>
         <tbody id="positions-tbody"></tbody>
       </table>
@@ -1062,7 +1062,7 @@ footer a:hover { color: var(--green); }
       <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
         <table id="positions-history-table" style="display:none;">
           <thead style="position:sticky;top:0;background:#000500;"><tr>
-            <th>Symbol</th><th>Strategy</th><th>Closed At</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Status</th><th>Duration</th><th>Re-Entry Target</th><th>Buyback Progress</th><th>Time Left</th>
+            <th>Symbol</th><th>Closed At</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Status</th><th>Duration</th><th>Re-Entry Target</th><th>Current</th><th>Buyback Progress</th><th>Time Left</th>
           </tr></thead>
           <tbody id="positions-history-tbody"></tbody>
         </table>
@@ -3094,8 +3094,14 @@ async function loadPositions() {
         const posCost = p.amount_usdc ? '$' + p.amount_usdc.toFixed(2) : '$' + (posQty * p.entry_price).toFixed(2);
         const fmtPrice = (v) => v < 1 ? '$' + v.toFixed(4) : '$' + v.toFixed(2);
         const stratLabel = p.strategy || p.timeframe || '--';
+        let openedStr = '--';
+        if (p.created_at) {
+          const od = new Date(p.created_at);
+          openedStr = (od.getMonth()+1) + '/' + od.getDate() + ' ' + od.getHours().toString().padStart(2,'0') + ':' + od.getMinutes().toString().padStart(2,'0');
+        }
         const cells = [
           p.symbol,
+          openedStr,
           stratLabel,
           fmtPrice(p.entry_price),
           fmtPrice(currentPrice),
@@ -3185,7 +3191,7 @@ async function loadPositions() {
           const cd = new Date(p.closed_at);
           closedStr = (cd.getMonth()+1) + '/' + cd.getDate() + ' ' + cd.getHours().toString().padStart(2,'0') + ':' + cd.getMinutes().toString().padStart(2,'0');
         }
-        [p.symbol, hStratLabel, closedStr, fmtP(p.entry_price), fmtP(p.exit_price || 0)].forEach(text => {
+        [p.symbol, closedStr, hStratLabel, fmtP(p.entry_price), fmtP(p.exit_price || 0)].forEach(text => {
           const td = document.createElement('td');
           td.textContent = text;
           tr.appendChild(td);
@@ -3208,12 +3214,21 @@ async function loadPositions() {
         // Re-entry watch columns
         const w = p.reentry_watch;
         const targetTd = document.createElement('td');
+        const curPriceTd = document.createElement('td');
         const progTd = document.createElement('td');
         const timeTd = document.createElement('td');
 
         if (w) {
           targetTd.textContent = fmtP(w.target_price);
           targetTd.style.color = '#00e5ff';
+
+          if (w.current_price) {
+            curPriceTd.textContent = fmtP(w.current_price);
+            curPriceTd.style.color = w.current_price <= w.target_price ? '#00ff41' : 'var(--green-dim)';
+          } else {
+            curPriceTd.textContent = '--';
+            curPriceTd.style.color = 'var(--green-dark)';
+          }
 
           if (w.status === 'active') {
             const pct = w.progress_pct || 0;
@@ -3244,6 +3259,8 @@ async function loadPositions() {
         } else {
           targetTd.textContent = '--';
           targetTd.style.color = 'var(--green-dark)';
+          curPriceTd.textContent = '--';
+          curPriceTd.style.color = 'var(--green-dark)';
           progTd.textContent = '--';
           progTd.style.color = 'var(--green-dark)';
           timeTd.textContent = '--';
@@ -3251,6 +3268,7 @@ async function loadPositions() {
         }
 
         tr.appendChild(targetTd);
+        tr.appendChild(curPriceTd);
         tr.appendChild(progTd);
         tr.appendChild(timeTd);
 
