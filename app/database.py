@@ -269,6 +269,26 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_portfolio_snap_ts ON portfolio_snapshots(timestamp);
 
+        CREATE TABLE IF NOT EXISTS reentry_watches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            strategy TEXT NOT NULL DEFAULT '',
+            timeframe TEXT NOT NULL DEFAULT '',
+            sl_exit_price REAL NOT NULL,
+            target_price REAL NOT NULL,
+            sl_distance REAL NOT NULL,
+            atr REAL,
+            sizing_pct REAL,
+            expires_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            triggered_at TEXT,
+            position_id INTEGER,
+            source_position_id INTEGER,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_reentry_status ON reentry_watches(status);
+
         """)
     # Migration: add trail_sl_price column if not exists
     try:
@@ -852,6 +872,76 @@ def close_position(
     )
     conn.commit()
     conn.close()
+
+
+def insert_reentry_watch(watch: dict) -> int:
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO reentry_watches
+        (created_at, symbol, strategy, timeframe, sl_exit_price, target_price,
+         sl_distance, atr, sizing_pct, expires_at, status, source_position_id, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+        (
+            datetime.utcnow().isoformat(),
+            watch["symbol"],
+            watch.get("strategy", ""),
+            watch.get("timeframe", ""),
+            watch["sl_exit_price"],
+            watch["target_price"],
+            watch["sl_distance"],
+            watch.get("atr"),
+            watch.get("sizing_pct"),
+            watch["expires_at"],
+            watch.get("source_position_id"),
+            watch.get("notes", ""),
+        ),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def get_active_reentry_watches() -> list[dict]:
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT * FROM reentry_watches
+        WHERE status = 'active'
+        ORDER BY created_at"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_reentry_watch(watch_id: int, status: str, **kwargs) -> None:
+    conn = get_db()
+    sets = ["status = ?"]
+    vals = [status]
+    if status == "triggered":
+        sets.append("triggered_at = ?")
+        vals.append(datetime.utcnow().isoformat())
+    if "position_id" in kwargs:
+        sets.append("position_id = ?")
+        vals.append(kwargs["position_id"])
+    vals.append(watch_id)
+    conn.execute(
+        f"UPDATE reentry_watches SET {', '.join(sets)} WHERE id = ?", vals
+    )
+    conn.commit()
+    conn.close()
+
+
+def expire_stale_reentry_watches() -> int:
+    conn = get_db()
+    now = datetime.utcnow().isoformat()
+    cur = conn.execute(
+        "UPDATE reentry_watches SET status = 'expired' WHERE status = 'active' AND expires_at < ?",
+        (now,),
+    )
+    conn.commit()
+    count = cur.rowcount
+    conn.close()
+    return count
 
 
 def get_position_analytics() -> dict:

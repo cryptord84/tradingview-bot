@@ -12,6 +12,10 @@ from app.database import (
     insert_trade,
     log_wallet_tx,
     update_trail_sl,
+    insert_reentry_watch,
+    get_active_reentry_watches,
+    update_reentry_watch,
+    expire_stale_reentry_watches,
     TradeReason,
 )
 
@@ -52,6 +56,13 @@ class PositionMonitor:
         self.trail_activation_atr = trail_cfg.get("activation_atr", 1.5)
         self.trail_offset_atr = trail_cfg.get("offset_atr", 1.0)
 
+        # Re-entry watch config: after SL, set a buy target at 1.0x SL-distance
+        # below exit. If price reaches it within expiry_hours, fire a new BUY.
+        reentry_cfg = cfg.get("reentry") or {}
+        self.reentry_enabled = reentry_cfg.get("enabled", False)
+        self.reentry_sl_distance_mult = reentry_cfg.get("sl_distance_mult", 1.0)
+        self.reentry_expiry_hours = reentry_cfg.get("expiry_hours", 24)
+
         self._running = False
         self._task: Optional[asyncio.Task] = None
 
@@ -78,6 +89,8 @@ class PositionMonitor:
         while self._running:
             try:
                 await self._check_positions()
+                if self.reentry_enabled:
+                    await self._check_reentry_watches()
             except Exception as e:
                 logger.error(f"Position monitor error: {e}")
             await asyncio.sleep(self.poll_interval)
@@ -438,6 +451,9 @@ class PositionMonitor:
                 f"${pnl_usdc:+.2f} ({pnl_percent:+.1f}%)"
             )
 
+            if self.reentry_enabled and trigger == "sl":
+                self._create_reentry_watch(pos, actual_exit_price)
+
             # Auto-deposit idle USDC to Kamino
             kamino = KaminoClient()
             if kamino.enabled and kamino.auto_deposit:
@@ -461,6 +477,123 @@ class PositionMonitor:
             await wallet.close()
             if own_jupiter:
                 await jupiter.close()
+
+    def _create_reentry_watch(self, pos: dict, exit_price: float):
+        """Create a re-entry watch after an SL close.
+
+        Target price = exit_price - (sl_distance_mult × SL distance).
+        SL distance = entry_price - sl_price (the original stop range).
+        """
+        from datetime import timedelta
+
+        entry = pos.get("entry_price", 0)
+        sl = pos.get("sl_price", 0)
+        sl_distance = abs(entry - sl)
+        if sl_distance <= 0:
+            return
+
+        target_price = exit_price - (self.reentry_sl_distance_mult * sl_distance)
+        if target_price <= 0:
+            return
+
+        expires = datetime.utcnow() + timedelta(hours=self.reentry_expiry_hours)
+
+        watch_id = insert_reentry_watch({
+            "symbol": pos["symbol"],
+            "strategy": pos.get("strategy", ""),
+            "timeframe": pos.get("timeframe", ""),
+            "sl_exit_price": exit_price,
+            "target_price": target_price,
+            "sl_distance": sl_distance,
+            "atr": pos.get("atr"),
+            "sizing_pct": None,
+            "expires_at": expires.isoformat(),
+            "source_position_id": pos["id"],
+            "notes": (
+                f"Re-entry: SL exit ${exit_price:.6f} - "
+                f"{self.reentry_sl_distance_mult}x SL-dist ${sl_distance:.6f} "
+                f"= target ${target_price:.6f}"
+            ),
+        })
+        logger.info(
+            f"Re-entry watch #{watch_id} created for {pos['symbol']}: "
+            f"target ${target_price:.6f} (SL exit ${exit_price:.6f} "
+            f"- {self.reentry_sl_distance_mult}x ${sl_distance:.6f}), "
+            f"expires {expires.strftime('%Y-%m-%d %H:%M')}"
+        )
+
+    async def _check_reentry_watches(self):
+        """Check active re-entry watches and fire BUY signals when triggered."""
+        expired = expire_stale_reentry_watches()
+        if expired:
+            logger.info(f"Expired {expired} stale re-entry watch(es)")
+
+        watches = get_active_reentry_watches()
+        if not watches:
+            return
+
+        from app.services.price_router import get_monitor_price
+
+        for watch in watches:
+            token_symbol = (watch["symbol"] or "").upper()\
+                .replace("USDT", "").replace("USD", "").replace(".P", "")
+
+            current_price = await get_monitor_price(token_symbol)
+            if current_price is None or current_price <= 0:
+                continue
+
+            if current_price <= watch["target_price"]:
+                logger.info(
+                    f"Re-entry watch #{watch['id']} TRIGGERED: {watch['symbol']} "
+                    f"${current_price:.6f} <= target ${watch['target_price']:.6f}"
+                )
+                await self._fire_reentry(watch, current_price)
+
+    async def _fire_reentry(self, watch: dict, current_price: float):
+        """Fire a synthetic BUY signal for a triggered re-entry watch."""
+        from app.models import WebhookSignal, SignalType
+        from app.services.trade_engine import TradeEngine
+        from app.services.telegram_service import TelegramService
+        from app.config import get as cfg_get
+
+        telegram = TelegramService()
+        try:
+            secret = cfg_get("webhook_secret")
+            signal = WebhookSignal(
+                secret=secret,
+                signal_type=SignalType.BUY,
+                symbol=watch["symbol"],
+                entry_price_estimate=current_price,
+                confidence_score=65,
+                suggested_leverage=1,
+                suggested_position_size_percent=watch.get("sizing_pct") or 9.0,
+                atr=watch.get("atr"),
+                timeframe=watch.get("timeframe"),
+                strategy=watch.get("strategy"),
+            )
+
+            engine = TradeEngine()
+            try:
+                await engine.process_signal(signal, source_ip="reentry_watch")
+                update_reentry_watch(watch["id"], "triggered")
+                await telegram.send_message(
+                    f"<b>🔄 Re-entry BUY triggered</b>\n\n"
+                    f"Symbol: {watch['symbol']}\n"
+                    f"Price: ${current_price:.6f}\n"
+                    f"Original SL exit: ${watch['sl_exit_price']:.6f}\n"
+                    f"Dip: {(watch['sl_exit_price'] - current_price) / watch['sl_exit_price'] * 100:.1f}%\n"
+                    f"Watch #{watch['id']} (source position #{watch['source_position_id']})"
+                )
+            except Exception as e:
+                logger.error(f"Re-entry watch #{watch['id']} fire failed: {e}")
+                update_reentry_watch(watch["id"], "failed")
+                await telegram.send_message(
+                    f"❌ Re-entry BUY failed for {watch['symbol']}: {str(e)[:100]}"
+                )
+            finally:
+                await engine.shutdown()
+        finally:
+            await telegram.close()
 
     async def _close_position_evm(
         self, pos: dict, current_price: float, trigger: str, token_symbol: str,
@@ -596,6 +729,9 @@ class PositionMonitor:
                 f"EVM position #{pos['id']} closed via {trigger}: "
                 f"P&L=${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)"
             )
+
+            if self.reentry_enabled and trigger == "sl":
+                self._create_reentry_watch(pos, current_price)
 
             # Auto-deposit recovered USDC to Aave V3 (mirrors Kamino's hook
             # in the Solana close path). Wallet just gained ~exit_value USDC;
@@ -743,6 +879,9 @@ class PositionMonitor:
                 f"Binance.US position #{pos['id']} closed via {trigger}: "
                 f"P&L=${pnl_usdc:+.2f} ({pnl_percent:+.2f}%)"
             )
+
+            if self.reentry_enabled and trigger == "sl":
+                self._create_reentry_watch(pos, avg_fill_price)
 
         finally:
             await telegram.close()
