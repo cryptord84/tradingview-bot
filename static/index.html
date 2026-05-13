@@ -390,6 +390,7 @@ main {
 .card-donut { grid-column: span 1; }
 
 /* ── TRADES TABLE ── */
+.card-signals { grid-column: 1 / -1; }
 .card-trades { grid-column: 1 / -1; }
 .card-wallet-log { grid-column: 1 / -1; }
 .card-scout { grid-column: 1 / -1; }
@@ -654,7 +655,7 @@ footer a:hover { color: var(--green); }
 
 @media (max-width: 900px) {
   main { grid-template-columns: 1fr; padding: 16px; }
-  .card-wallet,.card-status,.card-chart,.card-donut,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-indicators,.card-backtests,.card-stratlab,.card-kalshi,.card-settings,.card-costs,.card-prices { grid-column: 1; }
+  .card-wallet,.card-status,.card-chart,.card-donut,.card-signals,.card-trades,.card-wallet-log,.card-scout,.card-positions,.card-analytics,.card-indicators,.card-backtests,.card-stratlab,.card-kalshi,.card-settings,.card-costs,.card-prices { grid-column: 1; }
   .kalshi-stats-grid { grid-template-columns: repeat(3, 1fr); }
   .analytics-grid { grid-template-columns: repeat(2, 1fr); }
   .analytics-charts { grid-template-columns: 1fr; }
