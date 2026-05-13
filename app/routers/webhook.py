@@ -74,12 +74,22 @@ async def receive_webhook(request: Request):
         + (f" strategy={signal.strategy}" if signal.strategy else "")
     )
 
+    # Persist the signal IMMEDIATELY with disposition='received'. The engine
+    # updates the disposition column to the terminal state once processing
+    # finishes (executed / skipped_* / rejected_* / dropped_* / failed_*).
+    # Pre-2026-05-13 this INSERT happened inside process_signal, so signals
+    # that were skipped before reaching the engine (max_positions, etc.)
+    # never appeared in the DB — invisible to the dashboard.
+    from app.database import log_signal
+    source_ip = request.client.host or ""
+    signal.signal_log_id = log_signal(signal.model_dump_json(), source_ip)
+
     # Enqueue signal for background processing — return immediately so
     # TradingView doesn't get a timeout error (~3s limit)
     from app.services.trade_engine import get_signal_queue
 
     queue = get_signal_queue()
-    asyncio.create_task(queue.enqueue(signal, source_ip=request.client.host or ""))
+    asyncio.create_task(queue.enqueue(signal, source_ip=source_ip))
 
     return {
         "status": "queued",

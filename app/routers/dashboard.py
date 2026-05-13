@@ -2,6 +2,7 @@
 
 import logging
 import shutil
+from typing import Optional
 from pathlib import Path
 
 import httpx
@@ -9,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot, get_recent_signals
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
@@ -1092,6 +1093,50 @@ async def get_trade_history(limit: int = 100, offset: int = 0):
     """Get trade history."""
     trades = get_trades(limit=min(limit, 500), offset=offset)
     return {"trades": trades, "total": len(trades)}
+
+
+@router.get("/signals/recent")
+async def get_signal_history(limit: int = 50, since: Optional[str] = None):
+    """Every TradingView webhook the bot received, with its terminal
+    disposition (executed / skipped_* / rejected_* / dropped_* / failed_*).
+
+    Closes the audit-trail gap where signals skipped by max_positions,
+    correlation, or CLOSE filter never appeared in the dashboard. The
+    Signal Activity panel renders this — one row per webhook, color-coded
+    by disposition, with the reason text.
+    """
+    import json as _json
+    rows = get_recent_signals(limit=min(limit, 500), since=since)
+    out = []
+    for r in rows:
+        # Parse the payload for symbol/signal_type/strategy so the UI doesn't
+        # have to re-parse JSON in every row.
+        sig_type = "?"
+        symbol = "?"
+        strategy = ""
+        try:
+            payload = _json.loads(r.get("raw_payload") or "{}")
+            sig_type = payload.get("signal_type", "?")
+            symbol = payload.get("symbol", "?")
+            strategy = payload.get("strategy", "") or ""
+        except Exception:
+            pass
+        out.append({
+            "id": r["id"],
+            "timestamp": r["timestamp"],
+            "signal_type": sig_type,
+            "symbol": symbol,
+            "strategy": strategy,
+            "disposition": r.get("disposition") or "received",
+            "disposition_reason": r.get("disposition_reason") or "",
+            "disposition_at": r.get("disposition_at"),
+            "trade_id": r.get("trade_id"),
+            # Enrichment from linked trade row when executed
+            "trade_amount_usd": r.get("trade_amount_usd"),
+            "trade_price_usd": r.get("trade_price_usd"),
+            "trade_pnl_usd": r.get("trade_pnl_usd"),
+        })
+    return {"signals": out, "total": len(out)}
 
 
 @router.get("/trades/today")

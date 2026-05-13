@@ -12,7 +12,7 @@ from typing import Optional
 import yaml
 
 from app.config import get
-from app.database import insert_trade, get_stats, log_signal, insert_position, get_position_count, get_open_position_for_signal, get_open_positions, TradeReason
+from app.database import insert_trade, get_stats, log_signal, update_signal_disposition, insert_position, get_position_count, get_open_position_for_signal, get_open_positions, TradeReason
 from app.models import WebhookSignal, ClaudeDecision, ClaudeResponse
 from app.services.claude_decision import get_claude_decision
 from app.services.jupiter_client import JupiterClient
@@ -340,6 +340,10 @@ class SignalQueue:
                         f"Skipping {signal.symbol} (conf:{signal.confidence_score}) — "
                         f"max positions reached after higher-priority trades"
                     )
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_max_positions",
+                        reason=f"{open_count}/{max_positions} open positions cap reached",
+                    )
                     await engine.telegram.send_message(
                         f"Signal Queue: SKIPPED {signal.symbol} {signal.timeframe or ''} "
                         f"(conf:{signal.confidence_score}) — max positions reached"
@@ -348,6 +352,10 @@ class SignalQueue:
                     logger.warning(
                         f"Skipping {signal.symbol} — correlation cap ({corr['group']} "
                         f"{len(corr['held'])}/{corr['limit']})"
+                    )
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_correlation",
+                        reason=f"{corr['group']} cap {len(corr['held'])}/{corr['limit']} (held: {','.join(corr['held'][:3])})",
                     )
                     await engine.telegram.send_message(
                         f"Signal Queue: SKIPPED {signal.symbol} — correlation cap "
@@ -582,8 +590,12 @@ class TradeEngine:
             # Strategy name from indicator webhook (e.g. "FVG v1.0")
             strategy_label = signal.strategy or ""
 
-            # 1. Log raw signal
-            log_signal(signal.model_dump_json(), source_ip)
+            # 1. Persist signal — webhook handler already INSERTed signals_log
+            # with disposition='received' (2026-05-13 audit-trail fix). For
+            # programmatic invocations (no webhook origin), fall back to
+            # log_signal here so we still capture the event.
+            if not getattr(signal, "signal_log_id", None):
+                signal.signal_log_id = log_signal(signal.model_dump_json(), source_ip)
 
             # 1a. Blanket CLOSE filter — webhook.ignore_close_signals is the
             # tier-0 drop. Audit 2026-05-10 showed indicator CLOSEs closed
@@ -600,12 +612,20 @@ class TradeEngine:
                     f"exits handled by TP/SL/trail in position_monitor"
                 )
                 result["status"] = "close_ignored_by_config"
+                update_signal_disposition(
+                    signal.signal_log_id, "dropped_close_filter",
+                    reason="CLOSE signals ignored — exits via TP/SL/trail only",
+                )
                 return result
 
             # 2. Check duplicate
             if self.is_duplicate(signal):
                 result["status"] = "duplicate"
                 result["error"] = "Duplicate signal ignored"
+                update_signal_disposition(
+                    signal.signal_log_id, "skipped_dedup",
+                    reason="duplicate signal within dedup window",
+                )
                 return result
 
             # 2.5. Correlation cap — block BUYs that would stack same-group exposure
@@ -763,6 +783,10 @@ class TradeEngine:
                     "strategy": strategy_label,
                     "reason": TradeReason.LOW_BALANCE,
                 })
+                update_signal_disposition(
+                    signal.signal_log_id, "rejected_low_balance",
+                    reason=f"total ${total_usd:.2f} < threshold ${low_bal_usd:.2f}",
+                )
                 return result
 
             # 6. Build risk params
@@ -825,6 +849,11 @@ class TradeEngine:
                     "strategy": strategy_label,
                     "reason": TradeReason.CLAUDE_REJECT,
                 })
+                _reject_reason = (claude_resp.reasoning or "no reason given")[:160]
+                update_signal_disposition(
+                    signal.signal_log_id, "rejected_claude",
+                    reason=f"Claude REJECT (risk={claude_resp.risk_score}): {_reject_reason}",
+                )
                 return result
 
             # Determine trade parameters.
@@ -1129,6 +1158,10 @@ class TradeEngine:
                     f"DRY-RUN pass: {signal.signal_type.value} {token_symbol} "
                     f"lane={result['lane']} tradeable=${tradeable_usd:.2f} "
                     f"trade=${trade_usd:.2f}"
+                )
+                update_signal_disposition(
+                    signal.signal_log_id, "dry_run_pass",
+                    reason=f"preflight {result['lane']} tradeable=${tradeable_usd:.2f} trade=${trade_usd:.2f}",
                 )
                 return result
 
@@ -1465,6 +1498,21 @@ class TradeEngine:
                 except Exception as e:
                     logger.warning(f"Aave auto-deposit after trade failed: {e}")
 
+            # Final disposition write — runs on every successful return after
+            # a swap executes. Audit trail link to the trades row via trade_id
+            # (not always available; insert_trade doesn't bubble id back today
+            # so we leave it null and rely on the timestamp/symbol/side
+            # correlation for now). reason captures swap result summary.
+            if result.get("status") == "executed":
+                _disp_reason = (
+                    f"{result.get('chain', '?')}/${locals().get('trade_usd', 0):.2f} "
+                    f"@ ${locals().get('token_price', 0):.4f} → "
+                    f"{(result.get('tx_signature') or '')[:18]}"
+                )
+                update_signal_disposition(
+                    signal.signal_log_id, "executed", reason=_disp_reason,
+                )
+
             return result
 
         except Exception as e:
@@ -1533,10 +1581,18 @@ class TradeEngine:
                     error_summary=reason,
                     strategy=_strategy,
                 )
+                update_signal_disposition(
+                    signal.signal_log_id, "failed_swap",
+                    reason=f"swap rejected: {reason[:200]}",
+                )
             else:
                 # Non-swap engine error — fall back to the generic notifier
                 await self.telegram.notify_error(
                     str(e), f"Signal: {signal.signal_type.value} {signal.symbol}"
+                )
+                update_signal_disposition(
+                    signal.signal_log_id, "failed_engine_error",
+                    reason=str(e)[:200],
                 )
             return result
 

@@ -32,6 +32,11 @@ class WebhookSignal(BaseModel):
     # swap broadcast. Used by backtesting/webhook_preflight.py to catch
     # UnboundLocalError-class bugs without spending real money.
     dry_run: Optional[bool] = False
+    # 2026-05-13 audit-trail: signals_log row id assigned by the webhook
+    # handler immediately on receive. Used downstream to update disposition
+    # at each exit point (executed/skipped_*/rejected_*/dropped_*/failed_*).
+    # None = signal not from a webhook (e.g., direct programmatic call).
+    signal_log_id: Optional[int] = None
 
 
 class ClaudeDecision(str, Enum):

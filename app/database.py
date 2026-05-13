@@ -63,7 +63,15 @@ def init_db():
             timestamp TEXT NOT NULL,
             raw_payload TEXT NOT NULL,
             source_ip TEXT,
-            processed INTEGER DEFAULT 0
+            processed INTEGER DEFAULT 0,
+            -- Disposition fields added 2026-05-13. Every webhook arrival is
+            -- logged immediately with disposition='received'; engine updates
+            -- to the terminal state when it finishes processing. Closes the
+            -- audit-trail gap where skipped/dropped signals were invisible.
+            disposition TEXT,                -- received|executed|skipped_*|rejected_*|dropped_*|failed_*
+            disposition_reason TEXT,         -- short human-readable explanation
+            disposition_at TEXT,             -- when the terminal state was set
+            trade_id INTEGER                 -- FK trades.id when disposition=executed
         );
 
         CREATE TABLE IF NOT EXISTS daily_summary (
@@ -289,6 +297,16 @@ def init_db():
     except Exception:
         conn.execute("ALTER TABLE trades ADD COLUMN reason TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_reason ON trades(reason)")
+    # Migration: add disposition fields to signals_log (2026-05-13 audit trail fix)
+    try:
+        conn.execute("SELECT disposition FROM signals_log LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE signals_log ADD COLUMN disposition TEXT")
+        conn.execute("ALTER TABLE signals_log ADD COLUMN disposition_reason TEXT")
+        conn.execute("ALTER TABLE signals_log ADD COLUMN disposition_at TEXT")
+        conn.execute("ALTER TABLE signals_log ADD COLUMN trade_id INTEGER")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_disposition ON signals_log(disposition)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_ts ON signals_log(timestamp)")
     # Migration: add suggested_leverage and run_id columns to backtests
     try:
         conn.execute("SELECT suggested_leverage FROM backtests LIMIT 1")
@@ -339,14 +357,81 @@ def insert_trade(trade: dict) -> int:
     return row_id
 
 
-def log_signal(payload: str, source_ip: str = ""):
+def log_signal(payload: str, source_ip: str = "") -> int:
+    """Insert a webhook signal row with disposition='received'. Returns the
+    new row id so the engine can update the disposition once processing
+    completes.
+
+    Audit-trail rule (2026-05-13): every webhook the bot receives gets a
+    signals_log row, regardless of whether it executes, gets skipped, or
+    fails. The disposition column carries the terminal state."""
     conn = get_db()
-    conn.execute(
-        "INSERT INTO signals_log (timestamp, raw_payload, source_ip) VALUES (?, ?, ?)",
-        (datetime.utcnow().isoformat(), payload, source_ip),
+    now = datetime.utcnow().isoformat()
+    cur = conn.execute(
+        """INSERT INTO signals_log (timestamp, raw_payload, source_ip,
+            disposition, disposition_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (now, payload, source_ip, "received", now),
     )
+    row_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return row_id
+
+
+def update_signal_disposition(signal_log_id: Optional[int], disposition: str,
+                               reason: Optional[str] = None,
+                               trade_id: Optional[int] = None) -> None:
+    """Set the terminal state of a signals_log row. No-op when id is None
+    (e.g., when the engine is invoked programmatically without a webhook
+    origin). Silent on DB errors so engine flow isn't disrupted by audit
+    writes."""
+    if not signal_log_id:
+        return
+    try:
+        conn = get_db()
+        conn.execute(
+            """UPDATE signals_log
+               SET disposition = ?, disposition_reason = ?,
+                   disposition_at = ?, trade_id = ?,
+                   processed = 1
+               WHERE id = ?""",
+            (disposition, reason, datetime.utcnow().isoformat(),
+             trade_id, signal_log_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"update_signal_disposition failed for id={signal_log_id}: {e}")
+
+
+def get_recent_signals(limit: int = 50,
+                        since: Optional[str] = None) -> list[dict]:
+    """Return recent signals_log rows newest-first, enriched with the linked
+    trade summary when disposition=executed. Used by the dashboard Signal
+    Activity panel."""
+    conn = get_db()
+    args: list = []
+    where = "1=1"
+    if since:
+        where += " AND s.timestamp >= ?"
+        args.append(since)
+    args.append(limit)
+    rows = conn.execute(
+        f"""SELECT s.id, s.timestamp, s.raw_payload, s.disposition,
+                  s.disposition_reason, s.disposition_at, s.trade_id,
+                  t.symbol AS trade_symbol, t.action AS trade_action,
+                  t.amount_usd AS trade_amount_usd, t.price_usd AS trade_price_usd,
+                  t.pnl_usd AS trade_pnl_usd
+           FROM signals_log s
+           LEFT JOIN trades t ON t.id = s.trade_id
+           WHERE {where}
+           ORDER BY s.timestamp DESC
+           LIMIT ?""",
+        args,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_trades(limit: int = 100, offset: int = 0) -> list[dict]:

@@ -1093,6 +1093,34 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <!-- SIGNAL ACTIVITY — every webhook the bot received, with its outcome -->
+  <div class="card card-signals" data-label="// SIGNAL ACTIVITY">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Webhook Disposition Log</span>
+      <span style="display:flex;gap:10px;align-items:center;">
+        <span id="signal-summary" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:1px;">--</span>
+        <button onclick="loadSignals()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+      </span>
+    </div>
+    <div style="overflow-x:auto;max-height:240px;overflow-y:auto;">
+      <table>
+        <thead style="position:sticky;top:0;background:#000500;">
+          <tr>
+            <th>Timestamp</th>
+            <th>Strategy</th>
+            <th>Type</th>
+            <th>Symbol</th>
+            <th>Disposition</th>
+            <th>Why</th>
+            <th>Trade $</th>
+            <th>P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody id="signals-table"></tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- TRADE HISTORY -->
   <div class="card card-trades" data-label="// TRADE LOG">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -2692,6 +2720,83 @@ async function toggleBot() {
     botActive = d.active !== undefined ? d.active : !botActive;
     updateBotUI(botActive);
   } catch(e) { console.error('Toggle error:', e); }
+}
+
+// ── SIGNAL ACTIVITY (every webhook + disposition) ──
+// Maps disposition codes to display labels + colors. New codes? Add a row.
+const _DISPO_STYLES = {
+  'executed':              { label: 'EXECUTED',           color: 'var(--green)',     bg: 'rgba(0,255,65,0.08)' },
+  'dry_run_pass':          { label: 'DRY-RUN PASS',       color: '#7cb9ff',          bg: 'rgba(124,185,255,0.10)' },
+  'received':              { label: 'RECEIVED (PENDING)', color: 'var(--yellow)',    bg: 'rgba(255,200,0,0.08)' },
+  'skipped_max_positions': { label: 'SKIP — max positions', color: 'var(--yellow)',  bg: 'rgba(255,200,0,0.08)' },
+  'skipped_correlation':   { label: 'SKIP — correlation', color: 'var(--yellow)',    bg: 'rgba(255,200,0,0.08)' },
+  'skipped_dedup':         { label: 'SKIP — duplicate',   color: 'var(--green-dim)', bg: 'rgba(60,60,60,0.10)' },
+  'dropped_close_filter':  { label: 'DROP — CLOSE filter',color: 'var(--green-dim)', bg: 'rgba(60,60,60,0.10)' },
+  'rejected_low_balance':  { label: 'REJECT — low bal',   color: 'var(--red)',       bg: 'rgba(255,60,60,0.10)' },
+  'rejected_claude':       { label: 'REJECT — Claude',    color: 'var(--red)',       bg: 'rgba(255,60,60,0.10)' },
+  'failed_swap':           { label: 'FAIL — swap',        color: 'var(--red)',       bg: 'rgba(255,60,60,0.10)' },
+  'failed_engine_error':   { label: 'FAIL — engine err',  color: 'var(--red)',       bg: 'rgba(255,60,60,0.10)' },
+};
+
+async function loadSignals() {
+  try {
+    const r = await fetch(`${API}/api/signals/recent?limit=50`);
+    const d = await r.json();
+    const tbody = document.getElementById('signals-table');
+    if (!tbody) return;
+    tbody.textContent = '';
+    const counts = {};
+    (d.signals || []).forEach(s => {
+      counts[s.disposition] = (counts[s.disposition] || 0) + 1;
+      const sty = _DISPO_STYLES[s.disposition] || { label: s.disposition || '?', color: 'var(--green-dim)', bg: 'transparent' };
+      const tr = document.createElement('tr');
+      tr.style.background = sty.bg;
+      tr.appendChild(createCell(fmtEst(s.timestamp), 'dim'));
+      const stratCell = createCell(s.strategy || '--');
+      stratCell.style.color = 'var(--yellow)';
+      stratCell.style.fontSize = '.6rem';
+      tr.appendChild(stratCell);
+      const typeCell = createCell(s.signal_type);
+      typeCell.style.color = s.signal_type === 'BUY' ? 'var(--green)'
+                            : s.signal_type === 'SELL' ? 'var(--red)' : 'var(--yellow)';
+      typeCell.style.fontWeight = '700';
+      tr.appendChild(typeCell);
+      const symCell = createCell(s.symbol);
+      symCell.style.fontWeight = '600';
+      tr.appendChild(symCell);
+      const dispoCell = createCell(sty.label);
+      dispoCell.style.color = sty.color;
+      dispoCell.style.fontWeight = '700';
+      dispoCell.style.fontSize = '.6rem';
+      tr.appendChild(dispoCell);
+      const reasonCell = createCell(s.disposition_reason || '');
+      reasonCell.style.color = 'var(--green-dim)';
+      reasonCell.style.fontSize = '.55rem';
+      reasonCell.style.maxWidth = '320px';
+      reasonCell.style.overflow = 'hidden';
+      reasonCell.style.textOverflow = 'ellipsis';
+      reasonCell.title = s.disposition_reason || '';
+      tr.appendChild(reasonCell);
+      tr.appendChild(createCell(s.trade_amount_usd != null ? '$' + Number(s.trade_amount_usd).toFixed(2) : '--', 'dim'));
+      const pnlVal = s.trade_pnl_usd;
+      const pnlCell = createCell(pnlVal != null ? fmtSignedUsd(pnlVal) : '--');
+      if (pnlVal != null) pnlCell.style.color = pnlVal >= 0 ? 'var(--green)' : 'var(--red)';
+      tr.appendChild(pnlCell);
+      tbody.appendChild(tr);
+    });
+    // Summary chip
+    const sumEl = document.getElementById('signal-summary');
+    if (sumEl) {
+      const total = (d.signals || []).length;
+      const ex = counts['executed'] || 0;
+      const skipped = (counts['skipped_max_positions'] || 0) + (counts['skipped_correlation'] || 0) + (counts['skipped_dedup'] || 0);
+      const dropped = counts['dropped_close_filter'] || 0;
+      const failed = (counts['failed_swap'] || 0) + (counts['failed_engine_error'] || 0);
+      sumEl.textContent = `${total} total · ${ex} executed · ${skipped} skipped · ${dropped} dropped · ${failed} failed`;
+    }
+  } catch (e) {
+    console.error('loadSignals failed', e);
+  }
 }
 
 // ── TRADES ──
@@ -6171,6 +6276,7 @@ setInterval(loadPriceFeedStatus, 30000);  // 30s — catches WS staleness within
 setInterval(loadAaveStatus, 60000);       // refresh APY/balance every minute
 loadStats();
 loadTrades();
+loadSignals();
 loadWalletTxLog();
 loadScout();
 loadPositions();
@@ -6203,6 +6309,7 @@ loadMonitorAlerts();
 
 setInterval(loadStats, 15000);
 setInterval(loadTrades, 60000);
+setInterval(loadSignals, 30000);  // signal activity refreshes faster than trades
 setInterval(loadWalletTxLog, 120000);
 setInterval(loadPositions, 15000);
 setInterval(loadAnalytics, 120000);
