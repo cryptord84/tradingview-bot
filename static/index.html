@@ -1037,6 +1037,39 @@ footer a:hover { color: var(--green); }
   </div>
 
 
+  <!-- POSITIONS: TP/SL TRACKING -->
+  <div class="card card-positions" data-label="// OPEN POSITIONS">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Position Monitor</span>
+      <span id="positions-count" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">0 open</span>
+    </div>
+    <div style="overflow-x:auto;max-height:150px;overflow-y:auto;">
+      <table id="positions-table">
+        <thead style="position:sticky;top:0;background:#000500;"><tr>
+          <th>Symbol</th><th>Strategy</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
+        </tr></thead>
+        <tbody id="positions-tbody"></tbody>
+      </table>
+    </div>
+    <div id="positions-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
+      No open positions. Positions are created when BUY signals execute with ATR data.
+    </div>
+    <div id="positions-history" style="margin-top:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">CLOSED POSITIONS</span>
+        <span id="closed-count" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">0 closed</span>
+      </div>
+      <div style="overflow-x:auto;max-height:200px;overflow-y:auto;">
+        <table id="positions-history-table" style="display:none;">
+          <thead style="position:sticky;top:0;background:#000500;"><tr>
+            <th>Symbol</th><th>Strategy</th><th>Closed At</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Status</th><th>Duration</th><th>Re-Entry Target</th><th>Buyback Progress</th><th>Time Left</th>
+          </tr></thead>
+          <tbody id="positions-history-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ INDICATOR PERFORMANCE ═══ -->
   <div class="card card-indicators" data-label="// INDICATOR PERFORMANCE" id="indicators-card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
@@ -1593,34 +1626,6 @@ footer a:hover { color: var(--green); }
   <!-- DISTRIBUTION -->
   <div class="card card-donut" data-label="// SIGNAL MIX">
     <canvas id="dist-chart"></canvas>
-  </div>
-
-  <!-- POSITIONS: TP/SL TRACKING -->
-  <div class="card card-positions" data-label="// OPEN POSITIONS">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-      <span class="section-title" style="margin:0">Position Monitor</span>
-      <span id="positions-count" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;">0 open</span>
-    </div>
-    <div style="overflow-x:auto;max-height:150px;overflow-y:auto;">
-      <table id="positions-table">
-        <thead style="position:sticky;top:0;background:#000500;"><tr>
-          <th>Symbol</th><th>Strategy</th><th>Entry</th><th>Current</th><th>TP</th><th>SL</th><th>Size</th><th>P&L</th><th>Progress</th><th>Age</th><th>Action</th>
-        </tr></thead>
-        <tbody id="positions-tbody"></tbody>
-      </table>
-    </div>
-    <div id="positions-empty" style="color:var(--green-dim);padding:20px;text-align:center;font-family:var(--mono);font-size:.72rem;">
-      No open positions. Positions are created when BUY signals execute with ATR data.
-    </div>
-    <div id="positions-history" style="margin-top:16px;">
-      <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;margin-bottom:8px;">RECENT CLOSED</div>
-      <table id="positions-history-table" style="display:none;">
-        <thead><tr>
-          <th>Symbol</th><th>Strategy</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Status</th><th>Duration</th>
-        </tr></thead>
-        <tbody id="positions-history-tbody"></tbody>
-      </table>
-    </div>
   </div>
 
   <!-- PAPER TRADING -->
@@ -3043,12 +3048,12 @@ function escapeHtml(str) {
 
 async function loadPositions() {
   try {
-    const resp = await fetch('/api/positions?status=all&limit=20');
+    const resp = await fetch('/api/positions?status=all&limit=100');
     const data = await resp.json();
     const positions = data.positions || [];
 
     const openPositions = positions.filter(p => p.status === 'open');
-    const closedPositions = positions.filter(p => p.status !== 'open').slice(0, 5);
+    const closedPositions = positions.filter(p => p.status !== 'open');
 
     document.getElementById('positions-count').textContent = openPositions.length + ' open';
 
@@ -3153,6 +3158,7 @@ async function loadPositions() {
     const histTable = document.getElementById('positions-history-table');
     histTbody.innerHTML = '';
 
+    document.getElementById('closed-count').textContent = closedPositions.length + ' closed';
     if (closedPositions.length > 0) {
       histTable.style.display = 'table';
       closedPositions.forEach(p => {
@@ -3172,8 +3178,14 @@ async function loadPositions() {
         }
 
         const tr = document.createElement('tr');
+        const fmtP = (v) => v < 1 ? '$' + v.toFixed(4) : '$' + v.toFixed(2);
         const hStratLabel = p.strategy || p.timeframe || '--';
-        [p.symbol, hStratLabel, '$' + p.entry_price.toFixed(2), '$' + (p.exit_price || 0).toFixed(2)].forEach(text => {
+        let closedStr = '--';
+        if (p.closed_at) {
+          const cd = new Date(p.closed_at);
+          closedStr = (cd.getMonth()+1) + '/' + cd.getDate() + ' ' + cd.getHours().toString().padStart(2,'0') + ':' + cd.getMinutes().toString().padStart(2,'0');
+        }
+        [p.symbol, hStratLabel, closedStr, fmtP(p.entry_price), fmtP(p.exit_price || 0)].forEach(text => {
           const td = document.createElement('td');
           td.textContent = text;
           tr.appendChild(td);
@@ -3192,6 +3204,55 @@ async function loadPositions() {
         const durTd = document.createElement('td');
         durTd.textContent = duration;
         tr.appendChild(durTd);
+
+        // Re-entry watch columns
+        const w = p.reentry_watch;
+        const targetTd = document.createElement('td');
+        const progTd = document.createElement('td');
+        const timeTd = document.createElement('td');
+
+        if (w) {
+          targetTd.textContent = fmtP(w.target_price);
+          targetTd.style.color = '#00e5ff';
+
+          if (w.status === 'active') {
+            const pct = w.progress_pct || 0;
+            const barColor = pct > 75 ? '#00ff41' : pct > 40 ? '#FFD700' : 'var(--green-dim)';
+            progTd.innerHTML = '<div style="display:flex;align-items:center;gap:4px;">' +
+              '<div style="flex:1;height:6px;background:var(--green-dark);border-radius:3px;overflow:hidden;">' +
+              '<div style="width:' + pct.toFixed(0) + '%;height:100%;background:' + barColor + ';"></div></div>' +
+              '<span style="font-size:.55rem;color:' + barColor + ';">' + pct.toFixed(0) + '%</span></div>';
+            const expMs = new Date(w.expires_at) - Date.now();
+            if (expMs > 0) {
+              const expH = Math.floor(expMs / 3600000);
+              const expM = Math.floor((expMs % 3600000) / 60000);
+              timeTd.textContent = expH + 'h ' + expM + 'm';
+              timeTd.style.color = expH < 4 ? '#ff4444' : 'var(--green-dim)';
+            } else {
+              timeTd.textContent = 'expiring';
+              timeTd.style.color = '#ff4444';
+            }
+          } else if (w.status === 'triggered') {
+            progTd.textContent = 'FILLED';
+            progTd.style.color = '#00ff41';
+            timeTd.textContent = '--';
+          } else if (w.status === 'expired') {
+            progTd.textContent = 'EXPIRED';
+            progTd.style.color = 'var(--green-dim)';
+            timeTd.textContent = '--';
+          }
+        } else {
+          targetTd.textContent = '--';
+          targetTd.style.color = 'var(--green-dark)';
+          progTd.textContent = '--';
+          progTd.style.color = 'var(--green-dark)';
+          timeTd.textContent = '--';
+          timeTd.style.color = 'var(--green-dark)';
+        }
+
+        tr.appendChild(targetTd);
+        tr.appendChild(progTd);
+        tr.appendChild(timeTd);
 
         histTbody.appendChild(tr);
       });

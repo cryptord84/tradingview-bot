@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot, get_recent_signals
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot, get_recent_signals, get_reentry_watches_by_position
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
@@ -1816,6 +1816,37 @@ async def get_positions_api(status: str = "all", limit: int = 50):
                 trail_sl = p.get("trail_sl_price") or 0
                 p["effective_sl"] = max(p["sl_price"], trail_sl)
                 p["trail_active"] = trail_sl > p["sl_price"]
+
+    closed_ids = [p["id"] for p in positions if p["status"] != "open"]
+    if closed_ids:
+        watches = get_reentry_watches_by_position(closed_ids)
+        for p in positions:
+            if p["id"] in watches:
+                w = watches[p["id"]]
+                p["reentry_watch"] = {
+                    "id": w["id"],
+                    "target_price": w["target_price"],
+                    "sl_exit_price": w["sl_exit_price"],
+                    "status": w["status"],
+                    "expires_at": w["expires_at"],
+                    "triggered_at": w["triggered_at"],
+                    "created_at": w["created_at"],
+                }
+                if w["status"] == "active":
+                    token_sym = p["symbol"].replace("USDT", "").replace("USD", "")
+                    feed = get_price_feed()
+                    cp = None
+                    if feed.is_running:
+                        all_p = feed.get_all_prices()
+                        if token_sym in all_p:
+                            cp = all_p[token_sym].get("price")
+                    if cp:
+                        p["reentry_watch"]["current_price"] = cp
+                        distance_total = w["sl_exit_price"] - w["target_price"]
+                        distance_remaining = cp - w["target_price"]
+                        p["reentry_watch"]["progress_pct"] = round(
+                            max(0, min(100, (1 - distance_remaining / distance_total) * 100)) if distance_total > 0 else 0, 1
+                        )
 
     return {"positions": positions, "total": len(positions)}
 

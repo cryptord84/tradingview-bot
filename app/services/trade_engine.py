@@ -1371,7 +1371,7 @@ class TradeEngine:
             # Log trade — chain field tells us whether to look up tx on solscan or arbiscan
             chain_label = result.get("chain", "solana")
             trade_notes = f"Price impact: {swap_result.get('price_impact', '?')} | chain={chain_label}"
-            insert_trade({
+            _trade_row_id = insert_trade({
                 "timestamp": datetime.utcnow().isoformat(),
                 "tx_id": swap_result["tx_signature"],
                 "signal_type": signal.signal_type.value,
@@ -1498,11 +1498,6 @@ class TradeEngine:
                 except Exception as e:
                     logger.warning(f"Aave auto-deposit after trade failed: {e}")
 
-            # Final disposition write — runs on every successful return after
-            # a swap executes. Audit trail link to the trades row via trade_id
-            # (not always available; insert_trade doesn't bubble id back today
-            # so we leave it null and rely on the timestamp/symbol/side
-            # correlation for now). reason captures swap result summary.
             if result.get("status") == "executed":
                 _disp_reason = (
                     f"{result.get('chain', '?')}/${locals().get('trade_usd', 0):.2f} "
@@ -1511,6 +1506,7 @@ class TradeEngine:
                 )
                 update_signal_disposition(
                     signal.signal_log_id, "executed", reason=_disp_reason,
+                    trade_id=locals().get("_trade_row_id"),
                 )
 
             return result

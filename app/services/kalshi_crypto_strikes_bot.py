@@ -183,6 +183,7 @@ class KalshiCryptoStrikesBot:
         markets = await client.get_markets_full(
             status="open", limit=200, series_ticker=series,
         )
+        all_tickers = {m.get("ticker", "") for m in markets if m.get("ticker")}
         scored = score_markets(markets, spot, annual_vol, use_calibrator=self.use_calibrator)
 
         if scored:
@@ -201,8 +202,8 @@ class KalshiCryptoStrikesBot:
             f"scored={len(scored)} eligible={len(eligible)}"
         )
         if not eligible:
-            return []
-        return eligible
+            return [], all_tickers
+        return eligible, all_tickers
 
     async def _execute_signal(self, client: AsyncKalshiClient, s: ScoredMarket, count: int):
         if self.dry_run:
@@ -277,11 +278,13 @@ class KalshiCryptoStrikesBot:
 
         # Dedup against account-wide held tickers (avoid doubling up if another bot owns it)
         held = set(account_held)
+        open_market_tickers: set[str] = set()
         for series in self.series:
             if slots_left <= 0:
                 break
             try:
-                eligible = await self._scan_series(client, series, held)
+                eligible, all_tickers = await self._scan_series(client, series, held)
+                open_market_tickers.update(all_tickers)
             except Exception as e:
                 logger.warning(f"Scan failed for {series}: {e}")
                 continue
@@ -297,9 +300,9 @@ class KalshiCryptoStrikesBot:
                     self._bot_held_tickers.add(s.ticker)
                 slots_left -= 1
 
-        await self._whale_follow_scan(client, held, balance_cents)
+        await self._whale_follow_scan(client, held, balance_cents, open_market_tickers)
 
-    async def _whale_follow_scan(self, client: AsyncKalshiClient, held_tickers: set[str], balance_cents: int):
+    async def _whale_follow_scan(self, client: AsyncKalshiClient, held_tickers: set[str], balance_cents: int, open_market_tickers: set[str] | None = None):
         """Check DB for recent heavy whale YES flow on cheap strikes and follow with 1 contract."""
         if not self.whale_follow_enabled:
             return
@@ -313,6 +316,8 @@ class KalshiCryptoStrikesBot:
         for f in flows:
             ticker = f["ticker"]
             if ticker in held_tickers or ticker in self._whale_followed_tickers:
+                continue
+            if open_market_tickers and ticker not in open_market_tickers:
                 continue
 
             yes_c = f["yes_contracts"] or 0

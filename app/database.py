@@ -944,6 +944,28 @@ def expire_stale_reentry_watches() -> int:
     return count
 
 
+def get_reentry_watches_by_position(position_ids: list[int]) -> dict[int, dict]:
+    """Get re-entry watches keyed by source_position_id."""
+    if not position_ids:
+        return {}
+    conn = get_db()
+    placeholders = ",".join("?" for _ in position_ids)
+    rows = conn.execute(
+        f"""SELECT * FROM reentry_watches
+        WHERE source_position_id IN ({placeholders})
+        ORDER BY created_at DESC""",
+        position_ids,
+    ).fetchall()
+    conn.close()
+    result = {}
+    for r in rows:
+        d = dict(r)
+        pid = d["source_position_id"]
+        if pid not in result:
+            result[pid] = d
+    return result
+
+
 def get_position_analytics() -> dict:
     """Get aggregated position analytics for the dashboard."""
     conn = get_db()
