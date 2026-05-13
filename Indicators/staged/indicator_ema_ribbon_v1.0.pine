@@ -12,7 +12,7 @@
 //
 // Signal logic: 3/8/21/55 EMA stack alignment
 //   BUY:   all 4 EMAs bullish aligned (3>8>21>55) — first bar of alignment
-//   CLOSE: alignment breaks (EMAs no longer stacked)
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("EMA Ribbon v1.0 — Alerts", overlay=true, max_bars_back=500)
 
@@ -47,7 +47,6 @@ bear_aligned = e3 < e8 and e8 < e21 and e21 < e55
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = bull_aligned and not bull_aligned[1]
-long_exit   = not bull_aligned and bull_aligned[1]
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 p1 = plot(e3,  "EMA 3",  color=color.new(#00ff41, 20), linewidth=1)
@@ -59,7 +58,7 @@ ribbonColor = bull_aligned ? color.new(color.green, 85) : bear_aligned ? color.n
 fill(p1, p4, color=showRibbon ? ribbonColor : na, title="Ribbon Fill")
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
-plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
 
 // ── Webhook Alerts ────────────────────────────────────────────────────────────
 _sym   = syminfo.ticker
@@ -81,19 +80,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions ──────────────────────────────────────────────────────────
 alertcondition(long_entry,              "EMA Ribbon — BUY",   "EMA Ribbon BUY")
-alertcondition(long_exit, "EMA Ribbon — CLOSE", "EMA Ribbon CLOSE")

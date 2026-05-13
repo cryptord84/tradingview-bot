@@ -9,7 +9,7 @@
 //
 // Signal logic: ICT Liquidity Sweep — stop-hunt reversal
 //   BUY:   price wicks below swing low (10-bar) but closes above it + volume surge
-//   CLOSE: opposite sweep forms
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("Liquidity Sweep v1.0 — Alerts", overlay=true, max_bars_back=500)
 
@@ -45,9 +45,6 @@ bull_sweep = low < swing_low and close > swing_low and vol_ok
 bear_sweep = high > swing_high and close < swing_high and vol_ok
 
 long_entry  = bull_sweep
-// `and not long_entry` prevents a wide double-wick bar (both bull_sweep and
-// bear_sweep true) from emitting same-bar BUY+CLOSE.
-long_exit   = bear_sweep and not long_entry
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 plot(showLevels ? swing_high : na, "Swing High", color=color.new(color.red, 50),   linewidth=1, style=plot.style_stepline)
@@ -75,19 +72,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions ──────────────────────────────────────────────────────────
 alertcondition(long_entry,              "Liq Sweep — BUY",   "Liq Sweep BUY")
-alertcondition(long_exit, "Liq Sweep — CLOSE", "Liq Sweep CLOSE")

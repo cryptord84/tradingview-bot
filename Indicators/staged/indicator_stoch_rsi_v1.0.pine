@@ -10,8 +10,7 @@
 //
 // Signal logic: Stochastic RSI K/D crossover with zone + RSI trend filter
 //   BUY:   K crosses above D while both < 20 (oversold) AND RSI < 50
-//   CLOSE: K crosses down while overbought (long-only: removed short_exit which
-//          fired on the same bar as long_entry and caused instant BUY→CLOSE loops)
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("Stochastic RSI v1.0 — Alerts", overlay=false, max_bars_back=500)
 
@@ -49,7 +48,6 @@ k_cross_down = ta.crossunder(k, d)
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = k_cross_up   and k < osLevel and rsi_val < 50
-long_exit   = k_cross_down and k > obLevel
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 plot(k, "K",  color=#00ff41, linewidth=2)
@@ -83,19 +81,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions ──────────────────────────────────────────────────────────
 alertcondition(long_entry,              "Stoch RSI — BUY",   "Stoch RSI BUY")
-alertcondition(long_exit, "Stoch RSI — CLOSE", "Stoch RSI CLOSE")

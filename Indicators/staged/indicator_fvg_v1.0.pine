@@ -12,7 +12,7 @@
 //   Bullish FVG: current low > high 2 bars ago (upward gap)
 //   Bearish FVG: current high < low 2 bars ago (downward gap)
 //   BUY:   bar after bullish FVG forms + volume surge
-//   CLOSE: price fills the gap or opposite FVG forms
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("FVG v1.0 — Alerts", overlay=true, max_bars_back=500)
 
@@ -49,11 +49,6 @@ fvg_ref_low  = low[2]    // for bear FVG — price rising above here = gap fille
 // Enter on bar AFTER FVG forms (shift by 1) + volume confirmation
 long_entry  = bull_fvg[1] and vol_ok
 
-// Exit: gap filled or opposite FVG (long-only — short_exit removed; it contained
-// bull_fvg which also triggers long_entry, causing instant BUY→CLOSE loops).
-// `and not long_entry` guards against the entry-bar edge case where close can sit
-// below high[2] (the gap's lower reference) while a new bull_fvg also forms.
-long_exit   = (close < fvg_ref_high or bear_fvg) and not long_entry
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 // Highlight FVG zones
@@ -61,7 +56,7 @@ bgcolor(showGaps and bull_fvg ? color.new(color.green, 90) : na, title="Bull FVG
 bgcolor(showGaps and bear_fvg ? color.new(color.red, 90)   : na, title="Bear FVG Zone")
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small, text="FVG")
-plotshape(long_exit and not long_entry,  "Long Exit",  shape.circle, location.abovebar, color.yellow, size=size.tiny)
+
 
 // ── Webhook Alerts ────────────────────────────────────────────────────────────
 _sym   = syminfo.ticker
@@ -83,19 +78,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions ──────────────────────────────────────────────────────────
 alertcondition(long_entry,              "FVG — BUY",   "FVG BUY")
-alertcondition(long_exit, "FVG — CLOSE", "FVG CLOSE")

@@ -5,7 +5,7 @@
 //
 // Signal logic: 20-bar Donchian channel breakout with volume confirmation
 //   BUY:   close breaks above prior-bar channel high + volume surge
-//   CLOSE: close crosses mid-channel
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("Donchian Breakout v1.0 — Alerts", overlay=true, max_bars_back=500)
 
@@ -37,7 +37,6 @@ rsi_val = ta.rsi(close, 14)
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = ta.crossover(close, ch_upper) and volOk
-long_exit   = ta.crossunder(close, ch_mid)
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 plot(showCh ? ch_upper : na, "Channel High", color=color.new(color.green, 50), linewidth=1)
@@ -45,7 +44,7 @@ plot(showCh ? ch_lower : na, "Channel Low",  color=color.new(color.red, 50),   l
 plot(showCh ? ch_mid   : na, "Channel Mid",  color=color.new(color.gray, 60),  linewidth=1)
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
-plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
 
 // ── Webhook Alerts ────────────────────────────────────────────────────────────
 _sym   = syminfo.ticker
@@ -67,19 +66,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
 alertcondition(long_entry,             "Donchian — BUY",   "Donchian BUY")
-alertcondition(long_exit,"Donchian — CLOSE", "Donchian CLOSE")

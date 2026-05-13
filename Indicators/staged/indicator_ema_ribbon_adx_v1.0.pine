@@ -12,7 +12,7 @@
 // Signal logic: 3/8/21/55 EMA stack alignment + regime gate
 //   Regime gate: ADX(14) > 25 AND not in Bollinger squeeze (BB inside Keltner)
 //   BUY:   first bar of bullish stack alignment (3>8>21>55) AND trend regime
-//   CLOSE: alignment breaks (EMAs no longer stacked)
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 //
 // Mirrors backtesting/strategies.py:strategy_ema_ribbon_regime → _apply_regime_filter(regime="trend").
 
@@ -70,7 +70,6 @@ regime_ok  = adx_val > adxThresh and (not useSqueezeBlock or not in_squeeze)
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = bull_aligned and not bull_aligned[1] and regime_ok
-long_exit   = not bull_aligned and bull_aligned[1]
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 p1 = plot(e3,  "EMA 3",  color=color.new(#00ff41, 20), linewidth=1)
@@ -82,7 +81,7 @@ ribbonColor = bull_aligned ? color.new(color.green, 85) : bear_aligned ? color.n
 fill(p1, p4, color=showRibbon ? ribbonColor : na, title="Ribbon Fill")
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
-plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
 plotshape(regime_ok and not long_entry, "Regime OK", shape.circle, location.bottom, color.new(color.aqua, 70), size=size.tiny)
 
 // ── Webhook Alerts ────────────────────────────────────────────────────────────
@@ -106,19 +105,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions ──────────────────────────────────────────────────────────
 alertcondition(long_entry, "EMA+ADX — BUY",   "EMA+ADX BUY")
-alertcondition(long_exit,  "EMA+ADX — CLOSE", "EMA+ADX CLOSE")

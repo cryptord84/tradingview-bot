@@ -10,7 +10,7 @@
 // Signal logic: 20-bar Donchian breakout + volume surge + regime gate
 //   Regime gate: ADX(14) > 25 AND not in Bollinger squeeze (BB inside Keltner)
 //   BUY:   close breaks above prior-bar channel high + volume surge + trend regime
-//   CLOSE: close crosses mid-channel
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 //
 // Mirrors backtesting/strategies.py:strategy_donchian_regime → _apply_regime_filter(regime="trend").
 
@@ -66,7 +66,6 @@ regime_ok  = adx_val > adxThresh and (not useSqueezeBlock or not in_squeeze)
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = ta.crossover(close, ch_upper) and volOk and regime_ok
-long_exit   = ta.crossunder(close, ch_mid)
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 plot(showCh ? ch_upper : na, "Channel High", color=color.new(color.green, 50), linewidth=1)
@@ -74,7 +73,7 @@ plot(showCh ? ch_lower : na, "Channel Low",  color=color.new(color.red, 50),   l
 plot(showCh ? ch_mid   : na, "Channel Mid",  color=color.new(color.gray, 60),  linewidth=1)
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
-plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
 
 // Optional regime status indicator (small dot above bar when regime allows entries)
 plotshape(regime_ok and not long_entry, "Regime OK", shape.circle, location.bottom, color.new(color.aqua, 70), size=size.tiny)
@@ -100,19 +99,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
 alertcondition(long_entry, "Donch+ADX — BUY",   "Donch+ADX BUY")
-alertcondition(long_exit,  "Donch+ADX — CLOSE", "Donch+ADX CLOSE")

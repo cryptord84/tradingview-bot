@@ -7,7 +7,7 @@
 //
 // Signal logic: mean reversion off rolling VWAP ±2σ bands
 //   BUY:   close crosses back ABOVE lower band (was below it last bar)
-//   CLOSE: close crosses VWAP (exit signal)
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
 
 indicator("VWAP Deviation v1.0 — Alerts", overlay=true, max_bars_back=500)
 
@@ -38,9 +38,6 @@ rsi_val = ta.rsi(close, 14)
 
 // ── Signals ───────────────────────────────────────────────────────────────────
 long_entry  = close[1] < lower[1] and close > lower
-// `and not long_entry` prevents a single violent mean-reversion bar (close jumps
-// from below lower band straight through vwap) from emitting same-bar BUY+CLOSE.
-long_exit   = ta.crossover(close, vwap_line) and not long_entry
 
 // ── Plots ─────────────────────────────────────────────────────────────────────
 plot(vwap_line,               "VWAP",       color=color.new(color.blue, 20),  linewidth=2)
@@ -48,7 +45,7 @@ plot(showBands ? upper : na,  "Upper Band", color=color.new(color.red, 50),   li
 plot(showBands ? lower : na,  "Lower Band", color=color.new(color.green, 50), linewidth=1)
 
 plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
-plotshape(long_exit,   "Long Exit",   shape.circle,       location.abovebar, color.yellow, size=size.tiny)
+
 
 // ── Webhook Alerts ────────────────────────────────────────────────────────────
 _sym   = syminfo.ticker
@@ -70,19 +67,5 @@ if long_entry
           ',"strategy":"' + _strat + '"' +
           '}', _freq)
 
-if long_exit
-    alert('{"secret":"' + webhook_secret + '"' +
-          ',"signal_type":"CLOSE"' +
-          ',"symbol":"' + _sym + '"' +
-          ',"entry_price_estimate":' + str.tostring(close) +
-          ',"confidence_score":50' +
-          ',"suggested_leverage":1' +
-          ',"suggested_position_size_percent":100' +
-          ',"atr":' + str.tostring(atr_val) +
-          ',"timeframe":"' + _tf + '"' +
-          ',"strategy":"' + _strat + '"' +
-          '}', _freq)
-
 // ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
 alertcondition(long_entry,             "VWAP Dev — BUY",   "VWAP Dev BUY")
-alertcondition(long_exit,"VWAP Dev — CLOSE", "VWAP Dev CLOSE")
