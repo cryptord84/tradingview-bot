@@ -1735,6 +1735,21 @@ def get_kalshi_stats() -> dict:
     return dict(row) if row else {}
 
 
+def get_kalshi_daily_pnl(date_str: str) -> int:
+    """Get realized P&L in cents for positions closed on a specific UTC date."""
+    conn = get_db()
+    row = conn.execute("""
+        SELECT COALESCE(SUM(pnl_cents), 0) as daily_pnl
+        FROM kalshi_positions
+        WHERE closed_at IS NOT NULL
+          AND closed_at >= ?
+          AND closed_at < date(?, '+1 day')
+          AND pnl_cents IS NOT NULL
+    """, (date_str, date_str)).fetchone()
+    conn.close()
+    return int(row["daily_pnl"]) if row else 0
+
+
 def get_recent_signal_hash() -> Optional[str]:
     """Get the most recent signal hash for duplicate detection."""
     conn = get_db()

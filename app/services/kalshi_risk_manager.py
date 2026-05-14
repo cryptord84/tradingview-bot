@@ -317,12 +317,10 @@ class KalshiRiskManager:
         except Exception:
             pass
 
-        # DB-recorded Kalshi positions (covers AI agent + any manual trades)
+        # DB-recorded Kalshi positions closed today (covers AI agent + any manual trades)
         try:
-            from app.database import get_kalshi_stats
-            db_stats = get_kalshi_stats()
-            db_pnl = db_stats.get("total_pnl_cents", 0) or 0
-            total += db_pnl
+            from app.database import get_kalshi_daily_pnl
+            total += get_kalshi_daily_pnl(self._day_start)
         except Exception:
             pass
 
