@@ -168,6 +168,11 @@ async def lifespan(app: FastAPI):
     # Start daily scout scheduler (3:30 AM X.com scan)
     scout_task = asyncio.create_task(scout_scheduler())
 
+    # Start funding rate scanner (every 4 hours)
+    from app.services.funding_rate_scanner import run_loop as funding_scan_loop
+    funding_task = asyncio.create_task(funding_scan_loop(interval_seconds=14400))
+    logger.info("Funding rate scanner started (every 4h)")
+
     # Start real-time price feed (Binance WS + CoinGecko polling)
     price_feed = get_price_feed()
     if price_feed.enabled:
