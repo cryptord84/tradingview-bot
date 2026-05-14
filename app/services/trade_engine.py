@@ -30,40 +30,6 @@ logger = logging.getLogger("bot.engine")
 # Duplicate signal detection
 _recent_signals: dict[str, float] = {}
 
-# CLOSE-signal filter counters — most CLOSEs (~92%) have no matching position
-# (Pine indicators emit CLOSE on every bar where exit-condition is true). The
-# bot already drops them correctly; this counter lets us track filter volume
-# without spamming logs/Telegram on each one.
-_close_filter_stats = {
-    "ignored": 0,           # CLOSE arrived but no open position matches
-    "blocked_too_new": 0,   # matched but position younger than min_hold_seconds
-    "blocked_low_move": 0,  # matched but price hasn't moved enough to clear fees
-    "ignored_by_config": 0, # webhook.ignore_close_signals=true blanket drop
-    "last_summary_total": 0,
-}
-_CLOSE_FILTER_SUMMARY_EVERY = 25  # emit summary INFO line every N filtered signals
-
-
-def _bump_close_filter(reason: str) -> None:
-    """Increment a CLOSE-filter counter and emit a summary line every N events."""
-    if reason in _close_filter_stats:
-        _close_filter_stats[reason] += 1
-    total = (
-        _close_filter_stats["ignored"]
-        + _close_filter_stats["blocked_too_new"]
-        + _close_filter_stats["blocked_low_move"]
-        + _close_filter_stats["ignored_by_config"]
-    )
-    if total - _close_filter_stats["last_summary_total"] >= _CLOSE_FILTER_SUMMARY_EVERY:
-        logger.info(
-            f"CLOSE filter summary (since startup): "
-            f"{_close_filter_stats['ignored']} ignored (no position), "
-            f"{_close_filter_stats['blocked_too_new']} blocked (too new), "
-            f"{_close_filter_stats['blocked_low_move']} blocked (low move), "
-            f"{_close_filter_stats['ignored_by_config']} ignored by config"
-        )
-        _close_filter_stats["last_summary_total"] = total
-
 
 # ── TP/SL sweep overrides (config_tpsl_overrides.yaml) ───────────────────────
 _TPSL_OVERRIDES_PATH = Path(__file__).resolve().parents[2] / "config_tpsl_overrides.yaml"
@@ -597,27 +563,6 @@ class TradeEngine:
             if not getattr(signal, "signal_log_id", None):
                 signal.signal_log_id = log_signal(signal.model_dump_json(), source_ip)
 
-            # 1a. Blanket CLOSE filter — webhook.ignore_close_signals is the
-            # tier-0 drop. Audit 2026-05-10 showed indicator CLOSEs closed
-            # positions at +1.4% avg vs +8.0% TP avg — they're too eager.
-            # Exits now flow only through TP/SL/trailing-stop in position_monitor.
-            # This filter runs BEFORE duplicate detection and any heavy work
-            # (Telegram, Claude, market data) so spam is dropped cheaply.
-            if (signal.signal_type.value == "CLOSE"
-                    and bool(get("webhook", "ignore_close_signals", False))):
-                _bump_close_filter("ignored_by_config")
-                logger.debug(
-                    f"CLOSE ignored by config: {signal.symbol} "
-                    f"(strategy={strategy_label or '?'}) — "
-                    f"exits handled by TP/SL/trail in position_monitor"
-                )
-                result["status"] = "close_ignored_by_config"
-                update_signal_disposition(
-                    signal.signal_log_id, "dropped_close_filter",
-                    reason="CLOSE signals ignored — exits via TP/SL/trail only",
-                )
-                return result
-
             # 2. Check duplicate
             if self.is_duplicate(signal):
                 result["status"] = "duplicate"
@@ -1025,14 +970,10 @@ class TradeEngine:
                 matched_pos = get_open_position_for_signal(signal.symbol, strategy_name)
 
                 if not matched_pos:
-                    # ~92% of CLOSE signals land here — Pine indicators fire CLOSE on
-                    # every bar where exit-condition is true, even when no position is
-                    # open. Log at DEBUG and skip Telegram; periodic summary via _bump_close_filter.
                     logger.debug(
                         f"{action_label} signal for {signal.symbol} from strategy '{strategy_name}' "
                         f"but no matching open position found — ignoring"
                     )
-                    _bump_close_filter("ignored")
                     result["status"] = "no_position"
                     result["error"] = (
                         f"No open position for {signal.symbol} from strategy '{strategy_name}'"
@@ -1067,7 +1008,6 @@ class TradeEngine:
                         f"CLOSE rejected for {signal.symbol} pos #{matched_pos['id']}: "
                         f"only {age_seconds:.0f}s old (min {min_hold_seconds}s) — likely whipsaw"
                     )
-                    _bump_close_filter("blocked_too_new")
                     result["status"] = "close_rejected_too_new"
                     return result
 
@@ -1078,7 +1018,6 @@ class TradeEngine:
                         f"price moved only {move_pct*100:.2f}% from entry "
                         f"${entry_price:.6f} → ${token_price:.6f} (need {min_move_pct*100:.2f}% to clear fees)"
                     )
-                    _bump_close_filter("blocked_low_move")
                     result["status"] = "close_rejected_below_fee_threshold"
                     return result
 
