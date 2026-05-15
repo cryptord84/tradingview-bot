@@ -20,7 +20,7 @@ strategy_token_tf_sizes:
         tier: C
     ETH:
       1D:
-        note: "2026-05-13 promoted C→B. Combined PF 1.89 just under B threshold\
+        note: "2026-05-13 promoted C\u2192B. Combined PF 1.89 just under B threshold\
           \ (2.0), but OOS_PF 2.66 on 30 trades with Ret 172% justifies the bump.\
           \ Reverse if OOS_PF degrades below 1.5."
         pf: 1.89
@@ -111,6 +111,12 @@ strategy_token_tf_sizes:
         size_pct: 9.0
         source: main
         tier: C
+    ARB:
+      1D:
+        pf: 2.4
+        size_pct: 13.0
+        source: main
+        tier: B
     FARTCOIN:
       4H:
         pf: 4.18
@@ -132,7 +138,7 @@ strategy_token_tf_sizes:
         note: "2026-05-12 promoted C\u2192B. Combined PF 1.96 sits just under B threshold\
           \ (2.0), but OOS_PF 2.22 with 43 trades and Ret 131% justifies the bump.\
           \ Reverse if OOS_PF degrades below 1.5."
-        pf: 1.96
+        pf: 2.05
         size_pct: 13.0
         source: manual_promotion
         tier: B
@@ -143,7 +149,7 @@ strategy_token_tf_sizes:
         tier: C
     MOODENG:
       4H:
-        pf: 2.13
+        pf: 2.82
         size_pct: 18.0
         source: manual_promotion
         tier: A
@@ -151,7 +157,7 @@ strategy_token_tf_sizes:
       4H:
         note: Combined PF 1.52 below B; OOS PF 2.21 with retention 156% justifies
           B. Realized +$0.62 today.
-        pf: 1.52
+        pf: 1.59
         size_pct: 13.0
         source: manual_promotion
         tier: B
