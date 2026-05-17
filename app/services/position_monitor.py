@@ -56,12 +56,17 @@ class PositionMonitor:
         self.trail_activation_atr = trail_cfg.get("activation_atr", 1.5)
         self.trail_offset_atr = trail_cfg.get("offset_atr", 1.0)
 
-        # Re-entry watch config: after SL, set a buy target at 1.0x SL-distance
-        # below exit. If price reaches it within expiry_hours, fire a new BUY.
+        # Re-entry watch config: after SL, set a buy target below exit price.
+        # If price reaches it within expiry_hours, fire a new BUY.
         reentry_cfg = cfg.get("reentry") or {}
         self.reentry_enabled = reentry_cfg.get("enabled", False)
         self.reentry_sl_distance_mult = reentry_cfg.get("sl_distance_mult", 1.0)
         self.reentry_expiry_hours = reentry_cfg.get("expiry_hours", 24)
+        # Per-token drop % overrides (data-driven from post-SL price action).
+        # Tokens not listed fall back to sl_distance_mult formula.
+        self.reentry_token_drop_pct = reentry_cfg.get("token_drop_pct", {})
+        # Tokens to exclude from re-entry entirely (e.g., SOL: 0/2 rebuy win rate)
+        self.reentry_disabled_tokens = set(reentry_cfg.get("disabled_tokens", []))
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -482,10 +487,17 @@ class PositionMonitor:
     def _create_reentry_watch(self, pos: dict, exit_price: float):
         """Create a re-entry watch after an SL close.
 
-        Target price = exit_price - (sl_distance_mult × SL distance).
-        SL distance = entry_price - sl_price (the original stop range).
+        Uses per-token drop % if configured, otherwise falls back to
+        sl_distance_mult × SL distance formula.
         """
         from datetime import timedelta
+
+        sym = pos.get("symbol", "")
+        token = sym.replace("USDT", "").replace(".P", "")
+
+        if token in self.reentry_disabled_tokens or sym in self.reentry_disabled_tokens:
+            logger.info(f"Re-entry disabled for {sym}, skipping watch")
+            return
 
         entry = pos.get("entry_price", 0)
         sl = pos.get("sl_price", 0)
@@ -493,7 +505,14 @@ class PositionMonitor:
         if sl_distance <= 0:
             return
 
-        target_price = exit_price - (self.reentry_sl_distance_mult * sl_distance)
+        drop_pct = self.reentry_token_drop_pct.get(token)
+        if drop_pct is not None:
+            target_price = exit_price * (1.0 - drop_pct / 100.0)
+            method_note = f"{drop_pct}% below SL exit"
+        else:
+            target_price = exit_price - (self.reentry_sl_distance_mult * sl_distance)
+            method_note = f"{self.reentry_sl_distance_mult}x SL-dist ${sl_distance:.6f}"
+
         if target_price <= 0:
             return
 
@@ -512,7 +531,7 @@ class PositionMonitor:
             "source_position_id": pos["id"],
             "notes": (
                 f"Re-entry: SL exit ${exit_price:.6f} - "
-                f"{self.reentry_sl_distance_mult}x SL-dist ${sl_distance:.6f} "
+                f"{method_note} "
                 f"= target ${target_price:.6f}"
             ),
         })
