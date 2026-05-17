@@ -856,6 +856,29 @@ class TradeEngine:
             # Apply risk-capped size
             trade_usd = risk_check["capped_usd"]
 
+            min_trade_usd = risk_cfg.get("min_trade_usd", 5.0)
+            if trade_usd < min_trade_usd:
+                result["status"] = "rejected"
+                result["error"] = f"Trade size ${trade_usd:.2f} below ${min_trade_usd:.2f} minimum"
+                insert_trade({
+                    "signal_type": signal.signal_type.value,
+                    "symbol": signal.symbol,
+                    "action": "REJECT",
+                    "amount_sol": 0,
+                    "price_usd": token_price,
+                    "confidence_score": signal.confidence_score,
+                    "claude_reasoning": claude_resp.reasoning,
+                    "wallet_address": self.wallet.public_key,
+                    "notes": f"Below min trade size: ${trade_usd:.2f} < ${min_trade_usd:.2f}",
+                    "strategy": strategy_label,
+                    "reason": TradeReason.RISK_REJECT,
+                })
+                update_signal_disposition(
+                    signal.signal_log_id, "rejected_min_size",
+                    reason=f"trade ${trade_usd:.2f} < min ${min_trade_usd:.2f}",
+                )
+                return result
+
             # Calculate actual token quantity purchased
             token_qty = trade_usd / token_price if token_price > 0 else 0
 

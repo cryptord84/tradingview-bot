@@ -38,7 +38,9 @@ class ScoredMarket:
     hours_to_close: float
     fair_prob: float
     edge_cents: float  # fair_prob*100 - yes_ask_cents, positive = buy YES has edge
-    volume: float
+    no_edge_cents: float = 0.0  # yes_bid - fair_prob*100, positive = buy NO has edge
+    no_price_cents: int = 0  # 100 - yes_bid = cost to buy NO
+    volume: float = 0.0
     raw_fair_prob: float = 0.0  # parametric model output before calibration
 
 
@@ -189,6 +191,8 @@ def score_market(market: dict, spot: float, annual_vol: float,
         from app.services.btcd_calibrator import get_btcd_calibrator
         prob = get_btcd_calibrator().apply(raw_prob)
     edge = prob * 100.0 - yes_ask
+    no_price = 100 - yes_bid if yes_bid > 0 else 100
+    no_edge = yes_bid - prob * 100.0  # positive when YES is overpriced → NO is underpriced
 
     try:
         vol = float(market.get("volume_fp", "0") or "0")
@@ -204,6 +208,8 @@ def score_market(market: dict, spot: float, annual_vol: float,
         hours_to_close=hours,
         fair_prob=prob,
         edge_cents=edge,
+        no_edge_cents=no_edge,
+        no_price_cents=no_price,
         volume=vol,
         raw_fair_prob=raw_prob,
     )

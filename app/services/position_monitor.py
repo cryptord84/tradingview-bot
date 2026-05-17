@@ -65,6 +65,7 @@ class PositionMonitor:
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._evm_close_failures: dict[int, int] = {}  # pos_id → attempt count
 
     def start(self) -> asyncio.Task:
         """Start the background polling task."""
@@ -665,11 +666,23 @@ class PositionMonitor:
 
             receipt = evm_result.get("receipt") or {}
             if int(receipt.get("status", "0x0"), 16) != 1:
-                logger.error(f"EVM close tx reverted on-chain for #{pos['id']}")
-                await telegram.notify_error(
-                    f"EVM close reverted on-chain (#{pos['id']})",
-                    f"tx={evm_result['swap_tx']['hash']}",
-                )
+                pid = pos['id']
+                self._evm_close_failures[pid] = self._evm_close_failures.get(pid, 0) + 1
+                attempts = self._evm_close_failures[pid]
+                logger.error(f"EVM close tx reverted on-chain for #{pid} (attempt {attempts}/{self.max_retries})")
+                if attempts >= self.max_retries:
+                    logger.warning(f"Force-closing #{pid} after {attempts} failed EVM swaps (position too small or no liquidity)")
+                    pnl_usdc = (current_price - pos["entry_price"]) * pos.get("amount_sol", 0)
+                    pnl_pct = ((current_price - pos["entry_price"]) / pos["entry_price"]) * 100 if pos["entry_price"] else 0
+                    close_position(
+                        position_id=pid, exit_price=current_price, exit_tx="force_closed_revert",
+                        status="closed_sl", pnl_usdc=pnl_usdc, pnl_percent=pnl_pct,
+                    )
+                    del self._evm_close_failures[pid]
+                    await telegram.notify_error(
+                        f"Force-closed #{pid} after {attempts} revert attempts",
+                        f"Token still in wallet — manual sell may be needed",
+                    )
                 return
 
             tx_hash = evm_result["swap_tx"]["hash"]

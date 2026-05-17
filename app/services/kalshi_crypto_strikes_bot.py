@@ -33,7 +33,7 @@ VOL_CACHE_SECONDS = 3600
 
 
 def _kelly_fraction(fair_prob: float, yes_ask_cents: int) -> float:
-    """Binary-market Kelly: f* = (p - q) / (1 - q) where q = price as decimal.
+    """Binary-market Kelly for YES side: f* = (p - q) / (1 - q) where q = price as decimal.
 
     Returns 0 if no edge (p <= q) or if q >= 1 (degenerate market).
     """
@@ -43,6 +43,21 @@ def _kelly_fraction(fair_prob: float, yes_ask_cents: int) -> float:
     if fair_prob <= q:
         return 0.0
     return (fair_prob - q) / (1.0 - q)
+
+
+def _kelly_fraction_no(fair_prob_yes: float, no_price_cents: int) -> float:
+    """Binary-market Kelly for NO side: f* = (p_no - q_no) / (1 - q_no).
+
+    p_no = 1 - fair_prob_yes (true probability event does NOT happen)
+    q_no = no_price_cents / 100 (cost of NO contract as decimal)
+    """
+    p_no = 1.0 - fair_prob_yes
+    q_no = no_price_cents / 100.0
+    if q_no <= 0 or q_no >= 1:
+        return 0.0
+    if p_no <= q_no:
+        return 0.0
+    return (p_no - q_no) / (1.0 - q_no)
 
 
 class KalshiCryptoStrikesBot:
@@ -56,6 +71,9 @@ class KalshiCryptoStrikesBot:
         self.scan_interval = strikes_cfg.get("scan_interval_seconds", 300)
         self.series = strikes_cfg.get("series", ["KXBTCD"])
         self.min_edge_cents = strikes_cfg.get("min_edge_cents", 5)
+        # "yes" = original strategy (buy cheap OTM YES hoping for big moves)
+        # "no" = flipped strategy (buy NO on OTM strikes, high win rate, small profit per win)
+        self.side = strikes_cfg.get("side", "no")
         # Hotfix 2026-04-24: 48h paper-trade showed systematic OTM YES overprediction
         # in 10-50% fair_prob range (actual hit rate 4-22%, sim ROI -46% to -68%).
         # Gate at 0.50 until vol model (EWMA short-window + skew/recalibration) ships.
@@ -72,6 +90,9 @@ class KalshiCryptoStrikesBot:
         self.max_open_positions = strikes_cfg.get("max_open_positions", 8)
         self.min_yes_ask_cents = strikes_cfg.get("min_yes_ask_cents", 3)
         self.max_yes_ask_cents = strikes_cfg.get("max_yes_ask_cents", 97)
+        # NO-side filters: target YES priced at 20-50¢ (NO costs 50-80¢)
+        self.no_min_yes_bid_cents = strikes_cfg.get("no_min_yes_bid_cents", 15)
+        self.no_max_yes_bid_cents = strikes_cfg.get("no_max_yes_bid_cents", 50)
         self.max_days_to_close = strikes_cfg.get("max_days_to_close", 2)
         # Empirical calibration (2026-05-11): isotonic-regressed pred→actual mapping
         # on top of the parametric model. Fixes the bidirectional overdispersion
@@ -115,9 +136,9 @@ class KalshiCryptoStrikesBot:
         self._running = True
         self._scan_task = asyncio.create_task(self._scan_loop())
         mode = "DRY-RUN" if self.dry_run else "LIVE"
-        wf_status = f"whale_follow={'ON' if self.whale_follow_enabled else 'OFF'}"
+        wf_status = f"whale_follow={'ON' if self.whale_follow_enabled and self.side != 'no' else 'OFF'}"
         logger.info(
-            f"Kalshi crypto strikes bot started [{mode}] "
+            f"Kalshi crypto strikes bot started [{mode}] side={self.side.upper()} "
             f"series={self.series} interval={self.scan_interval}s "
             f"min_edge={self.min_edge_cents}c min_fair_prob={self.min_fair_prob:.2f} "
             f"kelly={self.kelly_fraction:.2f} {wf_status}"
@@ -167,14 +188,19 @@ class KalshiCryptoStrikesBot:
 
     def _size_contracts(self, scored: ScoredMarket, available_cents: int) -> int:
         """Returns number of contracts to buy. 0 means don't trade."""
-        f_star = _kelly_fraction(scored.fair_prob, scored.yes_ask_cents)
+        if self.side == "no":
+            f_star = _kelly_fraction_no(scored.fair_prob, scored.no_price_cents)
+            price = scored.no_price_cents
+        else:
+            f_star = _kelly_fraction(scored.fair_prob, scored.yes_ask_cents)
+            price = scored.yes_ask_cents
         if f_star <= 0:
             return 0
         stake_cents = int(available_cents * f_star * self.kelly_fraction)
         stake_cents = min(stake_cents, self.max_cost_per_trade_cents)
-        if stake_cents < scored.yes_ask_cents:
+        if stake_cents < price:
             return 0
-        count = stake_cents // scored.yes_ask_cents
+        count = stake_cents // price
         return min(count, self.max_contracts_per_ticker)
 
     async def _scan_series(self, client: AsyncKalshiClient, series: str, held_tickers: set[str]):
@@ -189,52 +215,75 @@ class KalshiCryptoStrikesBot:
         if scored:
             self._log_calibration(series, spot, annual_vol, scored)
 
-        eligible = [
-            s for s in scored
-            if s.edge_cents >= self.min_edge_cents
-            and s.fair_prob >= self.min_fair_prob
-            and self.min_yes_ask_cents <= s.yes_ask_cents <= self.max_yes_ask_cents
-            and 0 < s.hours_to_close <= self.max_days_to_close * 24
-            and s.ticker not in held_tickers
-        ]
+        if self.side == "no":
+            eligible = [
+                s for s in scored
+                if s.no_edge_cents >= self.min_edge_cents
+                and s.fair_prob <= (1.0 - self.min_fair_prob)  # YES prob low enough that NO has confidence
+                and self.no_min_yes_bid_cents <= s.yes_bid_cents <= self.no_max_yes_bid_cents
+                and 0 < s.hours_to_close <= self.max_days_to_close * 24
+                and s.ticker not in held_tickers
+            ]
+            eligible.sort(key=lambda s: s.no_edge_cents, reverse=True)
+        else:
+            eligible = [
+                s for s in scored
+                if s.edge_cents >= self.min_edge_cents
+                and s.fair_prob >= self.min_fair_prob
+                and self.min_yes_ask_cents <= s.yes_ask_cents <= self.max_yes_ask_cents
+                and 0 < s.hours_to_close <= self.max_days_to_close * 24
+                and s.ticker not in held_tickers
+            ]
         logger.info(
             f"{series}: spot=${spot:,.2f} vol={annual_vol:.2f} "
-            f"scored={len(scored)} eligible={len(eligible)}"
+            f"scored={len(scored)} eligible={len(eligible)} side={self.side}"
         )
         if not eligible:
             return [], all_tickers
         return eligible, all_tickers
 
     async def _execute_signal(self, client: AsyncKalshiClient, s: ScoredMarket, count: int):
+        if self.side == "no":
+            price = s.no_price_cents
+            edge = s.no_edge_cents
+            side_label = "NO"
+        else:
+            price = s.yes_ask_cents
+            edge = s.edge_cents
+            side_label = "YES"
+
         if self.dry_run:
             self._dry_run_signals += 1
             logger.info(
-                f"[DRY-RUN] WOULD BUY {count}× {s.ticker} @ {s.yes_ask_cents}c "
-                f"(fair={s.fair_prob:.3f} edge=+{s.edge_cents:.1f}c)"
+                f"[DRY-RUN] WOULD BUY {side_label} {count}× {s.ticker} @ {price}c "
+                f"(fair_yes={s.fair_prob:.3f} edge=+{edge:.1f}c)"
             )
             return
         try:
-            result = await client.buy_yes(s.ticker, s.yes_ask_cents, count)
+            if self.side == "no":
+                result = await client.buy_no(s.ticker, price, count)
+            else:
+                result = await client.buy_yes(s.ticker, price, count)
             order = result.get("order", {}) if isinstance(result, dict) else {}
             self._trades_placed += 1
             insert_kalshi_trade({
                 "order_id": order.get("order_id", ""),
                 "ticker": s.ticker,
                 "title": s.title,
-                "side": "yes",
+                "side": "no" if self.side == "no" else "yes",
                 "action": "buy",
                 "count": count,
-                "price_cents": s.yes_ask_cents,
-                "total_cost_cents": s.yes_ask_cents * count,
+                "price_cents": price,
+                "total_cost_cents": price * count,
                 "status": order.get("status", "placed"),
                 "notes": (
-                    f"Strikes bot: fair={s.fair_prob:.3f} edge=+{s.edge_cents:.1f}c "
-                    f"hours={s.hours_to_close:.1f}"
+                    f"Strikes bot ({side_label}): fair_yes={s.fair_prob:.3f} "
+                    f"edge=+{edge:.1f}c hours={s.hours_to_close:.1f}"
                 ),
             })
             logger.info(
-                f"LIVE BUY {count}× {s.ticker} @ {s.yes_ask_cents}c "
-                f"(fair={s.fair_prob:.3f} edge=+{s.edge_cents:.1f}c)"
+                f"LIVE BUY {side_label} {count}× {s.ticker} @ {price}c "
+                f"(fair_yes={s.fair_prob:.3f} edge=+{edge:.1f}c)"
             )
         except Exception as e:
             logger.error(f"Order failed for {s.ticker}: {e}")
@@ -305,6 +354,9 @@ class KalshiCryptoStrikesBot:
     async def _whale_follow_scan(self, client: AsyncKalshiClient, held_tickers: set[str], balance_cents: int, open_market_tickers: set[str] | None = None):
         """Check DB for recent heavy whale YES flow on cheap strikes and follow with 1 contract."""
         if not self.whale_follow_enabled:
+            return
+        # Whale-follow is a YES-momentum signal — skip when running NO-side strategy
+        if self.side == "no":
             return
 
         series_prefixes = [s.replace("KX", "") for s in self.series]

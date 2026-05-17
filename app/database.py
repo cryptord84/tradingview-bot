@@ -1650,7 +1650,7 @@ def sync_kalshi_settlements(settlements: list[dict]) -> dict:
             ticker = s.get("ticker", "") or ""
             if not ticker:
                 continue
-            revenue_per_contract = int(s.get("revenue", 0) or 0)
+            total_revenue_cents = int(s.get("revenue", 0) or 0)
             settled_time = s.get("settled_time")
             if hasattr(settled_time, "isoformat"):
                 settled_iso = settled_time.isoformat()
@@ -1692,7 +1692,7 @@ def sync_kalshi_settlements(settlements: list[dict]) -> dict:
                 continue
 
             net_cost = buy_cost - sell_rev
-            payout_cents = revenue_per_contract * held_at_settle
+            payout_cents = total_revenue_cents
             pnl_cents = payout_cents - net_cost
             avg_price = int(round(buy_cost / buy_qty)) if buy_qty > 0 else 0
 
