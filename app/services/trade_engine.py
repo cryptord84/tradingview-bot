@@ -448,11 +448,10 @@ class TradeEngine:
         # registry address 0x97ad75… was bogus. Liq Sweep / INJ.P alert culled.
         # Validated 2026-05-08 via dry-run swap (Phase 4):
         "UNI":   ("0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", 18),  # ✓
-        "ARB":   ("0x912CE59144191C1204E64559FE8253a0e49E6548", 18),  # ✓
+        # ARB/AAVE temporarily rerouted to Binance 2026-05-20 — EVM lane underfunded
         # Near-misses pre-mapped in case they cross WF later (UNVERIFIED):
         "LDO":   ("0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60", 18),
         "COMP":  ("0x354A6dA3fcde098F8389cad84b0182725c6C91dE", 18),
-        "AAVE":  ("0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", 18),
         "LINK":  ("0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18),
     }
     EVM_USDC_CONTRACT = "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
@@ -486,6 +485,10 @@ class TradeEngine:
         "BTC":   "BTCUSDT",
         "DOGE":  "DOGEUSDT",
         "OP":    "OPUSDT",
+        # 2026-05-20: rerouted from EVM lane (underfunded). Move back when Arb wallet funded.
+        "ARB":   "ARBUSDT",
+        "AAVE":  "AAVEUSDT",
+        "NEAR":  "NEARUSDT",
     }
 
     def _is_evm_symbol(self, symbol: str) -> bool:

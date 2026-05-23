@@ -432,7 +432,7 @@ def get_recent_signals(limit: int = 50,
     Activity panel."""
     conn = get_db()
     args: list = []
-    where = "1=1"
+    where = "1=1 AND s.raw_payload NOT LIKE '%Integration smoke test%'"
     if since:
         where += " AND s.timestamp >= ?"
         args.append(since)
@@ -1748,6 +1748,36 @@ def get_kalshi_daily_pnl(date_str: str) -> int:
     """, (date_str, date_str)).fetchone()
     conn.close()
     return int(row["daily_pnl"]) if row else 0
+
+
+def get_realized_pnl_24h() -> dict:
+    """Realized P&L from positions closed in the last 24 hours (crypto + Kalshi)."""
+    conn = get_db()
+    try:
+        crypto_row = conn.execute("""
+            SELECT COALESCE(SUM(pnl_usdc), 0) as pnl
+            FROM positions
+            WHERE status != 'open'
+              AND closed_at IS NOT NULL
+              AND closed_at >= datetime('now', '-24 hours')
+        """).fetchone()
+        kalshi_row = conn.execute("""
+            SELECT COALESCE(SUM(pnl_cents), 0) as pnl
+            FROM kalshi_positions
+            WHERE status != 'open'
+              AND closed_at IS NOT NULL
+              AND closed_at >= datetime('now', '-24 hours')
+              AND pnl_cents IS NOT NULL
+        """).fetchone()
+    finally:
+        conn.close()
+    crypto_pnl = float(crypto_row["pnl"]) if crypto_row else 0.0
+    kalshi_pnl = (int(kalshi_row["pnl"]) / 100) if kalshi_row else 0.0
+    return {
+        "crypto_pnl_usd": crypto_pnl,
+        "kalshi_pnl_usd": kalshi_pnl,
+        "total_pnl_usd": crypto_pnl + kalshi_pnl,
+    }
 
 
 def get_recent_signal_hash() -> Optional[str]:

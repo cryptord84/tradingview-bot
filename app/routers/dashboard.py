@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from app.config import get, reload_config
-from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot, get_recent_signals, get_reentry_watches_by_position
+from app.database import get_trades, get_stats, export_csv, get_today_trades, get_wallet_transactions, get_kamino_net_deposited, get_open_positions, get_all_positions, get_position_analytics, get_indicator_performance, get_backtests, insert_backtest, delete_backtest, get_kalshi_trades, get_kalshi_positions, get_kalshi_stats, insert_kamino_snapshot, compute_kamino_earnings, get_latest_kamino_snapshot, insert_portfolio_snapshot, get_portfolio_snapshots, get_latest_portfolio_snapshot, get_recent_signals, get_reentry_watches_by_position, get_realized_pnl_24h, get_kalshi_daily_pnl
 from app.models import DashboardStats, SettingsUpdate
 from app.services.jupiter_client import JupiterClient
 from app.services.wallet_service import WalletService
@@ -615,8 +615,14 @@ async def get_unified_portfolio():
     db_stats = get_stats()
     all_time_pnl = db_stats.get("total_pnl_usd", 0.0) + out["kalshi"].get("pnl_usd", 0.0)
     today_pnl = db_stats.get("today_pnl_usd", 0.0)
+    try:
+        from datetime import date as _d
+        kalshi_today_cents = get_kalshi_daily_pnl(_d.today().isoformat())
+        today_pnl += kalshi_today_cents / 100
+    except Exception as e:
+        logger.debug(f"kalshi today pnl lookup failed: {e}")
 
-    # 24h delta vs snapshot from ~24h ago
+    # 24h wallet value change — find closest snapshot to 24h ago
     delta_24h_usd, delta_24h_pct = 0.0, 0.0
     try:
         import sqlite3
@@ -624,14 +630,15 @@ async def get_unified_portfolio():
         c = sqlite3.connect(DB_PATH)
         c.row_factory = sqlite3.Row
         row = c.execute(
-            """SELECT total_usd FROM portfolio_snapshots
-               WHERE timestamp <= datetime('now','-23 hours')
-               ORDER BY timestamp DESC LIMIT 1"""
+            """SELECT total_usd, timestamp,
+                      ABS(julianday(timestamp) - julianday('now', '-24 hours')) as gap
+               FROM portfolio_snapshots
+               ORDER BY gap ASC LIMIT 1"""
         ).fetchone()
         c.close()
-        if row and row["total_usd"]:
+        if row and row["total_usd"] and row["total_usd"] > 0:
             delta_24h_usd = total_usd - row["total_usd"]
-            delta_24h_pct = (delta_24h_usd / row["total_usd"]) * 100 if row["total_usd"] > 0 else 0.0
+            delta_24h_pct = (delta_24h_usd / row["total_usd"]) * 100
     except Exception as e:
         logger.debug(f"24h delta lookup failed: {e}")
 

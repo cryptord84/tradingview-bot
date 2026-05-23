@@ -243,13 +243,18 @@ class PositionMonitor:
         from app.services.trade_engine import TradeEngine
 
         # ── Lane routing ────────────────────────────────────────────────────
+        # Close on the lane the position was OPENED on (entry_tx prefix),
+        # not the current routing table — tokens may have been rerouted
+        # between lanes since the position was opened.
         token_symbol_norm = (pos.get("symbol", "") or "").upper()\
             .replace("USDT", "").replace("USD", "").replace(".P", "")
-        # EVM takes precedence over Binance (matches trade_engine._is_binance_symbol)
-        if token_symbol_norm in TradeEngine.EVM_TOKENS:
+        entry_tx = pos.get("entry_tx") or ""
+        opened_on_evm = entry_tx.startswith("0x")
+        opened_on_binance = entry_tx.startswith("binance:")
+        if opened_on_evm:
             await self._close_position_evm(pos, current_price, trigger, token_symbol_norm)
             return
-        if token_symbol_norm in TradeEngine.BINANCE_TOKENS:
+        if opened_on_binance:
             await self._close_position_binance(pos, current_price, trigger, token_symbol_norm)
             return
 
