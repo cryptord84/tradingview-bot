@@ -117,6 +117,12 @@ strategy_token_tf_sizes:
         size_pct: 18.0
         source: manual_promotion
         tier: A
+    TIA:
+      4H:
+        pf: 1.67
+        size_pct: 9.0
+        source: main
+        tier: C
   VWAP Dev:
     AAVE:
       1D:

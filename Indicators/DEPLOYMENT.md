@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-05-19 ~10:00 EDT (deployed VWAP Dev/ARB/1D + EMA Ribbon/BTC/1D; full reconciliation against alert_list)
+**Last verified:** 2026-05-27 ~15:00 EDT (VWAP Dev v1.0→v1.1 upgrade: RSI filter + TP/SL rebalance; all 6 alerts repointed)
 **Source of truth:** TradingView (`alert_list` MCP / webpack 560065 `getAlertsCollection()`). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -24,13 +24,14 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 3 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 4.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
 | 0 | Liquidity Sweep v1.0 (retired) | `USER;12e465c59f0941d2a4fef70e58003c45` | 4.0 | `staged/indicator_liq_sweep_v1.0.pine` |
 | 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 4.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
-| 6 | VWAP Deviation v1.0 | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 11.0 | `staged/indicator_vwap_dev_v1.0.pine` |
+| 6 | VWAP Deviation v1.1 | `USER;bf538897546a48519a83e588ff562e72` | 3.0 | `staged/indicator_vwap_dev_v1.1.pine` |
+| 0 | VWAP Deviation v1.0 (retired) | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 11.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
 | 4 | Donchian Breakout v1.0 | `USER;6a0a490366d34845bed8071a79198cde` | 6.0 | `staged/indicator_donchian_v1.0.pine` |
-| 0 | Donchian + ADX v1.0 (retired) | `USER;bf538897546a48519a83e588ff562e72` | 2.0 | `staged/indicator_donchian_adx_v1.0.pine` |
+| 0 | Donchian + ADX v1.0 (retired, slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
 | 0 | EMA Ribbon + ADX v1.0 (retired) | `USER;c0ffe8e0dd034504a05de359eb6d41bd` | 2.0 | `staged/indicator_ema_ribbon_adx_v1.0.pine` |
 
-**Totals:** 16 alerts (16 active, 0 inactive), 4 indicators in production (VWAP Dev, Stoch RSI, EMA Ribbon, Donchian). 5 indicators retired (FVG v1.0, FVG v1.1, Liq Sweep, Donch+ADX, EMA+ADX).
+**Totals:** 18 alerts (18 active, 0 inactive), 4 indicators in production (VWAP Dev v1.1, Stoch RSI, EMA Ribbon, Donchian). 6 indicators retired (VWAP Dev v1.0, FVG v1.0, FVG v1.1, Liq Sweep, Donch+ADX, EMA+ADX).
 
 **Timeframe split:** 10 alerts on 1D (WF-validated), 6 alerts on 4H (WF-passing or live-profitable).
 
@@ -99,19 +100,20 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 ---
 
-## VWAP Deviation v1.0
+## VWAP Deviation v1.1 (upgraded from v1.0 2026-05-27)
 
-**Logic:** anchored VWAP ± deviation bands; mean-reversion entry on band touch + momentum confirmation. v6.0/v10.0 saves were part of Apr 19 same-bar bugfix series.
-**Slot:** `USER;53163d00de3843f1a78c67bfc88dbf6d` · script v11.0 · `staged/indicator_vwap_dev_v1.0.pine`
+**Logic:** mean reversion off rolling VWAP ±2.5σ bands + RSI oversold filter (< 40). v1.1 changes: band mult widened 2.0→2.5σ (deeper dip entries), RSI < 40 gate (rejects weak bounces), optional volume spike filter, sends `vwap_target` in webhook. Bot-side: strategy profile TP 4.0→2.0 ATR (target mean reversion, not breakout), SL 2.0→3.0 ATR (room for oscillation).
+**Slot:** `USER;bf538897546a48519a83e588ff562e72` · script v3.0 · `staged/indicator_vwap_dev_v1.1.pine`
+**v1.0 slot (retired):** `USER;53163d00de3843f1a78c67bfc88dbf6d` · script v11.0
 
 | status | symbol | TF | alert_id | notes |
 |---|---|---|---|---|
-| ✓ | FARTCOIN.P | 4H | 4606125661 | **WF passer (PF 3.79, Tier A+ 22%)** |
-| ✓ | MOODENG.P | 4H | 4606125675 | **WF passer (PF 2.13, Tier A 18%)** |
-| ✓ | PNUT | 4H | 4606392921 | **WF passer (PF 1.52, Tier B 13%) — added 2026-05-02** |
-| ✓ | AAVE | 1D | 4665962766 | **WF passer** — added 2026-05-10, EVM via Arbitrum |
-| ✓ | LDO | 1D | 4665962153 | **WF passer** — added 2026-05-10, EVM via Arbitrum |
-| ✓ | ARB | 1D | 4736423474 | **WF passer (PF 2.40, OOS 2.27)** — added 2026-05-19, EVM via Arbitrum |
+| ✓ | FARTCOIN.P | 4H | 4606125661 | **WF passer (PF 3.79, Tier A 18%)** — repointed v1.0→v1.1 2026-05-27 |
+| ✓ | MOODENG.P | 4H | 4606125675 | **WF passer (PF 2.13, Tier A 18%)** — repointed 2026-05-27 |
+| ✓ | PNUT | 4H | 4606392921 | **WF passer (PF 1.52, Tier B 13%)** — repointed 2026-05-27 |
+| ✓ | AAVE | 1D | 4665962766 | **WF passer** — repointed 2026-05-27, Binance.US lane |
+| ✓ | LDO | 1D | 4665962153 | **WF passer (Tier B 13%)** — repointed 2026-05-27, Binance.US lane |
+| ✓ | ARB | 1D | 4736423474 | **WF passer (PF 2.40, OOS 2.27)** — repointed 2026-05-27, Binance.US lane |
 | — | _culled 2026-05-15:_ JUP 4H (`4606092343`) -$1.00, LDO 4H (`4659627111`) dup of 1D, COMP 4H (`4659627481`) stacking |
 | — | _culled 2026-05-08:_ BONK 4H (`4524592285`) PF 0.95, PENGU 4H (`4478619043`) PF 0.97 | | | |
 | — | _culled 2026-05-03:_ ETH 4H (`4524592433`) PF 0.47 | | | |
@@ -214,6 +216,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-05-27 | **VWAP Deviation v1.0→v1.1 upgrade**: v1.0 had 18% WR with 59% SL hits — root cause was trend-following TP/SL params (4.0x/2.0x ATR) on a mean-reversion strategy. **Pine changes**: RSI < 40 oversold filter added (rejects weak bounces), band multiplier widened 2.0σ→2.5σ (deeper dip entries), optional volume spike filter, `vwap_target` sent in webhook. **Bot-side**: added `strategy_profiles.VWAP Deviation` in config.yaml with TP 2.0x ATR (target mean, not breakout) and SL 3.0x ATR (room for oscillation). v1.1 compiled to slot `USER;bf538897546a48519a83e588ff562e72` (reused retired Donch+ADX slot). All 6 alerts repointed via `modifyRestartAlert` + fetch interceptor: FARTCOIN/4H, MOODENG/4H, PNUT/4H, AAVE/1D, LDO/1D, ARB/1D. Inputs remapped to v1.1 layout with per-token sizing preserved. Bot restart required to pick up config.yaml strategy profile. |
 | 2026-05-19 | **Deployed VWAP Dev/ARB/1D + EMA Ribbon/BTC/1D**: Gap analysis against `nightly_20260518_0403` identified 2 WF-passing combos not yet deployed. Created alerts via TV UI automation; pine_versions corrected via `modifyRestartAlert` (ARB v10→v11, BTC v3→v4). ARB routes EVM/Arbitrum, BTC routes Binance.US. **Total alerts 14→16** (13 tokens, 10 1D + 6 4H). Full section reconciliation: added missing May 10 1D deploys to section tables, marked May 15 culls in Liq Sweep/Donch+ADX/EMA+ADX/Stoch RSI/VWAP Dev sections. |
 | 2026-05-15 | **Profitability overhaul — 13 underperforming 4H alerts culled, SL widened**: Data-driven cleanup based on May 1-15 P&L analysis. Deleted 13 alerts that failed WF AND underperformed live: PENGU/Stoch RSI, PENGU/FVG (biggest loser -$2.61), JUP/VWAP Dev (-$1.00), SOL/Donch+ADX (-$1.27), COMP/VWAP Dev (stacking positions), LDO/VWAP Dev 4H (dup of 1D, stacking), FLOKI/Donch+ADX, FLOKI/Liq Sweep, ARB/EMA+ADX, UNI/EMA+ADX, SOL/EMA+ADX, UNI/Liq Sweep, SOL/Liq Sweep. **SL multiplier widened**: global 1.5→2.0 ATR, memecoins 2.0→2.5 ATR (15 SL exits avg -4.2% vs 11 TP exits avg +8% — SL was triggering on normal volatility). Removed PENGU/JUP from token_overrides. Roster: 27→14 alerts (8 1D + 6 4H), 4 active indicators (down from 8). All remaining alerts refreshed via modifyRestartAlert. |
 | 2026-05-13 | **CLOSE/SELL signals removed from all 9 Pine indicators**: all indicators now BUY-only — `long_exit` variables, `if long_exit` alert blocks, CLOSE plotshapes, and CLOSE alertconditions stripped from all 9 staged Pine files (165 lines total). 8 production scripts recompiled+saved to TV slots (FVG v1.0 retired, skipped). All 27 alerts verified active post-save. Bot-side `ignore_close_signals` flag (deployed 2026-05-10) is now redundant but harmless. Webhook volume expected to drop ~75%. Commit `5182b0b`. |
