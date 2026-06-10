@@ -518,6 +518,66 @@ def strategy_ichimoku(df: pd.DataFrame, enable_short: bool = True) -> pd.DataFra
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 
+# ── Bench additions 2026-06-09 (profitability review follow-up) ──────────────
+# Two styles the core 8 don't cover. Python-bench only — no Pine until a combo
+# passes walk-forward (port → nightly → WF pass → then write the indicator).
+
+def strategy_rsi2(df: pd.DataFrame, enable_short: bool = True) -> pd.DataFrame:
+    """
+    Connors-style RSI(2) extreme mean reversion with long-term trend filter.
+    Long: RSI(2) < 10 while close > SMA(200) (oversold dip inside an uptrend).
+    Exit: close > SMA(5) or RSI(2) > 70 (snap-back complete).
+    Distinct cadence from VWAP Dev / Stoch RSI: enters on 1-2 bar washouts in
+    trending markets rather than band/oscillator structure.
+    """
+    rsi2 = rsi(df["close"], period=2)
+    sma200 = df["close"].rolling(200).mean()
+    sma5 = df["close"].rolling(5).mean()
+
+    long_entry = (rsi2 < 10) & (df["close"] > sma200)
+    long_exit = (df["close"] > sma5) | (rsi2 > 70)
+
+    short_entry = (rsi2 > 90) & (df["close"] < sma200) & enable_short
+    short_exit = (df["close"] < sma5) | (rsi2 < 30)
+
+    sig = _signals(len(df), df.index)
+    sig["entry_long"] = long_entry
+    sig["exit_long"] = long_exit
+    sig["entry_short"] = short_entry
+    sig["exit_short"] = short_exit
+    return sig
+
+
+def strategy_ema_pullback(df: pd.DataFrame, enable_short: bool = True) -> pd.DataFrame:
+    """
+    Buy the pullback in an established trend (the gap between our families:
+    Donchian/EMA Ribbon chase breakouts, VWAP/Stoch RSI catch falling knives —
+    nothing buys orderly dips inside an uptrend).
+    Long: EMA20 > EMA50 with EMA50 rising, and close crosses back UP through
+    EMA20 (prior close was below it — the pullback just resolved).
+    Exit: close < EMA50 (trend failed).
+    """
+    e20 = ema(df["close"], 20)
+    e50 = ema(df["close"], 50)
+
+    uptrend = (e20 > e50) & (e50 > e50.shift(1))
+    cross_up = (df["close"] > e20) & (df["close"].shift(1) <= e20.shift(1))
+    long_entry = uptrend & cross_up
+    long_exit = df["close"] < e50
+
+    downtrend = (e20 < e50) & (e50 < e50.shift(1))
+    cross_dn = (df["close"] < e20) & (df["close"].shift(1) >= e20.shift(1))
+    short_entry = downtrend & cross_dn & enable_short
+    short_exit = df["close"] > e50
+
+    sig = _signals(len(df), df.index)
+    sig["entry_long"] = long_entry
+    sig["exit_long"] = long_exit
+    sig["entry_short"] = short_entry
+    sig["exit_short"] = short_exit
+    return sig
+
+
 STRATEGIES = {
     # Original strategies (no regime filter)
     "Supertrend":   strategy_supertrend,
@@ -539,4 +599,7 @@ STRATEGIES = {
     "Mean Rev":     strategy_mean_reversion,
     # Long-horizon trend (added 2026-05-09 for BTC/SUI/POL coverage)
     "Ichimoku":     strategy_ichimoku,
+    # Bench additions 2026-06-09 — see function docstrings
+    "RSI2 Rev":     strategy_rsi2,
+    "EMA Pullback": strategy_ema_pullback,
 }

@@ -68,6 +68,17 @@ BINANCE_TOKENS = {
     "HYPE":     "HYPEUSDT",   # Hyperliquid token, hot
     "ONDO":     "ONDOUSDT",   # RWA narrative
     "ASTER":    "ASTERUSDT",  # User-flagged DeFi token
+    # ── 2026-06-09 expansion: liquidity probe of 163 not-in-universe USDT pairs.
+    # Added every pair with meaningful 24h quote volume + multi-year history;
+    # skipped thin tails (<$20k/day — data too gappy for honest signals) and
+    # PUMP/WOD-class listings. ZEC was the standout at $1.4M/day, 11x the next.
+    "ZEC":      "ZECUSDT",    # Privacy major — $1.4M/day on .US, deep history
+    "DASH":     "DASHUSDT",   # Privacy/payments major — $130k/day
+    "XLM":      "XLMUSDT",    # Payments major — $76k/day
+    "LTC":      "LTCUSDT",    # OG payments — $31k/day
+    "HBAR":     "HBARUSDT",   # Enterprise L1 — $21k/day
+    "DOT":      "DOTUSDT",    # Major L0 — $13k/day, long history
+    "TRX":      "TRXUSDT",    # Major L1 — $9k/day, long history
 }
 
 # Coinbase Advanced — used for Solana tokens not on Binance US.

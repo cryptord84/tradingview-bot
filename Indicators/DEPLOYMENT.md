@@ -1,7 +1,7 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-05-27 ~15:00 EDT (VWAP Dev v1.0→v1.1 upgrade: RSI filter + TP/SL rebalance; all 6 alerts repointed)
-**Source of truth:** TradingView (`alert_list` MCP / webpack 560065 `getAlertsCollection()`). This doc is a snapshot — always re-pull live state before acting.
+**Last verified:** 2026-06-09 ~7:00pm EDT (Donchian HTF v1.0 deployed + SOL/1D alert created `4892549592` — roster now 21 alerts; CLOSE exits restored across the entire roster, all bar-close)
+**Source of truth:** TradingView (`alert_list` MCP / webpack `getAlertsCollection()` — module rotated 560065 → **928195** as of 2026-06-09). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
 
@@ -20,20 +20,30 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | # alerts | indicator | script slot | script ver | source file |
 |---|---|---|---|---|
-| 1 | FVG v1.1 | `USER;3156f00306a244688b2d8de21cd03dbe` | 2.0 | `staged/indicator_fvg_v1.1.pine` |
-| 3 | EMA Ribbon v1.0 | `USER;f060080f798d46efa6ee90ea4356190a` | 4.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
+| 1 | FVG v1.2 | `USER;33f65a33cc544f53a324826578d3a8e2` | 1.0 | `staged/indicator_fvg_v1.2.pine` |
+| 3 | EMA Ribbon v1.1 | `USER;979fa3396148450591d37fff241dd4aa` | 1.0 | `staged/indicator_ema_ribbon_v1.1.pine` |
+| 4 | Donchian Breakout v1.1 | `USER;46a673e6469040dda110bfa1ffd1039d` | 1.0 | `staged/indicator_donchian_v1.1.pine` |
+| 1 | Donchian HTF v1.0 | `USER;dd331ce7211f48df8a39b8be50ab30c6` | 1.0 | `staged/indicator_donchian_htf_v1.0.pine` |
+| 6 | Stochastic RSI v1.1 | `USER;452f801743764531b38407308ff41da6` | 1.0 | `staged/indicator_stoch_rsi_v1.1.pine` |
+| 6 | VWAP Deviation v1.2 | `USER;d8d3064dcdc74ff4a72f2183ae8e19a1` | 1.0 | `staged/indicator_vwap_dev_v1.2.pine` |
+| 0 | FVG v1.1 (retired 2026-06-09) | `USER;3156f00306a244688b2d8de21cd03dbe` | 2.0 | `staged/indicator_fvg_v1.1.pine` |
+| 0 | EMA Ribbon v1.0 (retired 2026-06-09) | `USER;f060080f798d46efa6ee90ea4356190a` | 4.0 | `staged/indicator_ema_ribbon_v1.0.pine` |
+| 0 | Donchian Breakout v1.0 (retired 2026-06-09) | `USER;6a0a490366d34845bed8071a79198cde` | 6.0 | `staged/indicator_donchian_v1.0.pine` |
+| 0 | Stochastic RSI v1.0 (retired 2026-06-09) | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 4.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
+| 0 | VWAP Deviation v1.1 (retired 2026-06-09) | `USER;bf538897546a48519a83e588ff562e72` | 3.0 | `staged/indicator_vwap_dev_v1.1.pine` |
 | 0 | Liquidity Sweep v1.0 (retired) | `USER;12e465c59f0941d2a4fef70e58003c45` | 4.0 | `staged/indicator_liq_sweep_v1.0.pine` |
-| 4 | Stochastic RSI v1.0 | `USER;fea633ae4e5a488c8ccea5efd448b93a` | 4.0 | `staged/indicator_stoch_rsi_v1.0.pine` |
-| 6 | VWAP Deviation v1.1 | `USER;bf538897546a48519a83e588ff562e72` | 3.0 | `staged/indicator_vwap_dev_v1.1.pine` |
 | 0 | VWAP Deviation v1.0 (retired) | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 11.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
-| 4 | Donchian Breakout v1.0 | `USER;6a0a490366d34845bed8071a79198cde` | 6.0 | `staged/indicator_donchian_v1.0.pine` |
-| 0 | Donchian + ADX v1.0 (retired, slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
+| 0 | Donchian + ADX v1.0 (retired, old slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
 | 0 | EMA Ribbon + ADX v1.0 (retired) | `USER;c0ffe8e0dd034504a05de359eb6d41bd` | 2.0 | `staged/indicator_ema_ribbon_adx_v1.0.pine` |
 
-**Totals:** 18 alerts (18 active, 0 inactive), 4 indicators in production (VWAP Dev v1.1, Stoch RSI, EMA Ribbon, Donchian). 6 indicators retired (VWAP Dev v1.0, FVG v1.0, FVG v1.1, Liq Sweep, Donch+ADX, EMA+ADX).
+**Totals:** 21 alerts (all active), 6 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
 
-**Timeframe split:** 10 alerts on 1D (WF-validated), 6 alerts on 4H (WF-passing or live-profitable).
+**Mean-rev exit restore (2026-06-09):** VWAP Dev v1.2 and Stoch RSI v1.1 re-add the edge-triggered CLOSE alerts removed 2026-05-13 (the backtests' actual exits) and default `realtimeTrig=false` (bar-close fires). All 12 alerts repointed in place via `modifyRestartAlert` + fetch-interceptor (pine_id re-inject) — webhook URLs, secrets, fire history preserved. Alert display *names* still read v1.0/v1.1 (cosmetic — payload `strategy` strings come from the script: "VWAP Deviation v1.2" / "Stoch RSI v1.1"). Rollout note: positions opened under the old strategy labels won't match new CLOSE labels; the bot's 2-ATR TP cap + 14d max-hold resolve those stragglers.
+
+**Per-wallet split (live 2026-05-30):** Solana/Jupiter 9 · Binance.US 8 · EVM/Arbitrum 3 (AAVE, LDO, LINK).
+
+**Timeframe split:** 13 alerts on 1D, 7 alerts on 4H.
 
 **WF alignment:** 13/16 WF-validated passers. 3 live-performance keeps (RENDER/Donchian 4H 89% WR, PNUT/VWAP Dev 4H 100% WR, BONK/EMA Ribbon 4H +$1.24).
 
@@ -50,7 +60,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | status | symbol | TF | alert_id | notes |
 |---|---|---|---|---|
 | ✓ | NEAR | 1D | 4768403384 | **WF passer (PF 1.57, OOS 1.84)** — added 2026-05-23, Binance.US lane |
-| ✓ | PENGU | 4H | 4478628322 | 2026-04-28 |
+| — | _culled (gone from live alert_list 2026-05-30):_ PENGU 4H (`4478628322`) | | | |
 | — | _culled 2026-05-03:_ BONK (`4454018061`) PF 0.64, JUP (`4478601735`) PF 0.66, RENDER (`4454018043`) PF 0.41 | | | |
 
 ---
@@ -94,6 +104,8 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | ✓ | OP | 1D | 4665962133 | **WF passer** — added 2026-05-10 |
 | ✓ | ARB | 1D | 4665962784 | **WF passer** — added 2026-05-10 |
 | ✓ | ETH | 1D | 4765875052 | **WF passer (PF 1.72, OOS 1.66)** — added 2026-05-22, Solana/Jupiter |
+| ✓ | TIA | 4H | 4816316288 | **WF passer 2-sample (05-28 PF 1.67, 05-29 PF 1.60)** — added 2026-05-30, Binance.US lane, Tier C 9% |
+| ✓ | LINK | 1D | 4816484447 | **near-miss (IS 1.31 / OOS 1.48, 52 trades — fails IS_PF gate only)** — added 2026-05-30, EVM/Arbitrum lane, Tier C 9% |
 | — | _culled 2026-05-15:_ PENGU 4H (`4479801456`) — profitability overhaul |
 | — | _culled 2026-05-08:_ ETH 4H (`4454015121`) PF 0.65, SOL 4H (`4454015105`) PF 0.85, RENDER 1H (`4454015587`) PF 0.86 | | | |
 | — | _culled 2026-05-02:_ BONK 1H (`4576190853`), PENGU 1H (`4558016704`) | | | catastrophic 1H |
@@ -111,7 +123,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | ✓ | FARTCOIN.P | 4H | 4606125661 | **WF passer (PF 3.79, Tier A 18%)** — repointed v1.0→v1.1 2026-05-27 |
 | ✓ | MOODENG.P | 4H | 4606125675 | **WF passer (PF 2.13, Tier A 18%)** — repointed 2026-05-27 |
 | ✓ | PNUT | 4H | 4606392921 | **WF passer (PF 1.52, Tier B 13%)** — repointed 2026-05-27 |
-| ✓ | AAVE | 1D | 4665962766 | **WF passer** — repointed 2026-05-27, Binance.US lane |
+| ✓ | AAVE | 1D | 4665962766 | **WF passer** — repointed 2026-05-27; **routing moved Binance.US→EVM/Arbitrum 2026-05-30** (coins held on Arbitrum) |
 | ✓ | LDO | 1D | 4665962153 | **WF passer (Tier B 13%)** — repointed 2026-05-27, Binance.US lane |
 | ✓ | ARB | 1D | 4736423474 | **WF passer (PF 2.40, OOS 2.27)** — repointed 2026-05-27, Binance.US lane |
 | — | _culled 2026-05-15:_ JUP 4H (`4606092343`) -$1.00, LDO 4H (`4659627111`) dup of 1D, COMP 4H (`4659627481`) stacking |
@@ -197,7 +209,9 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | **OP** | — | **1D ✦** | — | — |
 | **PNUT** | — | — | **4H ▲** | — |
 | **RENDER** | — | — | — | **4H ▲** |
+| **LINK** | — | **1D ▲** | — | — |
 | **SOL** | **1D ✦** | — | — | — |
+| **TIA** | — | **4H ✦** | — | — |
 
 ✦ = WF-validated passer (nightly backtest walk-forward confirmed).
 ▲ = live-performance keeper (strong real-trade results justify retention despite no WF pass).
@@ -216,6 +230,12 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-06-09 | **Alert Signal Heartbeat panel + `data/active_alerts.json` refreshed (21 alerts, 16 tokens).** Snapshot regenerated from a fresh MCP `alert_list` (the post-deploy refresh step missed earlier today) — entries now carry `strategy`, normalized `tf`, and TV-side `last_fired`. New dashboard endpoint `/api/signals/heartbeat` joins this roster against `signals_log` per alert: last webhook received, 7d/30d/executed counts, staleness status (TF-aware thresholds), and a **delivery-gap detector** — TV `last_fired` newer than the last webhook ⇒ status MISSED (ngrok/secret/webhook breakage, distinct from a quiet market). Also reports "unrostered" signal groups (labels still arriving that match no deployed alert). UI panel sits under the Webhook Disposition Log; live on browser refresh, endpoint needs the next bot restart. Note: `signals_log` history starts 2026-05-30 (DB recovery), so "SILENT" means no webhook since then — Donchian/EMA Ribbon's TV fire dates (05-11→05-26) all predate the window, consistent, no missed deliveries detected. TV Desktop upgraded to 3.2.0 this evening; `tv_launch`/`alert_list` verified working post-upgrade (write-path module IDs unverified since the upgrade — rediscover before next `modifyRestartAlert`). |
+| 2026-06-09 | **Donchian HTF v1.0 deployed + SOL/1D alert created (Tier-A promotion) + backtest engine realism upgrades.** The 06-09 HTF nightly's only passer — Donchian/SOL/1D with the 4×TF EMA(20) slope gate (PF 4.43, IS 4.46/OOS 4.24, DD 4.6%, Tier A) — was undeployed; the UNFILTERED Donchian/SOL/1D fails WF (OOS 0.60), so the filter is load-bearing. New script `USER;dd331ce7211f48df8a39b8be50ab30c6` (Donchian v1.1 + non-repainting `request.security([1] vs [2], lookahead_off)` HTF gate on entries only, matching `_apply_higher_tf_filter` semantics; CLOSE included; bar-close). Alert `4892549592` (BINANCE:SOLUSDT, 1D) created via `createAlert(928195)` + interceptor — gotcha: client-format `symbol` is an OBJECT (`{symbol, adjustment, session, currency-id}`), string-coercing it sends "[object Object]" → server `internal` error; mutate `.symbol.symbol` instead. Created inactive → activated via modifyRestartAlert; server-verified active with secret + ngrok webhook. **Roster 20→21.** Bot-side: `"donchian htf"→"Donchian"` alias added to `_STRATEGY_NAME_ALIASES` (restart needed; until then SOL signals size at suggested 15% instead of Tier-A 18% — TP/SL unaffected). Engine (offline, no restart): breakeven step added to `RiskConfig` + both long/short paths (validated: pop-then-dump synthetic flips -1.80%→+0.10%); mean-rev TP clamp 2.0 mirrored in `risk_for`; `atr_sl_mult` default 1.5→2.0 (live parity, lagged since 05-15); per-token slippage (`slippage_for`: memes 0.75%/side, majors 0.1%) wired into nightly. Tonight's nightly reprices everything under live-true geometry — expect FARTCOIN/MOODENG paper edges to shrink. KAVA/VWAP/4H passes WF but stays undeployed (Binance.US $2.56 market-order cap — needs limit orders). |
+| 2026-06-09 | **Batch 2 — CLOSE exits restored on the rest of the roster: Donchian v1.1 + EMA Ribbon v1.1 + FVG v1.2, 8 alerts repointed.** Git diff of `5182b0b` confirmed all three lost backtest-matching edge-triggered exits in the May 13 wholesale removal (Donchian: `ta.crossunder(close, ch_mid)`; EMA Ribbon: alignment-break one-shot; FVG v1.1: state/signal split — none were spammers). New slots via `saveNew(752174)`, 0 compile errors: Donchian Breakout v1.1 → `USER;46a673e6469040dda110bfa1ffd1039d`, EMA Ribbon v1.1 → `USER;979fa3396148450591d37fff241dd4aa`, FVG v1.2 → `USER;33f65a33cc544f53a324826578d3a8e2`. Repointed via `modifyRestartAlert(928195)` + interceptor: Donchian DOGE/1D `4665962753`, ETH/1D `4665962725`, BTC/1D `4665961105`, RENDER/4H `4640525994` (in_7 already bar-close); EMA Ribbon BTC/1D `4736445587` (in_8 true→false), SOL/1D `4665962741` + BONK/4H `4454015047` (already false, stale in_10 dropped); FVG NEAR/1D `4768403384` (in_6 true→false). **Full-roster audit: 20/20 active alerts on new scripts, all bar-close, zero problems.** New strategy labels verified to normalize correctly bot-side (sizing tiers + TP/SL profiles resolve; Donchian keeps trend TP 4.0, FVG gets 2-ATR mean-rev cap). No bot restart needed — labels are payload strings parsed at signal time. No open positions on these 3 strategies → zero CLOSE-label stragglers. |
+| 2026-06-09 | **Mean-reversion exits restored: VWAP Dev v1.2 + Stoch RSI v1.1 deployed, all 12 alerts repointed + flipped to bar-close.** Root cause from the 2026-06-09 profitability review: the 2026-05-13 CLOSE removal deleted the exact exits the backtests were validated with (VWAP exit-at-mean, Stoch RSI overbought-cross) — 30d live result was 9 tp_hit vs 71 sl/trail exits, -$33.5. **New scripts** (created via `saveNew()` module 752174, NO editor binding involved): VWAP Deviation v1.2 → `USER;d8d3064dcdc74ff4a72f2183ae8e19a1` (edge-triggered CLOSE on VWAP crossover + same-bar BUY/CLOSE guard, `realtimeTrig=false` default); Stochastic RSI v1.1 → `USER;452f801743764531b38407308ff41da6` (CLOSE on K/D cross-down >80, 0 compile errors). **All 12 alerts repointed in place** via `getAlertsCollection().modifyRestartAlert` + fetch-interceptor pine_id re-inject — ⚠️ module rotated **560065 → 928195** this build. Every alert also got `in_10` (realtimeTrig) true→false, and Stoch alerts had stale `in_11` key dropped. Server-side verified via `list_alerts`: 12/12 on new pine_ids v1.0, bar-close, active, webhook URL + 64-char secret + fire history preserved. VWAP: ARB/1D `4736423474`, AAVE/1D `4665962766`, LDO/1D `4665962153`, PNUT/4H `4606392921`, MOODENG/4H `4606125675`, FARTCOIN.P/4H `4606125661`. Stoch: LINK/1D `4816484447`, TIA/4H `4816316288`, ETH/1D `4765875052`, ARB/1D `4665962784`, OP/1D `4665962133`, FARTCOIN.P/4H `4606125639`. **Near-miss logged**: `pine_new` MCP tool created a blank template while leaving the editor BOUND to the live VWAP v1.1 slot (`pine_get_active` caught it) — binding restored via `fetchAndOpenScript` before any save. Bot-side same day (already restarted): vwap_target TP cap, 2-ATR mean-rev TP clamp, trail breakeven step, Kalshi NO≤70¢ gate, Solana real-fill recording, duplicate-position guard. |
+| 2026-05-30 | **Stoch RSI/LINK/1D deployed (Tier C) + EVM leftovers sold + EVM swap precision bug fixed.** (1) Created alert `4816484447` (BINANCE:LINKUSDT, res D, Stoch RSI v1.0 slot, `in_9=9`) via createAlert + interceptor. LINK already in `EVM_TOKENS` (no code change). It's a near-miss (IS 1.31/OOS 1.48, 52 trades — fails IS_PF gate only), deployed Tier C as a watch like the May-8 LDO/COMP near-misses. **Total alerts 19→20.** COMP/UNI re-evaluated: both far off (COMP overfit IS→OOS collapse; UNI unstable). (2) Sold EVM leftovers COMP 0.085→1.55 USDC + ARB 111.4→11.69 USDC (~$13.20 freed). (3) **Fixed a real bug in `evm_swap_executor.execute_swap`**: `amount_human = str(amount_wei/10**dec)` used float and rounded UP on full-balance sells → OpenOcean requested more wei than held → `transferFrom` reverted ("transfer amount exceeds balance"). Now uses `Decimal`. **This also affected `position_monitor` EVM closes (AAVE/LDO/LINK TP/SL would have reverted) — restart needed so the live bot loads the fix.** |
+| 2026-05-30 | **Stoch RSI/TIA/4H deployed + AAVE re-routed to EVM + positions-table recovery.** (1) Created alert `4816316288` (BINANCE:TIAUSDT, res 240, Stoch RSI v1.0 slot `USER;fea633ae…`, Tier C `in_9=9`) via `getAlertsCollection().createAlert()` + the fetch-interceptor that re-injects `pine_id`/`pine_version` (validated path). 2-sample WF passer (05-28 PF 1.67 / 05-29 PF 1.60). Added `TIA→TIAUSDT` to `BINANCE_TOKENS`. **Total alerts 18→19.** (2) AAVE moved `BINANCE_TOKENS`→`EVM_TOKENS` (`0xba5DdD…`/18) so Arbitrum-held AAVE is monitored/exited on its real venue; new AAVE buys now route EVM (revert once that position closes if Binance headroom preferred). (3) Rebuilt `positions` table (8 rows) from wallet reconciliation after the 05-30 power-off corrupted `trades.db` (CSV backup only covered `trades`). Roster correction: FVG/PENGU/4H `4478628322` confirmed already culled (FVG = NEAR/1D only). **Bot restart required to load `BINANCE_TOKENS`/`EVM_TOKENS` changes.** |
 | 2026-05-27 | **VWAP Deviation v1.0→v1.1 upgrade**: v1.0 had 18% WR with 59% SL hits — root cause was trend-following TP/SL params (4.0x/2.0x ATR) on a mean-reversion strategy. **Pine changes**: RSI < 40 oversold filter added (rejects weak bounces), band multiplier widened 2.0σ→2.5σ (deeper dip entries), optional volume spike filter, `vwap_target` sent in webhook. **Bot-side**: added `strategy_profiles.VWAP Deviation` in config.yaml with TP 2.0x ATR (target mean, not breakout) and SL 3.0x ATR (room for oscillation). v1.1 compiled to slot `USER;bf538897546a48519a83e588ff562e72` (reused retired Donch+ADX slot). All 6 alerts repointed via `modifyRestartAlert` + fetch interceptor: FARTCOIN/4H, MOODENG/4H, PNUT/4H, AAVE/1D, LDO/1D, ARB/1D. Inputs remapped to v1.1 layout with per-token sizing preserved. Bot restart required to pick up config.yaml strategy profile. |
 | 2026-05-19 | **Deployed VWAP Dev/ARB/1D + EMA Ribbon/BTC/1D**: Gap analysis against `nightly_20260518_0403` identified 2 WF-passing combos not yet deployed. Created alerts via TV UI automation; pine_versions corrected via `modifyRestartAlert` (ARB v10→v11, BTC v3→v4). ARB routes EVM/Arbitrum, BTC routes Binance.US. **Total alerts 14→16** (13 tokens, 10 1D + 6 4H). Full section reconciliation: added missing May 10 1D deploys to section tables, marked May 15 culls in Liq Sweep/Donch+ADX/EMA+ADX/Stoch RSI/VWAP Dev sections. |
 | 2026-05-15 | **Profitability overhaul — 13 underperforming 4H alerts culled, SL widened**: Data-driven cleanup based on May 1-15 P&L analysis. Deleted 13 alerts that failed WF AND underperformed live: PENGU/Stoch RSI, PENGU/FVG (biggest loser -$2.61), JUP/VWAP Dev (-$1.00), SOL/Donch+ADX (-$1.27), COMP/VWAP Dev (stacking positions), LDO/VWAP Dev 4H (dup of 1D, stacking), FLOKI/Donch+ADX, FLOKI/Liq Sweep, ARB/EMA+ADX, UNI/EMA+ADX, SOL/EMA+ADX, UNI/Liq Sweep, SOL/Liq Sweep. **SL multiplier widened**: global 1.5→2.0 ATR, memecoins 2.0→2.5 ATR (15 SL exits avg -4.2% vs 11 TP exits avg +8% — SL was triggering on normal volatility). Removed PENGU/JUP from token_overrides. Roster: 27→14 alerts (8 1D + 6 4H), 4 active indicators (down from 8). All remaining alerts refreshed via modifyRestartAlert. |

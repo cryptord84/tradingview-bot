@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backtesting.data import fetch_all, TIMEFRAMES, BINANCE_TOKENS, COINGECKO_TOKENS, COINBASE_TOKENS, OKX_TOKENS
 from backtesting.engine import (
     run_backtest, run_walkforward, BacktestResult, WalkForwardResult,
-    RiskConfig, DEFAULT_RISK, risk_for,
+    RiskConfig, DEFAULT_RISK, risk_for, slippage_for,
 )
 from backtesting.strategies import STRATEGIES, with_htf_filter
 
@@ -111,6 +111,10 @@ FOCUS_TIMEFRAMES = ["4H", "1D"]
 CORE_STRATEGIES = [
     "VWAP Dev", "Donchian", "Stoch RSI", "EMA Ribbon", "Liq Sweep",
     "FVG", "Mean Rev", "EMA+ADX",
+    # Bench additions 2026-06-09: RSI(2) washout reversion + trend-pullback —
+    # the two styles the core 8 don't cover. Python-bench only; Pine gets
+    # written only after a combo passes WF.
+    "RSI2 Rev", "EMA Pullback",
 ]
 
 
@@ -174,6 +178,9 @@ def run_nightly(
                         min_oos_pf_retention=0.6,
                         min_oos_pf_absolute=1.2,
                         risk=risk,
+                        # Per-token fill realism (2026-06-09): memes pay 0.75%/side
+                        # vs 0.1% for liquid majors — see engine.MEME_TOKENS.
+                        slippage=slippage_for(token),
                     )
                 except Exception as e:
                     print(f"  ERROR: {strat_name}/{token}/{tf}: {e}")

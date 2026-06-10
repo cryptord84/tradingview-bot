@@ -1095,6 +1095,94 @@ async def get_strategy_pnl(days: int = 30):
     return {"days": days, "bars": bars}
 
 
+@router.get("/exit-quality")
+async def get_exit_quality(days: int = 30):
+    """Exit-quality tracking for the 2026-06-09 profitability overhaul.
+
+    Splits exit stats at the fix-deploy cutoff so the dashboard shows whether
+    the changes are paying off: exits by reason (tp/sl/trail/signal), the
+    trail-exits-at-breakeven-or-better rate (was 0/22 pre-fix by construction),
+    CLOSE-signal flow from the restored Pine exits, and Kalshi P&L by NO-cost
+    band (the 70-79c band gate landed in the same overhaul).
+    """
+    days = max(1, min(int(days), 365))
+    # All trade/position timestamps are UTC; the restart that loaded the fixes
+    # (Kalshi gate, trail rework, TP caps) completed 2026-06-09 22:10:43 UTC —
+    # entries before this ran on old config (a 70c NO slipped in at 22:07).
+    FIX_CUTOFF = "2026-06-09T22:11:00"
+    import sqlite3
+    from app.database import DB_PATH
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+
+    def reason_stats(where_extra: str, params: tuple) -> dict:
+        rows = c.execute(
+            f"""SELECT reason, COUNT(*) n, ROUND(COALESCE(SUM(pnl_usd),0),2) pnl,
+                       SUM(CASE WHEN pnl_usd >= 0 THEN 1 ELSE 0 END) wins
+                FROM trades
+                WHERE pnl_usd IS NOT NULL
+                  AND reason IN ('tp_hit','sl_hit','trail_sl','signal_close','manual_close')
+                  {where_extra}
+                GROUP BY reason""",
+            params,
+        ).fetchall()
+        by_reason = {r["reason"]: {"n": r["n"], "pnl": r["pnl"], "wins": r["wins"]} for r in rows}
+        trail = by_reason.get("trail_sl", {"n": 0, "wins": 0})
+        return {
+            "by_reason": by_reason,
+            "total_pnl": round(sum(v["pnl"] for v in by_reason.values()), 2),
+            "trail_n": trail["n"],
+            # The pre-fix trail geometry made breakeven impossible (22/22 losses
+            # in the 30d before 06-09); this rate should trend toward 100%.
+            "trail_breakeven_rate": round(trail["wins"] / trail["n"] * 100, 1) if trail["n"] else None,
+        }
+
+    window = reason_stats("AND timestamp >= datetime('now', ?)", (f"-{days} days",))
+    post_fix = reason_stats("AND timestamp >= ?", (FIX_CUTOFF,))
+
+    # CLOSE-signal flow since the fix (restored Pine exits should arrive as
+    # sparse one-shots — a spike here means a script is spamming again).
+    close_row = c.execute(
+        """SELECT COUNT(*) n,
+                  SUM(CASE WHEN disposition = 'executed' THEN 1 ELSE 0 END) executed
+           FROM signals_log
+           WHERE timestamp >= ? AND raw_payload LIKE '%\"signal_type\":\"CLOSE\"%'""",
+        (FIX_CUTOFF,),
+    ).fetchone()
+
+    # Kalshi NO-cost bands within the window (NO-side era only). Bands ≥70c
+    # should stop appearing after the 06-09 gate (no_min_yes_bid_cents 12→30).
+    band_rows = c.execute(
+        """SELECT (avg_price_cents/10)*10 AS band, COUNT(*) n,
+                  SUM(CASE WHEN pnl_cents > 0 THEN 1 ELSE 0 END) wins,
+                  ROUND(COALESCE(SUM(pnl_cents),0)/100.0, 2) pnl,
+                  SUM(CASE WHEN opened_at >= ? THEN 1 ELSE 0 END) n_post_gate
+           FROM kalshi_positions
+           WHERE pnl_cents IS NOT NULL
+             AND opened_at >= '2026-05-16'
+             AND COALESCE(closed_at, opened_at) >= datetime('now', ?)
+           GROUP BY band ORDER BY band""",
+        (FIX_CUTOFF, f"-{days} days"),
+    ).fetchall()
+    c.close()
+
+    return {
+        "days": days,
+        "fix_cutoff": FIX_CUTOFF,
+        "window": window,
+        "post_fix": post_fix,
+        "close_signals_post_fix": {
+            "received": close_row["n"] or 0,
+            "executed": close_row["executed"] or 0,
+        },
+        "kalshi_bands": [
+            {"band": f"{r['band']}-{r['band']+9}c", "n": r["n"], "wins": r["wins"],
+             "pnl": r["pnl"], "n_post_gate": r["n_post_gate"]}
+            for r in band_rows
+        ],
+    }
+
+
 @router.get("/trades")
 async def get_trade_history(limit: int = 100, offset: int = 0):
     """Get trade history."""
@@ -1144,6 +1232,171 @@ async def get_signal_history(limit: int = 50, since: Optional[str] = None):
             "trade_pnl_usd": r.get("trade_pnl_usd"),
         })
     return {"signals": out, "total": len(out)}
+
+
+_TF_NORM = {"60": "1H", "1H": "1H", "240": "4H", "4H": "4H", "D": "1D", "1D": "1D"}
+
+
+def _heartbeat_strat_key(name: str) -> str:
+    """Normalize a strategy label for roster<->payload matching.
+
+    Payloads carry versioned labels ("VWAP Deviation v1.2"); the roster stores
+    base names. Version suffix is stripped so a repoint that bumps the script
+    version keeps the same heartbeat row (alert_id is unchanged).
+    """
+    import re
+    s = re.sub(r"\s+v\d+(\.\d+)*\s*$", "", (name or "").strip().lower())
+    return {"vwap dev": "vwap deviation", "donchian breakout": "donchian"}.get(s, s)
+
+
+@router.get("/signals/heartbeat")
+async def signals_heartbeat():
+    """Per-alert signal heartbeat: when each deployed TV alert last reached the
+    webhook, and its recent fire counts.
+
+    Catches the silent failure mode after a repoint/redeploy — a bad webhook
+    message or wrong slot binding produces no errors, just no signals. Roster
+    comes from data/active_alerts.json (refreshed via the MCP alert_list flow
+    after deploys); history from signals_log. Also reports "unrostered" signal
+    groups still firing that match no deployed alert (retired-but-live alerts).
+    """
+    import json as _json
+    import sqlite3
+    from datetime import datetime, timezone
+    from app.database import DB_PATH
+
+    roster = _load_active_alerts()
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+    try:
+        # signals_log only goes back to the 2026-05-30 DB recovery — "never"
+        # below means "no webhook since history_since", not "never fired".
+        history_since = c.execute("SELECT MIN(timestamp) FROM signals_log").fetchone()[0]
+        rows = c.execute(
+            """SELECT COALESCE(json_extract(raw_payload,'$.strategy'),'') strat,
+                      COALESCE(json_extract(raw_payload,'$.symbol'),'') sym,
+                      COALESCE(json_extract(raw_payload,'$.timeframe'),'') tf,
+                      MAX(timestamp) last_at,
+                      SUM(CASE WHEN timestamp >= datetime('now','-7 days') THEN 1 ELSE 0 END) n7,
+                      SUM(CASE WHEN timestamp >= datetime('now','-30 days') THEN 1 ELSE 0 END) n30,
+                      SUM(CASE WHEN disposition='executed'
+                               AND timestamp >= datetime('now','-30 days') THEN 1 ELSE 0 END) exec30
+               FROM signals_log
+               WHERE COALESCE(json_extract(raw_payload,'$.dry_run'), 0) NOT IN (1, 'true')
+               GROUP BY 1, 2, 3"""
+        ).fetchall()
+    finally:
+        c.close()
+
+    # Aggregate signal groups by (strategy, symbol); keep per-TF detail for
+    # disambiguating same strategy+symbol deployed on two timeframes.
+    groups: dict = {}
+    for r in rows:
+        key = (_heartbeat_strat_key(r["strat"]), r["sym"])
+        g = groups.setdefault(key, {"by_tf": {}, "last_at": None, "n7": 0, "n30": 0, "exec30": 0})
+        tf = _TF_NORM.get(r["tf"], r["tf"] or "")
+        agg = g["by_tf"].setdefault(tf, {"last_at": None, "n7": 0, "n30": 0, "exec30": 0})
+        for tgt in (g, agg):
+            tgt["n7"] += r["n7"] or 0
+            tgt["n30"] += r["n30"] or 0
+            tgt["exec30"] += r["exec30"] or 0
+            if r["last_at"] and (tgt["last_at"] is None or r["last_at"] > tgt["last_at"]):
+                tgt["last_at"] = r["last_at"]
+
+    now = datetime.now(timezone.utc)
+
+    def _age_hours(ts: str):
+        if not ts:
+            return None
+        try:
+            dt = datetime.fromisoformat(ts.replace(" ", "T"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return round((now - dt).total_seconds() / 3600, 1)
+        except Exception:
+            return None
+
+    alerts = []
+    matched_keys = set()
+    for token, entries in (roster.get("by_token") or {}).items():
+        for a in entries:
+            strat = a.get("strategy") or ""
+            sym = (a.get("tv_symbol") or "").split(":")[-1]
+            tf = _TF_NORM.get(a.get("tf") or "", a.get("tf") or "")
+            key = (_heartbeat_strat_key(strat), sym)
+            matched_keys.add(key)
+            g = groups.get(key)
+            # Prefer the exact-TF bucket when this strategy+symbol runs on
+            # multiple timeframes; fall back to the combined group (payloads
+            # occasionally omit the timeframe field).
+            src = None
+            if g:
+                same_key_tfs = sum(
+                    1 for e2 in entries
+                    if _heartbeat_strat_key(e2.get("strategy") or "") == key[0]
+                    and (e2.get("tv_symbol") or "").split(":")[-1] == sym
+                )
+                src = g["by_tf"].get(tf) if (same_key_tfs > 1 and tf in g["by_tf"]) else g
+            last_at = src["last_at"] if src else None
+            age = _age_hours(last_at)
+            # Sparse alerts are expected (1D bar-close fires) — thresholds are
+            # generous and only meant to flag "worth a manual look".
+            warn_h, stale_h = (72, 168) if tf in ("1H", "4H") else (168, 336)
+            if last_at is None:
+                status = "never"
+            elif age is not None and age >= stale_h:
+                status = "stale"
+            elif age is not None and age >= warn_h:
+                status = "warn"
+            else:
+                status = "ok"
+            # Delivery-gap check: TV recorded a fire (as of the snapshot) that
+            # never showed up as a webhook → ngrok/webhook/secret breakage,
+            # a sharper alarm than mere staleness. Only valid for fires inside
+            # the signals_log retention window.
+            tv_fired = a.get("last_fired")
+            missed = False
+            if tv_fired and history_since:
+                tv_age = _age_hours(tv_fired.replace("Z", "+00:00"))
+                in_window = tv_fired.replace("Z", "")[:19] > history_since.replace(" ", "T")[:19]
+                if tv_age is not None and in_window:
+                    # webhook absent, or older than the TV fire by >12 min
+                    missed = age is None or (age - tv_age) > 0.2
+                    if missed:
+                        status = "missed"
+            alerts.append({
+                "alert_id": a.get("alert_id"),
+                "token": token,
+                "strategy": strat,
+                "symbol": sym,
+                "tf": tf,
+                "active": a.get("active", True),
+                "last_signal_at": last_at,
+                "age_hours": age,
+                "tv_last_fired": tv_fired,
+                "n7": src["n7"] if src else 0,
+                "n30": src["n30"] if src else 0,
+                "exec30": src["exec30"] if src else 0,
+                "status": status,
+            })
+
+    # Most-silent first: never-fired, then oldest last-signal.
+    alerts.sort(key=lambda x: (x["last_signal_at"] is not None, x["last_signal_at"] or ""))
+
+    unrostered = [
+        {"strategy": k[0], "symbol": k[1], "last_signal_at": g["last_at"], "n30": g["n30"]}
+        for k, g in groups.items()
+        if k not in matched_keys and g["n30"] > 0 and k[0] and "smoke test" not in k[0]
+    ]
+    unrostered.sort(key=lambda x: x["last_signal_at"] or "", reverse=True)
+
+    return {
+        "roster_snapshot_at": roster.get("snapshot_at"),
+        "roster_count": sum(len(v) for v in (roster.get("by_token") or {}).values()),
+        "history_since": history_since,
+        "alerts": alerts,
+        "unrostered": unrostered,
+    }
 
 
 @router.get("/trades/today")
@@ -1827,13 +2080,25 @@ async def get_positions_api(status: str = "all", limit: int = 50):
     closed_ids = [p["id"] for p in positions if p["status"] != "open"]
     if closed_ids:
         watches = get_reentry_watches_by_position(closed_ids)
+        # Bounce-confirmation re-entry (2026-06-03): two-stage — price must dip to the
+        # discount target, THEN recover bounce_confirm_pct off the trailing low before re-buying.
+        _re = (get("position_monitor") or {}).get("reentry") or {}
+        bounce_pct = float(_re.get("bounce_confirm_pct", 1.5) or 1.5)
         for p in positions:
             if p["id"] in watches:
                 w = watches[p["id"]]
+                low_seen = w.get("low_seen") or w["sl_exit_price"]
+                dip_confirmed = low_seen <= w["target_price"]
+                bounce_target = low_seen * (1.0 + bounce_pct / 100.0)
                 p["reentry_watch"] = {
                     "id": w["id"],
                     "target_price": w["target_price"],
                     "sl_exit_price": w["sl_exit_price"],
+                    "low_seen": low_seen,
+                    "bounce_confirm_pct": bounce_pct,
+                    "bounce_target": bounce_target,
+                    "dip_confirmed": dip_confirmed,
+                    "phase": "awaiting_bounce" if dip_confirmed else "awaiting_dip",
                     "status": w["status"],
                     "expires_at": w["expires_at"],
                     "triggered_at": w["triggered_at"],
@@ -1849,11 +2114,15 @@ async def get_positions_api(status: str = "all", limit: int = 50):
                             cp = all_p[token_sym].get("price")
                     if cp:
                         p["reentry_watch"]["current_price"] = cp
-                        distance_total = w["sl_exit_price"] - w["target_price"]
-                        distance_remaining = cp - w["target_price"]
-                        p["reentry_watch"]["progress_pct"] = round(
-                            max(0, min(100, (1 - distance_remaining / distance_total) * 100)) if distance_total > 0 else 0, 1
-                        )
+                        if dip_confirmed:
+                            # Stage 2: how far price has recovered off the low toward the bounce trigger
+                            span = bounce_target - low_seen
+                            prog = ((cp - low_seen) / span * 100) if span > 0 else 0
+                        else:
+                            # Stage 1: how close the dip is to reaching the discount target
+                            span = w["sl_exit_price"] - w["target_price"]
+                            prog = ((1 - (cp - w["target_price"]) / span) * 100) if span > 0 else 0
+                        p["reentry_watch"]["progress_pct"] = round(max(0, min(100, prog)), 1)
 
     return {"positions": positions, "total": len(positions)}
 

@@ -220,6 +220,21 @@ class BinanceUSClient:
         except Exception:
             return None
 
+    async def get_book_ticker(self, symbol: str) -> dict:
+        """Best bid/ask — limit-order pricing needs the touch, not last trade."""
+        r = await self._public_get("/api/v3/ticker/bookTicker", {"symbol": symbol})
+        if not r.get("success"):
+            return {"success": False, "error": r.get("error")}
+        try:
+            d = r["data"]
+            return {
+                "success": True,
+                "bid": float(d["bidPrice"]), "ask": float(d["askPrice"]),
+                "bid_qty": float(d["bidQty"]), "ask_qty": float(d["askQty"]),
+            }
+        except Exception as e:
+            return {"success": False, "error": f"bookTicker parse: {e}"}
+
     # ── Trading (Phase 2) ─────────────────────────────────────────────────
     async def place_market_buy_quote(self, symbol: str, quote_quantity: float) -> dict:
         """Market BUY using a USDT-denominated quote amount.
@@ -274,6 +289,25 @@ class BinanceUSClient:
             {"symbol": symbol, "limit": limit},
         )
 
+    async def place_limit_order(self, symbol: str, side: str, base_quantity: float,
+                                price: float, time_in_force: str = "GTC",
+                                test: bool = False) -> dict:
+        """LIMIT order with base quantity. Caller must pre-quantize qty (stepSize)
+        and price (tickSize). `test=True` hits /api/v3/order/test — full filter +
+        signature validation server-side, nothing placed."""
+        if not self.enabled:
+            return {"success": False, "error": "binance_us disabled"}
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "type": "LIMIT",
+            "timeInForce": time_in_force,
+            "quantity": base_quantity,
+            "price": f"{price:.8f}".rstrip("0").rstrip("."),
+        }
+        endpoint = "/api/v3/order/test" if test else "/api/v3/order"
+        return await self._signed_post(endpoint, params)
+
     @staticmethod
     def quantize_qty(qty: float, step_size: float) -> float:
         """Round a base-asset quantity DOWN to the symbol's step size.
@@ -286,6 +320,15 @@ class BinanceUSClient:
         # Floor-divide to nearest step
         steps = int(qty / step_size)
         return round(steps * step_size, 8)
+
+    @staticmethod
+    def quantize_price(price: float, tick_size: float, up: bool = False) -> float:
+        """Align a price to the symbol's tickSize (floor unless `up`)."""
+        if tick_size <= 0:
+            return price
+        import math
+        ticks = (math.ceil if up else math.floor)(price / tick_size)
+        return round(ticks * tick_size, 8)
 
     # ── Internal helpers for signed POST/DELETE ───────────────────────────
     async def _signed_post(self, path: str, params: Optional[dict] = None) -> dict:

@@ -85,10 +85,11 @@ class TelegramCommandHandler:
     async def poll_updates(self):
         """Fetch new messages from Telegram.
 
-        Uses short polling (timeout=3) to coexist with the Claude Code MCP
-        Telegram plugin, which also polls the same bot token. On 409 Conflict
-        (another consumer has an active getUpdates), backs off exponentially
-        to avoid log spam and wasted requests.
+        Polls this bot's own token — the Claude Code Telegram plugin runs on a
+        SEPARATE bot (verified 2026-06-10: trading bot 8607085242 vs Claude
+        "Trinity" 8436907963), so the two do not contend for the getUpdates
+        slot. The 409 backoff below is defensive — it fires only if some other
+        consumer ever polls THIS token (stray script, webhook misconfig).
         """
         try:
             resp = await self._client.get(
@@ -111,10 +112,14 @@ class TelegramCommandHandler:
             if updates:
                 self._offset = updates[-1]["update_id"] + 1
             return updates
-        except httpx.ReadTimeout:
+        except httpx.TimeoutException:
+            # All timeout flavors (Read/Connect/Pool) are benign under short
+            # polling — expected whenever the Claude MCP plugin holds the
+            # getUpdates slot. ConnectTimeout/PoolTimeout str() to "" which
+            # produced the empty "Telegram poll error: " spam (2026-06-09/10).
             return []
         except Exception as e:
-            logger.error(f"Telegram poll error: {e}")
+            logger.error(f"Telegram poll error: {type(e).__name__}: {e}")
             await asyncio.sleep(5)
             return []
 
@@ -617,16 +622,27 @@ class TelegramCommandHandler:
         total_pnl = stats.get("total_pnl_usd", 0)
         today_pnl = stats.get("today_pnl_usd", 0)
 
-        # Fetch Kalshi P&L alongside crypto
+        # Kalshi P&L from SETTLED positions in the DB. The old source
+        # (/api/kalshi/unified-pnl) only tracks the four live-bot sessions —
+        # all idle since the May quiet-mode — so it reported $0.00 while the
+        # real money flows through kalshi_positions settlements. (Fixed 2026-06-09.)
         kalshi_total_usd = 0.0
-        kalshi_bots = {}
+        kalshi_today_usd = 0.0
+        kalshi_30d_usd = 0.0
         try:
-            async with httpx.AsyncClient(timeout=5) as c:
-                resp = await c.get(f"{self._api_base_url}/api/kalshi/unified-pnl")
-                if resp.status_code == 200:
-                    kdata = resp.json()
-                    kalshi_total_usd = kdata.get("total_pnl_usd", 0.0)
-                    kalshi_bots = kdata.get("bots", {})
+            import sqlite3
+            from app.database import DB_PATH
+            kc = sqlite3.connect(DB_PATH)
+            row = kc.execute(
+                """SELECT COALESCE(SUM(pnl_cents),0),
+                          COALESCE(SUM(CASE WHEN closed_at >= date('now') THEN pnl_cents END),0),
+                          COALESCE(SUM(CASE WHEN closed_at >= datetime('now','-30 days') THEN pnl_cents END),0)
+                   FROM kalshi_positions WHERE pnl_cents IS NOT NULL"""
+            ).fetchone()
+            kc.close()
+            kalshi_total_usd = row[0] / 100
+            kalshi_today_usd = row[1] / 100
+            kalshi_30d_usd = row[2] / 100
         except Exception:
             pass
 
@@ -641,25 +657,15 @@ class TelegramCommandHandler:
             f"  Today: <b>${today_pnl:+.2f}</b>",
             f"  Trades: {total_trades} · Win Rate: {win_rate:.1f}%",
             "",
-            f"<b>Kalshi</b>",
+            f"<b>Kalshi (settled)</b>",
             f"  Total: <b>${kalshi_total_usd:+.2f}</b>",
-        ]
-        bot_labels = {
-            "market_maker": "MM", "spread_bot": "Spread",
-            "technical": "Tech", "ai_agent": "AI",
-        }
-        for key, label in bot_labels.items():
-            info = kalshi_bots.get(key) or {}
-            bot_pnl = info.get("pnl_usd", 0.0)
-            if bot_pnl or info.get("running"):
-                icon = "🟢" if info.get("running") else "⚫"
-                lines.append(f"  {icon} {label}: ${bot_pnl:+.2f}")
-        lines += [
+            f"  30d: ${kalshi_30d_usd:+.2f} · Today: ${kalshi_today_usd:+.2f}",
             "",
             f"<b>Combined: ${combined:+.2f}</b>",
             "",
-            f"Monthly Costs: $133.95",
-            f"Break-even: ~$134/mo profit needed",
+            # 2026-06-08 Claude Max→Pro downgrade: $20 + TradingView $22
+            f"Monthly Costs: $42.00 (Claude Pro $20 + TV $22)",
+            f"Break-even: ~$42/mo profit needed",
         ]
         await self.send("\n".join(lines))
 

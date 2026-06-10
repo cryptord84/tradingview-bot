@@ -1155,6 +1155,36 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <!-- ALERT HEARTBEAT — per deployed TV alert: last webhook, fire counts, delivery gaps -->
+  <div class="card card-heartbeat" data-label="// ALERT HEARTBEAT">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Alert Signal Heartbeat</span>
+      <span style="display:flex;gap:10px;align-items:center;">
+        <span id="hb-summary" style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:1px;">--</span>
+        <button onclick="loadHeartbeat()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+      </span>
+    </div>
+    <div style="overflow-x:auto;max-height:260px;overflow-y:auto;">
+      <table>
+        <thead style="position:sticky;top:0;background:#000500;">
+          <tr>
+            <th>Status</th>
+            <th>Strategy</th>
+            <th>Symbol</th>
+            <th>TF</th>
+            <th>Last Webhook</th>
+            <th>TV Fired</th>
+            <th>7d</th>
+            <th>30d</th>
+            <th>Exec 30d</th>
+          </tr>
+        </thead>
+        <tbody id="hb-table"></tbody>
+      </table>
+    </div>
+    <div id="hb-foot" style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;margin-top:6px;"></div>
+  </div>
+
   <!-- TRADE HISTORY -->
   <div class="card card-trades" data-label="// TRADE LOG">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -1757,6 +1787,52 @@ footer a:hover { color: var(--green); }
   </div>
 
   <!-- SOL RISK MANAGER -->
+  <!-- EXIT QUALITY — tracks the 2026-06-09 profitability overhaul -->
+  <div class="card" data-label="// EXIT QUALITY" style="grid-column: 1 / -1;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <span class="section-title" style="margin:0">Exit Quality — Fix Tracking (since 2026-06-09 overhaul)</span>
+      <button onclick="loadExitQuality()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px;">
+      <div style="text-align:center;">
+        <div id="eq-trail-be" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">TRAIL EXITS ≥ BREAKEVEN (POST-FIX)</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="eq-close-flow" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">CLOSE SIGNALS RECV / EXEC</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="eq-postfix-pnl" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">POST-FIX EXIT P&L</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="eq-band-leak" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">KALSHI ≥70¢ NO ENTRIES POST-GATE</div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;margin-bottom:6px;">EXITS BY REASON — 30D vs POST-FIX</div>
+        <table style="width:100%;font-family:var(--mono);font-size:.65rem;color:var(--green);border-collapse:collapse;" id="eq-reason-table">
+          <thead><tr style="color:var(--green-dim);text-align:right;">
+            <th style="text-align:left;padding:2px 4px;">REASON</th><th style="padding:2px 4px;">30D N</th><th style="padding:2px 4px;">30D P&L</th><th style="padding:2px 4px;">POST N</th><th style="padding:2px 4px;">POST P&L</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;margin-bottom:6px;">KALSHI NO-COST BANDS — 30D (GATE: ≤70¢ SINCE 06-09)</div>
+        <table style="width:100%;font-family:var(--mono);font-size:.65rem;color:var(--green);border-collapse:collapse;" id="eq-band-table">
+          <thead><tr style="color:var(--green-dim);text-align:right;">
+            <th style="text-align:left;padding:2px 4px;">BAND</th><th style="padding:2px 4px;">N</th><th style="padding:2px 4px;">WIN%</th><th style="padding:2px 4px;">P&L</th><th style="padding:2px 4px;">POST-GATE N</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="card" data-label="// SOL RISK MANAGER">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <span class="section-title" style="margin:0">SOL Trade Risk</span>
@@ -2805,6 +2881,89 @@ async function loadSignals() {
   }
 }
 
+// ── ALERT HEARTBEAT ──
+const _HB_STYLES = {
+  ok:     { label: 'OK',      color: 'var(--green)' },
+  warn:   { label: 'QUIET',   color: 'var(--yellow)' },
+  stale:  { label: 'STALE',   color: 'var(--red)' },
+  missed: { label: 'MISSED',  color: 'var(--red)' },   // TV fired, webhook never arrived
+  never:  { label: 'SILENT',  color: 'var(--green-dim)' },
+};
+
+function _hbAge(h) {
+  if (h == null) return '--';
+  if (h < 1) return Math.round(h * 60) + 'm ago';
+  if (h < 48) return Math.round(h) + 'h ago';
+  return Math.floor(h / 24) + 'd ' + Math.round(h % 24) + 'h ago';
+}
+
+async function loadHeartbeat() {
+  try {
+    const r = await fetch(`${API}/api/signals/heartbeat`);
+    const sumEl = document.getElementById('hb-summary');
+    if (!r.ok) {
+      if (sumEl) sumEl.textContent = 'endpoint live after next bot restart';
+      return;
+    }
+    const d = await r.json();
+    const tbody = document.getElementById('hb-table');
+    if (!tbody) return;
+    tbody.textContent = '';
+    const counts = {};
+    (d.alerts || []).forEach(a => {
+      counts[a.status] = (counts[a.status] || 0) + 1;
+      const sty = _HB_STYLES[a.status] || _HB_STYLES.never;
+      const tr = document.createElement('tr');
+      if (a.status === 'missed') tr.style.background = 'rgba(255,34,34,0.08)';
+      const stCell = createCell(sty.label);
+      stCell.style.color = sty.color;
+      stCell.style.fontWeight = '700';
+      stCell.style.fontSize = '.6rem';
+      tr.appendChild(stCell);
+      const stratCell = createCell(a.strategy);
+      stratCell.style.color = 'var(--yellow)';
+      stratCell.style.fontSize = '.6rem';
+      tr.appendChild(stratCell);
+      const symCell = createCell(a.symbol);
+      symCell.style.fontWeight = '600';
+      tr.appendChild(symCell);
+      tr.appendChild(createCell(a.tf || '--', 'dim'));
+      const whCell = createCell(a.last_signal_at ? _hbAge(a.age_hours) : 'none');
+      whCell.style.color = a.last_signal_at ? 'var(--green)' : 'var(--green-dim)';
+      whCell.title = a.last_signal_at ? fmtEst(a.last_signal_at) : 'no webhook in log window';
+      tr.appendChild(whCell);
+      const tvCell = createCell(a.tv_last_fired ? fmtEst(a.tv_last_fired) : 'never', 'dim');
+      tvCell.style.fontSize = '.55rem';
+      tvCell.title = 'last fire recorded by TradingView (as of roster snapshot)';
+      tr.appendChild(tvCell);
+      tr.appendChild(createCell(String(a.n7), a.n7 > 0 ? '' : 'dim'));
+      tr.appendChild(createCell(String(a.n30), a.n30 > 0 ? '' : 'dim'));
+      tr.appendChild(createCell(String(a.exec30), a.exec30 > 0 ? '' : 'dim'));
+      tbody.appendChild(tr);
+    });
+    if (sumEl) {
+      const parts = [`${(d.alerts || []).length} alerts`];
+      if (counts.ok) parts.push(`${counts.ok} ok`);
+      if (counts.warn) parts.push(`${counts.warn} quiet`);
+      if (counts.stale) parts.push(`${counts.stale} stale`);
+      if (counts.never) parts.push(`${counts.never} silent`);
+      if (counts.missed) parts.push(`⚠ ${counts.missed} MISSED DELIVERY`);
+      sumEl.textContent = parts.join(' · ');
+      sumEl.style.color = counts.missed ? 'var(--red)' : 'var(--green-dim)';
+    }
+    const foot = document.getElementById('hb-foot');
+    if (foot) {
+      let t = `roster snapshot ${d.roster_snapshot_at ? fmtEst(d.roster_snapshot_at) : '?'} · webhook log since ${d.history_since ? fmtEst(d.history_since) : '?'}`;
+      if ((d.unrostered || []).length) {
+        t += ` · unrostered signals: ${d.unrostered.map(u => `${u.strategy} ${u.symbol} (${u.n30}×30d)`).join(', ')}`;
+      }
+      foot.textContent = t;
+    }
+  } catch (e) {
+    console.warn('loadHeartbeat failed', e);
+  }
+}
+
 // ── TRADES ──
 async function loadTrades() {
   try {
@@ -2867,9 +3026,26 @@ async function loadTrades() {
         dry_run: 'var(--yellow)',
         paper: 'var(--yellow)',
       };
-      const reasonCell = createCell(t.reason || '--');
-      reasonCell.style.color = reasonColors[t.reason] || 'var(--green-dim)';
+      // Reason column: colored tag + the detail from `notes` (e.g. "Below min
+      // trade size: $1.86 < $5.00"). The tag alone (risk_reject) hid the useful
+      // detail; signals_log holds the same text but was wiped in the 05-30 rebuild.
+      const reasonCell = document.createElement('td');
       reasonCell.style.fontSize = '.6rem';
+      reasonCell.style.maxWidth = '340px';
+      reasonCell.style.overflow = 'hidden';
+      reasonCell.style.textOverflow = 'ellipsis';
+      reasonCell.style.whiteSpace = 'nowrap';
+      const tagSpan = document.createElement('span');
+      tagSpan.textContent = t.reason || '--';
+      tagSpan.style.color = reasonColors[t.reason] || 'var(--green-dim)';
+      reasonCell.appendChild(tagSpan);
+      if (t.notes) {
+        const noteSpan = document.createElement('span');
+        noteSpan.className = 'dim';
+        noteSpan.textContent = ' — ' + t.notes;
+        reasonCell.appendChild(noteSpan);
+      }
+      reasonCell.title = (t.reason || '') + (t.notes ? ' — ' + t.notes : '');
       tr.appendChild(reasonCell);
 
       const qty = t.amount_sol || 0;
@@ -3053,7 +3229,11 @@ async function loadPositions() {
     const positions = data.positions || [];
 
     const openPositions = positions.filter(p => p.status === 'open');
-    const closedPositions = positions.filter(p => p.status !== 'open');
+    // API returns rows by created_at (open time), which is right for the open
+    // list but wrong for closed — a position opened earlier can close later.
+    // Re-sort closed by close/execution time, newest first.
+    const closedPositions = positions.filter(p => p.status !== 'open')
+      .sort((a, b) => new Date(b.closed_at || b.created_at) - new Date(a.closed_at || a.created_at));
 
     document.getElementById('positions-count').textContent = openPositions.length + ' open';
 
@@ -3171,8 +3351,10 @@ async function loadPositions() {
         const pnl = p.pnl_usdc || 0;
         const pnlPct = p.pnl_percent || 0;
         const pnlClass = pnl >= 0 ? 'pnl-positive' : 'pnl-negative';
-        const statusLabel = { closed_tp: 'TP HIT', closed_sl: 'SL HIT', closed_trail: 'TRAIL SL', closed_manual: 'MANUAL' }[p.status] || p.status;
-        const statusColor = p.status === 'closed_tp' ? '#00ff41' : (p.status === 'closed_sl' || p.status === 'closed_trail') ? '#ff4444' : '#FFD700';
+        const statusLabel = { closed_tp: 'TP HIT', closed_sl: 'SL HIT', closed_trail: 'TRAIL', closed_manual: 'MANUAL' }[p.status] || p.status;
+        // Color by actual P&L, not close-type: a TRAILING stop (and occasionally an SL) can lock in a
+        // PROFIT. Old logic hardcoded closed_trail red, so profitable trailing exits looked like losses.
+        const statusColor = pnl > 0 ? '#00ff41' : pnl < 0 ? '#ff4444' : '#FFD700';
 
         // Duration
         let duration = '--';
@@ -3219,12 +3401,18 @@ async function loadPositions() {
         const timeTd = document.createElement('td');
 
         if (w) {
-          targetTd.textContent = fmtP(w.target_price);
-          targetTd.style.color = '#00e5ff';
+          // Two-stage re-entry: awaiting_dip (↓ to discount target) then awaiting_bounce (↑ reclaim off the low)
+          const bouncePhase = w.phase === 'awaiting_bounce';
+          targetTd.textContent = (bouncePhase ? '↑ ' : '↓ ') + fmtP(bouncePhase ? w.bounce_target : w.target_price);
+          targetTd.style.color = bouncePhase ? '#FFD700' : '#00e5ff';
+          targetTd.title = bouncePhase
+            ? ('Dip confirmed (low ' + fmtP(w.low_seen) + ') — re-buys once price recovers +' + w.bounce_confirm_pct + '% to ' + fmtP(w.bounce_target))
+            : ('Awaiting dip to ' + fmtP(w.target_price) + ' before watching for a bounce');
 
           if (w.current_price) {
             curPriceTd.textContent = fmtP(w.current_price);
-            curPriceTd.style.color = w.current_price <= w.target_price ? '#00ff41' : 'var(--green-dim)';
+            const firing = bouncePhase ? (w.current_price >= w.bounce_target) : (w.current_price <= w.target_price);
+            curPriceTd.style.color = firing ? '#00ff41' : (bouncePhase ? '#FFD700' : 'var(--green-dim)');
           } else {
             curPriceTd.textContent = '--';
             curPriceTd.style.color = 'var(--green-dark)';
@@ -5993,6 +6181,63 @@ async function loadStrategyPnl() {
   } catch(e) { console.warn('Strategy P&L chart failed:', e); }
 }
 
+// ── EXIT QUALITY (2026-06-09 fix tracking) ──
+async function loadExitQuality() {
+  try {
+    const r = await fetch(`${API}/api/exit-quality?days=30`);
+    const d = await r.json();
+
+    const beRate = d.post_fix?.trail_breakeven_rate;
+    const beN = d.post_fix?.trail_n || 0;
+    const beEl = document.getElementById('eq-trail-be');
+    beEl.textContent = beN ? `${beRate}% (n=${beN})` : 'no trail exits yet';
+    beEl.style.color = beN === 0 ? 'var(--green-dim)' : (beRate >= 50 ? 'var(--green)' : 'var(--red, #ff5a5a)');
+
+    const cs = d.close_signals_post_fix || {};
+    document.getElementById('eq-close-flow').textContent = `${cs.received || 0} / ${cs.executed || 0}`;
+
+    const pp = d.post_fix?.total_pnl ?? 0;
+    const ppEl = document.getElementById('eq-postfix-pnl');
+    ppEl.textContent = `$${pp.toFixed(2)}`;
+    ppEl.style.color = pp >= 0 ? 'var(--green)' : 'var(--red, #ff5a5a)';
+
+    // Kalshi ≥70c leak counter — should stay 0 with the gate in place
+    const bands = d.kalshi_bands || [];
+    const leak = bands.filter(b => parseInt(b.band) >= 70).reduce((s, b) => s + (b.n_post_gate || 0), 0);
+    const leakEl = document.getElementById('eq-band-leak');
+    leakEl.textContent = String(leak);
+    leakEl.style.color = leak === 0 ? 'var(--green)' : 'var(--red, #ff5a5a)';
+
+    const reasons = ['tp_hit', 'sl_hit', 'trail_sl', 'signal_close', 'manual_close'];
+    const tbody = document.querySelector('#eq-reason-table tbody');
+    tbody.innerHTML = reasons.map(rn => {
+      const w = d.window?.by_reason?.[rn] || { n: 0, pnl: 0 };
+      const p = d.post_fix?.by_reason?.[rn] || { n: 0, pnl: 0 };
+      const col = v => v >= 0 ? 'var(--green)' : 'var(--red, #ff5a5a)';
+      return `<tr style="text-align:right;">
+        <td style="text-align:left;padding:2px 4px;color:var(--green-dim);">${rn}</td>
+        <td style="padding:2px 4px;">${w.n}</td>
+        <td style="padding:2px 4px;color:${col(w.pnl)};">$${w.pnl.toFixed(2)}</td>
+        <td style="padding:2px 4px;">${p.n}</td>
+        <td style="padding:2px 4px;color:${col(p.pnl)};">$${p.pnl.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+
+    const btb = document.querySelector('#eq-band-table tbody');
+    btb.innerHTML = bands.map(b => {
+      const winPct = b.n ? (b.wins / b.n * 100).toFixed(0) : '0';
+      const hot = parseInt(b.band) >= 70;
+      return `<tr style="text-align:right;${hot ? 'opacity:.75;' : ''}">
+        <td style="text-align:left;padding:2px 4px;color:var(--green-dim);">${b.band}${hot ? ' ⛔' : ''}</td>
+        <td style="padding:2px 4px;">${b.n}</td>
+        <td style="padding:2px 4px;">${winPct}%</td>
+        <td style="padding:2px 4px;color:${b.pnl >= 0 ? 'var(--green)' : 'var(--red, #ff5a5a)'};">$${b.pnl.toFixed(2)}</td>
+        <td style="padding:2px 4px;">${b.n_post_gate}</td>
+      </tr>`;
+    }).join('') || '<tr><td style="padding:2px 4px;color:var(--green-dim);">no settled NO-side positions in window</td></tr>';
+  } catch (e) { console.warn('Exit quality panel failed:', e); }
+}
+
 // ── INDICATOR PERFORMANCE ──
 let _indChart = null;
 let _indData = null;
@@ -6341,6 +6586,7 @@ function _renderIndChart() {
 loadPortfolio();
 loadEquityChart();
 loadStrategyPnl();
+loadExitQuality();
 loadIndicatorPerf();
 loadBacktestMatrix();
 loadPriceFeedStatus();
@@ -6350,6 +6596,7 @@ setInterval(loadPortfolio, 30000);
 setInterval(loadTodayActivity, 10000);   // every 10s — most live widget
 setInterval(loadEquityChart, 120000);
 setInterval(loadStrategyPnl, 120000);
+setInterval(loadExitQuality, 120000);
 setInterval(loadIndicatorPerf, 60000);
 setInterval(loadBacktestMatrix, 600000);  // 10min — config rarely changes
 setInterval(loadPriceFeedStatus, 30000);  // 30s — catches WS staleness within ~1min
@@ -6357,6 +6604,7 @@ setInterval(loadAaveStatus, 60000);       // refresh APY/balance every minute
 loadStats();
 loadTrades();
 loadSignals();
+loadHeartbeat();
 loadWalletTxLog();
 loadScout();
 loadPositions();
@@ -6390,6 +6638,7 @@ loadMonitorAlerts();
 setInterval(loadStats, 15000);
 setInterval(loadTrades, 60000);
 setInterval(loadSignals, 30000);  // signal activity refreshes faster than trades
+setInterval(loadHeartbeat, 300000); // heartbeat moves slowly — 5min is plenty
 setInterval(loadWalletTxLog, 120000);
 setInterval(loadPositions, 15000);
 setInterval(loadAnalytics, 120000);

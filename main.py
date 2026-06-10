@@ -157,6 +157,17 @@ async def lifespan(app: FastAPI):
     init_db()
     run_daily_backup()
 
+    # Refresh the full-DB snapshot every 24h so long uptime still yields a fresh
+    # backup (run_daily_backup is idempotent per calendar day). See csv_backup.py.
+    async def _daily_backup_loop():
+        while True:
+            await asyncio.sleep(86400)
+            try:
+                run_daily_backup()
+            except Exception as e:
+                logger.error(f"Daily backup loop error: {e}")
+    backup_task = asyncio.create_task(_daily_backup_loop())
+
     # Start Telegram command listener
     _tg_handler = TelegramCommandHandler()
     tg_task = asyncio.create_task(_tg_handler.run())
@@ -300,6 +311,9 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Startup Kamino cache prime failed: {e}")
     await kamino.close()
 
+    from app.database import sweep_stale_received
+    sweep_stale_received()
+
     logger.info("Bot initialized successfully")
 
     yield
@@ -310,6 +324,7 @@ async def lifespan(app: FastAPI):
     if _tg_handler:
         await _tg_handler.stop()
     tg_task.cancel()
+    backup_task.cancel()
     await ngrok.stop()
     if pos_monitor.enabled:
         await pos_monitor.stop()
@@ -354,6 +369,37 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Remote-access gate (2026-06-10, hardened after security review): only
+# /webhook (which validates its own shared secret) should be reachable from
+# anywhere but the local operator's browser. Two non-local vectors exist:
+#   1. LAN — uvicorn binds 0.0.0.0, so other devices hit it directly. Their
+#      TCP peer (request.client.host) is a non-loopback address. This check is
+#      NOT spoofable: it's the real socket peer, not a header.
+#   2. ngrok tunnel — `ngrok http 8000` forwards to localhost, so tunneled
+#      requests arrive with peer == 127.0.0.1, INDISTINGUISHABLE from the local
+#      browser by peer address alone (this is why the review's suggested
+#      client.host==127.0.0.1 allowlist would silently re-admit the tunnel).
+#      The only separator is that ngrok injects forwarding headers the local
+#      browser never sends. That is a heuristic, not authentication — it holds
+#      because ngrok always sets them, but a forwarder that didn't would slip
+#      through. The position-independent fix is per-endpoint auth (a dashboard
+#      access token); deferred because this surface is sabotage-only — no route
+#      serves secrets and swaps can only send funds to the owner's own wallet.
+_LOOPBACK = {"127.0.0.1", "::1", None}
+_FORWARD_HEADERS = ("x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded")
+
+
+@app.middleware("http")
+async def remote_access_gate(request, call_next):
+    if request.url.path != "/webhook":
+        peer = request.client.host if request.client else None
+        forwarded = any(h in request.headers for h in _FORWARD_HEADERS)
+        if peer not in _LOOPBACK or forwarded:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "local access only"})
+    return await call_next(request)
 
 # Routers
 app.include_router(webhook.router)

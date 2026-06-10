@@ -15,6 +15,7 @@ from app.database import (
     insert_reentry_watch,
     get_active_reentry_watches,
     update_reentry_watch,
+    update_reentry_low_seen,
     expire_stale_reentry_watches,
     TradeReason,
 )
@@ -55,6 +56,13 @@ class PositionMonitor:
         self.trail_enabled = trail_cfg.get("enabled", False)
         self.trail_activation_atr = trail_cfg.get("activation_atr", 1.5)
         self.trail_offset_atr = trail_cfg.get("offset_atr", 1.0)
+        # Breakeven step (2026-06-09): once price reaches entry + trigger×ATR,
+        # raise SL to entry + buffer% so a faded winner exits at >= fees instead
+        # of a loss. The old activation/offset pair alone (1.5/3.0) put the trail
+        # at entry−1.5 ATR on activation — all 22 trail exits in the prior 30d
+        # were negative. Set breakeven_trigger_atr to 0 to disable.
+        self.trail_breakeven_atr = float(trail_cfg.get("breakeven_trigger_atr", 0.0))
+        self.trail_breakeven_buffer_pct = float(trail_cfg.get("breakeven_buffer_pct", 0.5))
 
         # Re-entry watch config: after SL, set a buy target below exit price.
         # If price reaches it within expiry_hours, fire a new BUY.
@@ -67,6 +75,14 @@ class PositionMonitor:
         self.reentry_token_drop_pct = reentry_cfg.get("token_drop_pct", {})
         # Tokens to exclude from re-entry entirely (e.g., SOL: 0/2 rebuy win rate)
         self.reentry_disabled_tokens = set(reentry_cfg.get("disabled_tokens", []))
+        # Bounce confirmation: after price dips to target, require it to recover this
+        # % off the trailing low before re-buying (turns knife-catching into
+        # reversal-buying — in a sustained dump the bounce never confirms, so re-entry
+        # sits out instead of bleeding). 2026-06-03.
+        self.reentry_bounce_confirm_pct = reentry_cfg.get("bounce_confirm_pct", 1.5)
+        # Glitch guard: ignore a "new low" that's >this% below the running low in one poll
+        # (a feed glitch would otherwise corrupt low_seen and defeat the bounce check). 2026-06-08.
+        self.reentry_glitch_drop_pct = reentry_cfg.get("glitch_drop_pct", 15.0)
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
@@ -199,9 +215,11 @@ class PositionMonitor:
     def _update_trailing_sl(self, pos: dict, current_price: float) -> float:
         """Update trailing stop-loss and return the effective SL price.
 
-        Trail activates when price reaches entry + activation_atr * ATR.
-        Once active, trail SL = current_price - offset_atr * ATR.
-        Trail only ratchets UP (never down).
+        Two-stage trail (only ratchets UP, never down):
+          1. Breakeven step — once price reaches entry + breakeven_trigger_atr
+             * ATR, SL rises to entry + breakeven_buffer_pct% (locks fees).
+          2. ATR trail — once price reaches entry + activation_atr * ATR,
+             trail SL = current_price - offset_atr * ATR.
         """
         atr = pos["atr"]
         entry = pos["entry_price"]
@@ -209,20 +227,27 @@ class PositionMonitor:
 
         # Current trail SL from DB (may be None)
         current_trail = pos.get("trail_sl_price") or 0
+        new_trail = current_trail
 
+        # Stage 1: breakeven step
+        if self.trail_breakeven_atr > 0:
+            breakeven_trigger = entry + (self.trail_breakeven_atr * atr)
+            if current_price >= breakeven_trigger:
+                breakeven_sl = entry * (1.0 + self.trail_breakeven_buffer_pct / 100.0)
+                new_trail = max(new_trail, breakeven_sl)
+
+        # Stage 2: ATR trail after activation
         if current_price >= activation_price:
-            # Trail is active — compute new trail level
-            new_trail = current_price - (self.trail_offset_atr * atr)
+            new_trail = max(new_trail, current_price - (self.trail_offset_atr * atr))
 
-            # Only ratchet up, never down
-            if new_trail > current_trail:
-                update_trail_sl(pos["id"], new_trail)
-                logger.debug(
-                    f"Position #{pos['id']}: trail SL updated "
-                    f"${current_trail:.2f} → ${new_trail:.2f} "
-                    f"(price=${current_price:.2f}, activation=${activation_price:.2f})"
-                )
-                current_trail = new_trail
+        if new_trail > current_trail:
+            update_trail_sl(pos["id"], new_trail)
+            logger.debug(
+                f"Position #{pos['id']}: trail SL updated "
+                f"${current_trail:.2f} → ${new_trail:.2f} "
+                f"(price=${current_price:.2f}, activation=${activation_price:.2f})"
+            )
+            current_trail = new_trail
 
         # Effective SL is the higher of fixed SL and trailing SL
         return max(pos["sl_price"], current_trail)
@@ -567,10 +592,34 @@ class PositionMonitor:
             if current_price is None or current_price <= 0:
                 continue
 
-            if current_price <= watch["target_price"]:
+            # Track the trailing low since the SL (persisted so it survives polls).
+            low = watch.get("low_seen") or watch["sl_exit_price"]
+            if current_price < low:
+                # Glitch guard: a single poll >glitch_drop_pct below the running low is a
+                # junk quote (real 30s moves are <5%), not a real crash. Ignore it — otherwise
+                # one bad price collapses the bounce check (ETH $1203-vs-$1684 incident 2026-06-08).
+                if current_price >= low * (1.0 - self.reentry_glitch_drop_pct / 100.0):
+                    low = current_price
+                    update_reentry_low_seen(watch["id"], low)
+                else:
+                    logger.warning(
+                        f"Re-entry #{watch['id']} {watch['symbol']}: ignoring glitch low "
+                        f"${current_price:.6f} ({(1-current_price/low)*100:.0f}% below running low "
+                        f"${low:.6f} > {self.reentry_glitch_drop_pct}% guard)"
+                    )
+
+            # Bounce-confirmation trigger (replaces the old knife-catch "price <= target"):
+            #   1. the dip reached the discount target (a real dip happened), AND
+            #   2. price has now recovered bounce_confirm_pct off that trailing low.
+            # In a sustained dump the low keeps dropping and #2 never fires → re-entry
+            # sits out instead of catching the falling knife.
+            dip_confirmed = low <= watch["target_price"]
+            bounce_level = low * (1.0 + self.reentry_bounce_confirm_pct / 100.0)
+            if dip_confirmed and current_price >= bounce_level:
                 logger.info(
                     f"Re-entry watch #{watch['id']} TRIGGERED: {watch['symbol']} "
-                    f"${current_price:.6f} <= target ${watch['target_price']:.6f}"
+                    f"${current_price:.6f} bounced +{self.reentry_bounce_confirm_pct}% off "
+                    f"low ${low:.6f} (dip target ${watch['target_price']:.6f} hit)"
                 )
                 await self._fire_reentry(watch, current_price)
 
@@ -847,7 +896,13 @@ class PositionMonitor:
                 )
                 return
 
-            order_result = await bn.place_market_sell_base(bn_symbol, sell_amount)
+            from app.services.binance_limit_executor import (
+                execute_limit, limit_orders_enabled,
+            )
+            if limit_orders_enabled():
+                order_result = await execute_limit(bn, bn_symbol, "SELL", base_qty=sell_amount)
+            else:
+                order_result = await bn.place_market_sell_base(bn_symbol, sell_amount)
             if not order_result.get("success"):
                 logger.error(
                     f"Binance.US sell failed for #{pos['id']}: {order_result.get('error')}"

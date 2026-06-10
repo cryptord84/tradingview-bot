@@ -12,6 +12,7 @@ without spending gas or capital).
 """
 
 import logging
+from decimal import Decimal
 from typing import Optional
 
 from eth_utils import keccak
@@ -106,7 +107,12 @@ class EVMSwapExecutor:
 
         # 2. Get quote + unsigned tx in one call (OpenOcean's swap_quote endpoint).
         # Convert wei amount → human-readable string for OpenOcean's API.
-        amount_human = str(amount_wei / (10 ** src_decimals))
+        # MUST use Decimal, not float: `amount_wei / 10**decimals` as a float loses
+        # precision for large balances and rounds UP, so OpenOcean reconstructs a
+        # wei amount slightly LARGER than the wallet holds → the router's transferFrom
+        # reverts with "ERC20: transfer amount exceeds balance". This bit full-balance
+        # sells (2026-05-30) and would revert EVM position closes the same way.
+        amount_human = format(Decimal(amount_wei) / (Decimal(10) ** src_decimals), "f")
         # Convert slippage from bps to percent (slippage_bps=100 → 1.0%)
         slippage_pct = slippage_bps / 100.0
         # Estimate gas price in gwei for OpenOcean's gas-aware routing

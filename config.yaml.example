@@ -425,6 +425,31 @@ paper_trading:
   simulated_slippage_bps: 10          # Simulated slippage (10 bps = 0.1%)
   simulated_fee_bps: 5                # Simulated fees (5 bps = 0.05%)
 
+# --- Alpaca stock/ETF lane (scaffold) ---
+alpaca:
+  enabled: false                      # flip true once keys are in AND alpaca_client is built
+  paper: true                         # true → paper-api.alpaca.markets (no KYC/funding) ; false → live
+  base_url: https://paper-api.alpaca.markets
+  data_url: https://data.alpaca.markets
+  timeout_seconds: 15
+  reserve_usd: 0.0                    # buying-power floor kept untraded
+  market_hours_only: true             # gate signals to 09:30-16:00 ET (stocks aren't 24/7)
+  # API key ID + secret loaded from .env (ALPACA_KEY_ID / ALPACA_SECRET_KEY)
+
+# --- Binance.US execution lane ---
+binance_us:
+  enabled: false
+  base_url: https://api.binance.us
+  timeout_seconds: 15
+  health_check_interval_minutes: 30
+  # Keys via .env: BINANCE_US_API_KEY / BINANCE_US_API_SECRET (spot trade + read; withdrawals MUST be off)
+  limit_orders:                  # two-stage limit flow: rest at mid (maker) -> marketable limit at touch
+    enabled: true
+    stage1_timeout_s: 45
+    stage2_timeout_s: 20
+    cross_ticks: 2
+    market_fallback_sells: true  # exits must complete; entries never market-fallback
+
 # --- Logging ---
 logging:
   file: "logs/bot.log"

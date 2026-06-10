@@ -254,6 +254,18 @@ class WalletService:
                 price = 0.0
                 if token_prices and symbol in token_prices:
                     price = token_prices[symbol].get("price", 0.0)
+                if (not price or price <= 0) and amount > 0:
+                    # price_feed gap (e.g. low-volume PNUT whose Binance.US WS
+                    # goes hours without a trade) — fall back to the same robust
+                    # resolver the TP/SL monitor uses (Jupiter→WS→CoinGecko) so a
+                    # held token is valued instead of showing $0 on the dashboard.
+                    try:
+                        from app.services.price_router import get_monitor_price
+                        mp = await get_monitor_price(symbol)
+                        if mp and mp > 0:
+                            price = float(mp)
+                    except Exception:
+                        pass
                 usd_value = amount * price
                 tokens_usd += usd_value
                 token_holdings[symbol] = {

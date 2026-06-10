@@ -27,6 +27,10 @@ class WebhookSignal(BaseModel):
     atr: Optional[float] = None
     timeframe: Optional[str] = None
     strategy: Optional[str] = None  # Alert/indicator name e.g. "BB Squeeze v1.0"
+    # 2026-06-09: VWAP Dev v1.1 sends the current VWAP so the bot can cap TP at
+    # the mean — the strategy's backtested exit is "close reaches VWAP", and a
+    # pure ATR-multiple TP routinely lands far beyond it (unreachable).
+    vwap_target: Optional[float] = None
     # 2026-05-10: when True, process_signal runs the full pre-execution pipeline
     # (correlation, sizing, risk gates, lane routing) but returns before any
     # swap broadcast. Used by backtesting/webhook_preflight.py to catch

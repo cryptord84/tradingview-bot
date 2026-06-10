@@ -124,6 +124,10 @@ _STRATEGY_NAME_ALIASES = {
     # writes/removes entries under these keys on BULL_CONFIRMED/BULL_LOST.
     "donchian + adx": "Donch+ADX",
     "ema ribbon + adx": "EMA+ADX",
+    # 2026-06-09: HTF-filtered Donchian variant (SOL/1D Tier-A WF passer,
+    # PF 4.43 IS/OOS-consistent). Entry filter only — sizing/TP/SL tables are
+    # plain Donchian's, so it maps to the same canonical name.
+    "donchian htf": "Donchian",
 }
 
 
@@ -139,6 +143,16 @@ def _normalize_strategy_name(raw: Optional[str]) -> Optional[str]:
             base = base[:idx]
             break
     return _STRATEGY_NAME_ALIASES.get(base.lower(), base)
+
+
+# Strategies whose backtested edge is reversion-to-mean. The backtest engine
+# closes their trades via the strategy's own exit signal (VWAP cross / overbought
+# cross) long before wide ATR TPs matter — those exits were removed from live
+# Pine on 2026-05-14, so sweep TPs of 4-5x ATR became the only ceiling and
+# almost never hit (30d: 9 tp_hit vs 71 sl/trail exits). Cap live TP until the
+# Pine CLOSE exits are restored.
+_MEAN_REVERSION_STRATEGIES = {"VWAP Dev", "Stoch RSI", "FVG", "Mean Rev", "RSI2 Rev"}
+_MEAN_REVERSION_TP_CAP = 2.0
 
 
 # Pine `timeframe.period` emits raw resolution codes. Backtest uses human labels.
@@ -448,8 +462,14 @@ class TradeEngine:
         # registry address 0x97ad75… was bogus. Liq Sweep / INJ.P alert culled.
         # Validated 2026-05-08 via dry-run swap (Phase 4):
         "UNI":   ("0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", 18),  # ✓
-        # ARB/AAVE temporarily rerouted to Binance 2026-05-20 — EVM lane underfunded
+        # ARB rerouted to Binance 2026-05-20 — EVM lane underfunded.
+        # 2026-05-30: AAVE moved BACK to EVM. The DB-corruption recovery left a
+        # real ~$21 AAVE holding on Arbitrum; its exit must route to the venue
+        # the coins actually live on. Routing is per-symbol (governs buy AND
+        # sell), so new AAVE buys also route to EVM again — move back to
+        # BINANCE_TOKENS once this position closes if Binance headroom is preferred.
         # Near-misses pre-mapped in case they cross WF later (UNVERIFIED):
+        "AAVE":  ("0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", 18),
         "LDO":   ("0x13Ad51ed4F1B7e9Dc168d8a00cB3f4dDD85EfA60", 18),
         "COMP":  ("0x354A6dA3fcde098F8389cad84b0182725c6C91dE", 18),
         "LINK":  ("0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", 18),
@@ -467,8 +487,10 @@ class TradeEngine:
     #   building BSC support.
     #
     # NOT included:
-    # - INJ: not listed on Binance.US (US regulatory). Liq Sweep/INJ/4H
-    #   remains executable only if we build a Cosmos lane (Keplr/Helix).
+    # - INJ: WAS unlisted on Binance.US (US regulatory) — 2026-06-09 probe
+    #   shows INJUSDT now TRADING with ~$13k/day volume and a ~7,000-INJ
+    #   market-order cap, so the mapping below makes Liq Sweep/INJ-class
+    #   combos executable again if one re-passes WF. (Comment kept for history.)
     # - KAVA: listed but MARKET_LOT_SIZE caps single market order at $2.56,
     #   below any meaningful Phase 6 trade size. Limit orders could work
     #   but we don't have that path yet. Mean Rev/KAVA stays untradeable.
@@ -487,8 +509,14 @@ class TradeEngine:
         "OP":    "OPUSDT",
         # 2026-05-20: rerouted from EVM lane (underfunded). Move back when Arb wallet funded.
         "ARB":   "ARBUSDT",
-        "AAVE":  "AAVEUSDT",
+        # AAVE moved back to EVM_TOKENS 2026-05-30 (existing coins live on Arbitrum).
         "NEAR":  "NEARUSDT",
+        # 2026-05-30: Stoch RSI/TIA/4H — 2-sample WF passer (05-28 PF 1.67, 05-29 PF 1.60).
+        "TIA":   "TIAUSDT",
+        # 2026-06-09: INJ newly listed on Binance.US (probe: TRADING, ~$13k/day).
+        # Pre-mapped so a future INJ alert doesn't silently drop (the 05-12
+        # BTC/DOGE/OP lesson). No INJ alerts deployed yet.
+        "INJ":   "INJUSDT",
     }
 
     def _is_evm_symbol(self, symbol: str) -> bool:
@@ -601,6 +629,48 @@ class TradeEngine:
                         "reason": TradeReason.CORRELATION_REJECT,
                     })
                     result["status"] = "correlation_blocked"
+                    result["error"] = msg
+                    return result
+
+            # 2.6. Duplicate-position guard — don't stack a second open long on
+            # the same (symbol, strategy). 2026-06-05: two FARTCOIN/Stoch RSI
+            # longs opened 4h apart doubled exposure to one signal family. The
+            # correlation cap deliberately exempts same-symbol adds, so this is
+            # the only gate. Set risk.allow_pyramiding: true to disable.
+            # dry_run preflights skip it — a live open position would false-fail
+            # the pipeline validation they exist to run.
+            if (
+                signal.signal_type.value == "BUY"
+                and not getattr(signal, "dry_run", False)
+                and not (get("risk") or {}).get("allow_pyramiding", False)
+            ):
+                dup_pos = get_open_position_for_signal(signal.symbol, strategy_label)
+                if dup_pos:
+                    msg = (
+                        f"Duplicate guard: open position #{dup_pos['id']} already exists "
+                        f"for {signal.symbol} / {strategy_label or 'unknown'} "
+                        f"(entry ${dup_pos['entry_price']:.6f}) — rejecting new BUY"
+                    )
+                    logger.warning(msg)
+                    await self.telegram.send_message(f"[DUP] {msg}")
+                    insert_trade({
+                        "signal_type": signal.signal_type.value,
+                        "symbol": signal.symbol,
+                        "action": "REJECT",
+                        "amount_sol": 0,
+                        "price_usd": signal.entry_price_estimate or 0,
+                        "confidence_score": signal.confidence_score,
+                        "claude_reasoning": "Duplicate position guard — not queried",
+                        "wallet_address": self.wallet.public_key,
+                        "notes": f"Open position #{dup_pos['id']} same symbol+strategy",
+                        "strategy": strategy_label,
+                        "reason": TradeReason.DUPLICATE_REJECT,
+                    })
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_duplicate_position",
+                        reason=f"open position #{dup_pos['id']} for {signal.symbol}/{strategy_label}",
+                    )
+                    result["status"] = "duplicate_position"
                     result["error"] = msg
                     return result
 
@@ -763,6 +833,21 @@ class TradeEngine:
                     reasoning="dry_run synthetic — Claude bypass for pre-flight",
                     risk_score=5,
                 )
+            elif source_ip == "reentry_watch" and ((get("position_monitor") or {}).get("reentry", {}).get("bypass_claude_risk", False)):
+                # Bounce-confirmed re-entry: skip the Claude risk gate (incl. the geo-risk/
+                # war-escalation REJECT and any Claude-CLI timeout) and execute at FULL size.
+                # The bounce confirmation (dip-to-target THEN +bounce off the low) is the entry
+                # gate; user wants to catch crash-bottom turnarounds Claude would reject mid
+                # black-swan. Correlation/min-size/balance/sizing checks still apply downstream. (2026-06-08)
+                logger.warning(
+                    f"Re-entry bypass: EXECUTING {signal.symbol} at full size — skipping Claude risk "
+                    f"gate (bounce-confirmed crash re-entry, reentry.bypass_claude_risk=true)"
+                )
+                claude_resp = ClaudeResponse(
+                    decision=ClaudeDecision.EXECUTE,
+                    reasoning="Re-entry bypass (config): bounce-confirmed crash re-entry — Claude risk gate skipped to catch crash-bottom turnarounds.",
+                    risk_score=5,
+                )
             else:
                 logger.info(
                     f"Requesting Claude decision for {signal.signal_type.value} {signal.symbol} "
@@ -860,6 +945,22 @@ class TradeEngine:
             trade_usd = risk_check["capped_usd"]
 
             min_trade_usd = risk_cfg.get("min_trade_usd", 5.0)
+            # Bump-to-floor (2026-06-10): a computed size in [50%, 100%) of the
+            # floor is raised to the floor instead of rejected — capturing the
+            # entry beats saving the fee delta (06-07: ETH signal thrown away at
+            # $3.81 vs $5.00). Deeply starved lanes (<50% of floor) still reject,
+            # and the bumped size re-clears the risk manager so a risk cap is
+            # never silently exceeded.
+            if min_trade_usd > trade_usd >= 0.5 * min_trade_usd:
+                bump_check = sol_rm.check_order(
+                    token_symbol, min_trade_usd, signal.signal_type.value
+                )
+                if bump_check["allowed"] and bump_check["capped_usd"] >= min_trade_usd:
+                    logger.info(
+                        f"Min-size bump: ${trade_usd:.2f} → ${min_trade_usd:.2f} "
+                        f"for {signal.symbol}"
+                    )
+                    trade_usd = min_trade_usd
             if trade_usd < min_trade_usd:
                 result["status"] = "rejected"
                 result["error"] = f"Trade size ${trade_usd:.2f} below ${min_trade_usd:.2f} minimum"
@@ -1150,10 +1251,19 @@ class TradeEngine:
                         raise RuntimeError(
                             f"Trade size ${trade_usd:.2f} below {bn_symbol} min notional ${min_notional}"
                         )
-                    logger.info(
-                        f"Executing BUY {token_symbol} on Binance.US: ${trade_usd:.2f} USDT market order"
+                    from app.services.binance_limit_executor import (
+                        execute_limit, limit_orders_enabled,
                     )
-                    order_result = await bn.place_market_buy_quote(bn_symbol, trade_usd)
+                    if limit_orders_enabled():
+                        logger.info(
+                            f"Executing BUY {token_symbol} on Binance.US: ${trade_usd:.2f} USDT limit flow"
+                        )
+                        order_result = await execute_limit(bn, bn_symbol, "BUY", quote_usd=trade_usd)
+                    else:
+                        logger.info(
+                            f"Executing BUY {token_symbol} on Binance.US: ${trade_usd:.2f} USDT market order"
+                        )
+                        order_result = await bn.place_market_buy_quote(bn_symbol, trade_usd)
                 else:
                     # SELL: use base-asset quantity from positions table; quantize to stepSize
                     bn_balance = await bn.get_balance(token_symbol)
@@ -1164,10 +1274,19 @@ class TradeEngine:
                         raise RuntimeError(
                             f"Sell size {qty} {token_symbol} (~${qty*token_price:.2f}) below min notional ${min_notional}"
                         )
-                    logger.info(
-                        f"Executing SELL {qty} {token_symbol} on Binance.US (~${qty*token_price:.2f}) market order"
+                    from app.services.binance_limit_executor import (
+                        execute_limit, limit_orders_enabled,
                     )
-                    order_result = await bn.place_market_sell_base(bn_symbol, qty)
+                    if limit_orders_enabled():
+                        logger.info(
+                            f"Executing SELL {qty} {token_symbol} on Binance.US (~${qty*token_price:.2f}) limit flow"
+                        )
+                        order_result = await execute_limit(bn, bn_symbol, "SELL", base_qty=qty)
+                    else:
+                        logger.info(
+                            f"Executing SELL {qty} {token_symbol} on Binance.US (~${qty*token_price:.2f}) market order"
+                        )
+                        order_result = await bn.place_market_sell_base(bn_symbol, qty)
 
                 if not order_result.get("success"):
                     raise RuntimeError(
@@ -1317,6 +1436,27 @@ class TradeEngine:
                     amount_lamports=amount_lamports,
                 )
 
+                # Record the route's actual output as the fill (2026-06-09).
+                # The old estimate (trade_usd / oracle price) ignored the
+                # slippage the swap paid — qty was overstated and TP/SL were
+                # anchored to an entry ~0.5-1% better than reality (the close
+                # path then clamped qty to wallet balance). Binance lane and
+                # all close paths already record real fills.
+                if signal.signal_type.value == "BUY":
+                    _out_raw = int(swap_result.get("output_amount") or 0)
+                    if _out_raw > 0:
+                        _actual_qty = _out_raw / (10 ** self._token_decimals(token_symbol))
+                        if _actual_qty > 0:
+                            _fill_price = trade_usd / _actual_qty
+                            if token_price > 0:
+                                logger.info(
+                                    f"Solana fill: {_actual_qty:.6f} {token_symbol} @ "
+                                    f"${_fill_price:.6f} "
+                                    f"({(_fill_price / token_price - 1) * 100:+.2f}% vs oracle)"
+                                )
+                            token_qty = _actual_qty
+                            token_price = _fill_price
+
                 result["status"] = "executed"
                 result["tx_signature"] = swap_result["tx_signature"]
                 result["chain"] = "solana"
@@ -1400,6 +1540,22 @@ class TradeEngine:
                 tp_mult, sl_mult = self._get_strategy_tp_sl(signal.strategy, signal.symbol, signal.timeframe)
                 tp_price = token_price + (effective_atr * tp_mult)
                 sl_price = token_price - (effective_atr * sl_mult)
+
+                # Cap TP at the VWAP the indicator measured (the strategy's real
+                # reversion target — VWAP Dev v1.1 sends it as vwap_target).
+                # Only when it clears entry by enough to beat round-trip fees;
+                # if price already snapped back above VWAP by fill time, keep
+                # the ATR TP instead of creating an instant-exit target.
+                if (
+                    getattr(signal, "vwap_target", None)
+                    and signal.vwap_target > token_price * 1.005
+                    and signal.vwap_target < tp_price
+                ):
+                    logger.info(
+                        f"TP capped at vwap_target ${signal.vwap_target:.6f} "
+                        f"for {signal.symbol} (ATR TP was ${tp_price:.6f})"
+                    )
+                    tp_price = signal.vwap_target
 
                 risk_cfg = get("risk")
                 max_positions = risk_cfg.get("max_open_positions", 3)
@@ -1666,6 +1822,10 @@ class TradeEngine:
             if slot:
                 tp_mult = slot.get("atr_tp_mult", tp_mult)
                 sl_mult = slot.get("atr_sl_mult", sl_mult)
+
+        # Mean-reversion TP ceiling (2026-06-09) — see _MEAN_REVERSION_STRATEGIES.
+        if _normalize_strategy_name(strategy) in _MEAN_REVERSION_STRATEGIES:
+            tp_mult = min(tp_mult, _MEAN_REVERSION_TP_CAP)
 
         return tp_mult, sl_mult
 

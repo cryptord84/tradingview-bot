@@ -20,7 +20,16 @@ import pandas as pd
 # Thresholds for pass/fail evaluation
 THRESHOLDS = {
     "profit_factor": 1.40,
-    "win_rate":      30.0,   # percent
+    # Win-rate floors are strategy-class-aware (2026-06-10). The original flat
+    # 30% was a day-one default that repeatedly blocked healthy breakout combos
+    # (Donchian/ZEC/4H OOS WR 25% @ PF 3.11; Donchian/SOL HTF WR 27% @ OOS PF
+    # 15.9): low WR + fat winners is that class working as designed. Mean
+    # reversion keeps 30% — its edge IS frequent small wins, so a low-WR
+    # mean-rev combo is broken, not stylistic. The statistical job the flat
+    # floor was doing (PF inflated by one lucky outlier) moved to "min_wins".
+    "win_rate":       30.0,  # percent — mean-reversion floor
+    "win_rate_trend": 20.0,  # percent — trend/breakout floor
+    "min_wins":       4,     # winning trades per WF segment — fewer is luck, not edge
     "trade_count":   30,
     "max_drawdown":  35.0,   # percent (must be BELOW this)
     "net_profit":    0.0,    # percent (must be ABOVE this)
@@ -38,7 +47,9 @@ class RiskConfig:
     # Position sizing: risk this % of equity per trade
     risk_per_trade_pct: float = 2.0
     # ATR-based stop-loss multiplier (SL = entry ± atr_sl_mult * ATR)
-    atr_sl_mult: float = 1.5
+    # 2026-06-09: 1.5 → 2.0 to match live (config.yaml position_monitor
+    # sl_multiplier was widened to 2.0 on 2026-05-15; engine default lagged).
+    atr_sl_mult: float = 2.0
     # ATR-based take-profit multiplier (live default in config.yaml is 4.0)
     atr_tp_mult: float = 4.0
     # Trailing stop: activate after price moves this many ATRs in profit
@@ -47,6 +58,12 @@ class RiskConfig:
     trail_offset_atr: float = 2.0
     # Enable trailing stop
     trail_enabled: bool = True
+    # Breakeven step (2026-06-09, mirrors live position_monitor): once price
+    # moves breakeven_trigger_atr × ATR in profit, SL rises to
+    # entry × (1 + breakeven_buffer_pct/100) so a faded winner exits at >= fees
+    # instead of a loss. 0 disables. Gated under trail_enabled like live.
+    breakeven_trigger_atr: float = 1.0
+    breakeven_buffer_pct: float = 0.5
     # Use ATR-based SL/TP (if False, rely purely on strategy exit signals)
     use_atr_stops: bool = True
 
@@ -188,6 +205,14 @@ def run_backtest(
 
             # Update trailing stop
             if risk.trail_enabled and current_atr > 0:
+                # Breakeven step — mirrors live position_monitor (2026-06-09)
+                if (
+                    risk.breakeven_trigger_atr > 0
+                    and bar_high >= entry_price + (risk.breakeven_trigger_atr * current_atr)
+                ):
+                    breakeven_sl = entry_price * (1.0 + risk.breakeven_buffer_pct / 100.0)
+                    if breakeven_sl > trail_sl:
+                        trail_sl = breakeven_sl
                 activation_price = entry_price + (risk.trail_activation_atr * current_atr)
                 if bar_high >= activation_price:
                     trail_active = True
@@ -227,6 +252,14 @@ def run_backtest(
 
             # Trailing stop for shorts
             if risk.trail_enabled and current_atr > 0:
+                # Breakeven step (short side) — SL drops to entry - buffer
+                if (
+                    risk.breakeven_trigger_atr > 0
+                    and bar_low <= entry_price - (risk.breakeven_trigger_atr * current_atr)
+                ):
+                    breakeven_sl = entry_price * (1.0 - risk.breakeven_buffer_pct / 100.0)
+                    if trail_sl == 0 or breakeven_sl < trail_sl:
+                        trail_sl = breakeven_sl
                 activation_price = entry_price - (risk.trail_activation_atr * current_atr)
                 if bar_low <= activation_price:
                     trail_active = True
@@ -353,7 +386,9 @@ def run_backtest(
     fail_reasons = []
     if profit_factor < THRESHOLDS["profit_factor"]:
         fail_reasons.append(f"PF {profit_factor:.2f}")
-    if win_rate < THRESHOLDS["win_rate"]:
+    wr_floor = (THRESHOLDS["win_rate"] if strategy in MEAN_REVERSION_STRATEGIES
+                else THRESHOLDS["win_rate_trend"])
+    if win_rate < wr_floor:
         fail_reasons.append(f"WR {win_rate:.1f}%")
     if trade_count < THRESHOLDS["trade_count"]:
         fail_reasons.append(f"{trade_count} trades")
@@ -481,6 +516,14 @@ def run_walkforward(
     if oos_quality_reasons:
         fail_reasons.append(f"OOS fail: {','.join(oos_quality_reasons)}")
 
+    # Minimum winning trades per segment: a segment PF carried by fewer than
+    # min_wins winners is one outlier, not an edge. This is the statistical
+    # guard that lets the trend-class WR floor sit at 20% safely.
+    for seg_label, seg in (("IS", is_result), ("OOS", oos_result)):
+        wins = round(seg.trade_count * seg.win_rate / 100)
+        if wins < THRESHOLDS["min_wins"]:
+            fail_reasons.append(f"{seg_label} wins {wins} < {THRESHOLDS['min_wins']}")
+
     if combined.trade_count < THRESHOLDS["trade_count"]:
         fail_reasons.append(
             f"combined {combined.trade_count} trades < {THRESHOLDS['trade_count']}"
@@ -581,6 +624,12 @@ def risk_for(strategy: str, token: str, timeframe: str,
         tp_mult = slot.get("atr_tp_mult", tp_mult)
         sl_mult = slot.get("atr_sl_mult", sl_mult)
 
+    # Mean-reversion TP ceiling — mirrors trade_engine._MEAN_REVERSION_STRATEGIES
+    # (2026-06-09): live clamps these to 2.0× ATR because their edge is the
+    # reversion exit, not a wide target. Backtest must price the same cap.
+    if strategy in MEAN_REVERSION_STRATEGIES:
+        tp_mult = min(tp_mult, MEAN_REVERSION_TP_CAP)
+
     # Build a copy of base with overrides applied
     return RiskConfig(
         risk_per_trade_pct=base.risk_per_trade_pct,
@@ -589,5 +638,38 @@ def risk_for(strategy: str, token: str, timeframe: str,
         trail_activation_atr=base.trail_activation_atr,
         trail_offset_atr=base.trail_offset_atr,
         trail_enabled=base.trail_enabled,
+        breakeven_trigger_atr=base.breakeven_trigger_atr,
+        breakeven_buffer_pct=base.breakeven_buffer_pct,
         use_atr_stops=base.use_atr_stops,
     )
+
+
+# Mirrors trade_engine._MEAN_REVERSION_STRATEGIES — keep the two in sync.
+MEAN_REVERSION_STRATEGIES = {"VWAP Dev", "Stoch RSI", "FVG", "Mean Rev", "RSI2 Rev"}
+MEAN_REVERSION_TP_CAP = 2.0
+
+# ── Per-token fill-cost realism (2026-06-09) ─────────────────────────────────
+# The flat 0.1%/side slippage default badly understates memecoin fills: live
+# closes run 300 bps tolerance and realized SL/trail fills on FARTCOIN/MOODENG
+# routinely came in 1%+ worse than trigger. Pricing realistic slippage demotes
+# combos whose paper edge is thinner than their real execution cost.
+MEME_TOKENS = {
+    "FARTCOIN", "MOODENG", "PNUT", "BONK", "PENGU", "POPCAT",
+    "MEW", "WIF", "DOG", "GOAT", "ACT", "FLOKI", "SHIB",
+}
+MEME_SLIPPAGE = 0.0075   # 0.75% per side
+DEFAULT_SLIPPAGE = 0.001  # 0.1% per side (majors/liquid alts)
+
+# Wide-spread Binance.US books that aren't memes but trade nowhere near the
+# default 0.1%/side. Half-spreads spot-checked 2026-06-10 (bookTicker):
+# ZEC 0.33%, DOT 0.26%, TRX 0.56% per side. Re-check if a combo on one of
+# these starts passing WF — spreads drift with listing health.
+WIDE_SPREAD_SLIPPAGE = {"ZEC": 0.0035, "DOT": 0.003, "TRX": 0.006}
+
+
+def slippage_for(token: str) -> float:
+    """Per-token slippage estimate for backtest fills."""
+    bare = token.replace("USDT", "").replace("USD", "").replace(".P", "")
+    if bare in WIDE_SPREAD_SLIPPAGE:
+        return WIDE_SPREAD_SLIPPAGE[bare]
+    return MEME_SLIPPAGE if bare in MEME_TOKENS else DEFAULT_SLIPPAGE

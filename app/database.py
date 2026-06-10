@@ -2,7 +2,7 @@
 
 import csv
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -24,6 +24,7 @@ class TradeReason:
     CLAUDE_REJECT = "claude_reject"          # Claude said REJECT
     RISK_REJECT = "risk_reject"              # SOL risk manager blocked
     CORRELATION_REJECT = "correlation_reject"  # Correlation cap hit
+    DUPLICATE_REJECT = "duplicate_reject"    # Open position already exists for symbol+strategy
     LOW_BALANCE = "low_balance"              # Auto-shutdown threshold
     DRY_RUN = "dry_run"                      # Per-alert dry-run simulation
     PAPER = "paper"                          # Paper-trading mode
@@ -31,8 +32,19 @@ class TradeReason:
 
 def get_db() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
     conn.row_factory = sqlite3.Row
+    # Crash resilience (added 2026-05-30 after a power-off corrupted the DB and
+    # the trades-only CSV backup couldn't restore `positions` → manual rebuild):
+    #   WAL    — survives abrupt power loss without corrupting the main DB file
+    #            (the default 'delete' rollback journal does not).
+    #   NORMAL — durable across app crashes; on power loss may drop only the last
+    #            commit, never corrupts.
+    #   busy_timeout — avoids 'database is locked' when the daily snapshot runs
+    #            concurrently with bot writes.
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -277,6 +289,7 @@ def init_db():
             timeframe TEXT NOT NULL DEFAULT '',
             sl_exit_price REAL NOT NULL,
             target_price REAL NOT NULL,
+            low_seen REAL,
             sl_distance REAL NOT NULL,
             atr REAL,
             sizing_pct REAL,
@@ -311,6 +324,11 @@ def init_db():
         conn.execute("SELECT strategy FROM trades LIMIT 1")
     except Exception:
         conn.execute("ALTER TABLE trades ADD COLUMN strategy TEXT NOT NULL DEFAULT ''")
+    # Migration: add low_seen column to reentry_watches (bounce-confirmation re-entry, 2026-06-03)
+    try:
+        conn.execute("SELECT low_seen FROM reentry_watches LIMIT 1")
+    except Exception:
+        conn.execute("ALTER TABLE reentry_watches ADD COLUMN low_seen REAL")
     # Migration: add reason column to trades if not exists
     try:
         conn.execute("SELECT reason FROM trades LIMIT 1")
@@ -423,6 +441,38 @@ def update_signal_disposition(signal_log_id: Optional[int], disposition: str,
         conn.close()
     except Exception as e:
         logger.debug(f"update_signal_disposition failed for id={signal_log_id}: {e}")
+
+
+def sweep_stale_received(max_age_minutes: int = 5) -> int:
+    """Mark pre-restart 'received' signals as dropped_restart.
+
+    The signal queue is in-memory; a restart kills in-flight processing and
+    leaves those rows frozen at 'received', which the dashboard renders as
+    eternally pending (2026-06-10: three VWAP CLOSE signals killed by the
+    12:06 restart). Called once at startup — anything still 'received' and
+    older than max_age_minutes predates this process and can never complete.
+    """
+    try:
+        conn = get_db()
+        now = datetime.utcnow()
+        cutoff = (now - timedelta(minutes=max_age_minutes)).isoformat()
+        cur = conn.execute(
+            """UPDATE signals_log
+               SET disposition = 'dropped_restart',
+                   disposition_reason = 'in-flight at bot shutdown (queue is in-memory)',
+                   disposition_at = ?, processed = 1
+               WHERE disposition = 'received' AND timestamp < ?""",
+            (now.isoformat(), cutoff),
+        )
+        n = cur.rowcount
+        conn.commit()
+        conn.close()
+        if n:
+            logger.info(f"Startup sweep: {n} in-flight signal(s) from before restart marked dropped_restart")
+        return n
+    except Exception as e:
+        logger.debug(f"sweep_stale_received failed: {e}")
+        return 0
 
 
 def get_recent_signals(limit: int = 50,
@@ -878,9 +928,9 @@ def insert_reentry_watch(watch: dict) -> int:
     conn = get_db()
     cur = conn.execute(
         """INSERT INTO reentry_watches
-        (created_at, symbol, strategy, timeframe, sl_exit_price, target_price,
+        (created_at, symbol, strategy, timeframe, sl_exit_price, target_price, low_seen,
          sl_distance, atr, sizing_pct, expires_at, status, source_position_id, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
         (
             datetime.utcnow().isoformat(),
             watch["symbol"],
@@ -888,6 +938,7 @@ def insert_reentry_watch(watch: dict) -> int:
             watch.get("timeframe", ""),
             watch["sl_exit_price"],
             watch["target_price"],
+            watch["sl_exit_price"],   # low_seen starts at the SL exit price, tracks downward
             watch["sl_distance"],
             watch.get("atr"),
             watch.get("sizing_pct"),
@@ -926,6 +977,16 @@ def update_reentry_watch(watch_id: int, status: str, **kwargs) -> None:
     vals.append(watch_id)
     conn.execute(
         f"UPDATE reentry_watches SET {', '.join(sets)} WHERE id = ?", vals
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_reentry_low_seen(watch_id: int, low_seen: float) -> None:
+    """Persist the trailing low for a re-entry watch (bounce-confirmation tracking)."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE reentry_watches SET low_seen = ? WHERE id = ?", (low_seen, watch_id)
     )
     conn.commit()
     conn.close()
