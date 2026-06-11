@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-06-09 ~7:00pm EDT (Donchian HTF v1.0 deployed + SOL/1D alert created `4892549592` — roster now 21 alerts; CLOSE exits restored across the entire roster, all bar-close)
+**Last verified:** 2026-06-11 (Stoch RSI/INJ/1D deployed, alert `4906105516` — roster now 22 alerts. Write-path module 928195 re-verified on TVDesktop 3.2.0)
 **Source of truth:** TradingView (`alert_list` MCP / webpack `getAlertsCollection()` — module rotated 560065 → **928195** as of 2026-06-09). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -37,15 +37,15 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 0 | Donchian + ADX v1.0 (retired, old slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
 | 0 | EMA Ribbon + ADX v1.0 (retired) | `USER;c0ffe8e0dd034504a05de359eb6d41bd` | 2.0 | `staged/indicator_ema_ribbon_adx_v1.0.pine` |
 
-**Totals:** 21 alerts (all active), 6 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
+**Totals:** 22 alerts (all active), 6 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
 
 **Mean-rev exit restore (2026-06-09):** VWAP Dev v1.2 and Stoch RSI v1.1 re-add the edge-triggered CLOSE alerts removed 2026-05-13 (the backtests' actual exits) and default `realtimeTrig=false` (bar-close fires). All 12 alerts repointed in place via `modifyRestartAlert` + fetch-interceptor (pine_id re-inject) — webhook URLs, secrets, fire history preserved. Alert display *names* still read v1.0/v1.1 (cosmetic — payload `strategy` strings come from the script: "VWAP Deviation v1.2" / "Stoch RSI v1.1"). Rollout note: positions opened under the old strategy labels won't match new CLOSE labels; the bot's 2-ATR TP cap + 14d max-hold resolve those stragglers.
 
-**Per-wallet split (live 2026-05-30):** Solana/Jupiter 9 · Binance.US 8 · EVM/Arbitrum 3 (AAVE, LDO, LINK).
+**Per-wallet split:** Solana/Jupiter 9 · Binance.US 9 (INJ added 2026-06-11) · EVM/Arbitrum 3 (AAVE, LDO, LINK).
 
-**Timeframe split:** 13 alerts on 1D, 7 alerts on 4H.
+**Timeframe split:** 14 alerts on 1D, 7 alerts on 4H.
 
-**WF alignment:** 13/16 WF-validated passers. 3 live-performance keeps (RENDER/Donchian 4H 89% WR, PNUT/VWAP Dev 4H 100% WR, BONK/EMA Ribbon 4H +$1.24).
+**WF alignment:** 14/17 WF-validated passers. 3 live-performance keeps (RENDER/Donchian 4H 89% WR, PNUT/VWAP Dev 4H 100% WR, BONK/EMA Ribbon 4H +$1.24).
 
 **Note on FARTCOIN/MOODENG perp symbols:** These tokens have no Binance Spot listing — alerts use `BINANCE:<TOKEN>USDT.P` (perpetual). The trade engine's symbol normalization was patched 2026-05-02 to strip the `.P` suffix so webhook payloads route correctly.
 
@@ -106,6 +106,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | ✓ | ETH | 1D | 4765875052 | **WF passer (PF 1.72, OOS 1.66)** — added 2026-05-22, Solana/Jupiter |
 | ✓ | TIA | 4H | 4816316288 | **WF passer 2-sample (05-28 PF 1.67, 05-29 PF 1.60)** — added 2026-05-30, Binance.US lane, Tier C 9% |
 | ✓ | LINK | 1D | 4816484447 | **near-miss (IS 1.31 / OOS 1.48, 52 trades — fails IS_PF gate only)** — added 2026-05-30, EVM/Arbitrum lane, Tier C 9% |
+| ✓ | INJ | 1D | 4906105516 | **WF passer 2-night (06-10 + 06-11: PF 2.59, IS 3.00/OOS 2.10, WR 59.5%)** — added 2026-06-11, Binance.US lane (newly listed), Tier B 13% |
 | — | _culled 2026-05-15:_ PENGU 4H (`4479801456`) — profitability overhaul |
 | — | _culled 2026-05-08:_ ETH 4H (`4454015121`) PF 0.65, SOL 4H (`4454015105`) PF 0.85, RENDER 1H (`4454015587`) PF 0.86 | | | |
 | — | _culled 2026-05-02:_ BONK 1H (`4576190853`), PENGU 1H (`4558016704`) | | | catastrophic 1H |
@@ -204,6 +205,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | **DOGE** | — | — | — | **1D ✦** |
 | **ETH** | — | — | — | **1D ✦** |
 | **FARTCOIN.P** | — | **4H ✦** | **4H ✦** | — |
+| **INJ** | — | **1D ✦** | — | — |
 | **LDO** | — | — | **1D ✦** | — |
 | **MOODENG.P** | — | — | **4H ✦** | — |
 | **OP** | — | **1D ✦** | — | — |
@@ -230,6 +232,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-06-11 | **Stoch RSI/INJ/1D deployed (Tier B 13%) — alert `4906105516`.** Two-consecutive-night WF passer under the new realism gates (06-10 + 06-11 nightlies: PF 2.59, IS 3.00/OOS 2.10, WR 59.5%, DD 3.4%) and the strongest undeployed combo on the board. INJ is tradeable again on Binance.US (06-09 probe: TRADING, ~$13k/day). Created via `getAlertsCollection(928195).createAlert()` + fetch-interceptor pine_id re-inject, cloned from the ETH/1D Stoch alert (`4765875052`): symbol object mutated to BINANCE:INJUSDT, `in_9` 9→13 (Tier B), `in_10=false` (bar-close) inherited. Created inactive → activated via `modifyRestartAlert`; server-verified active with correct pine_id v1.0, webhook + secret matching the working roster. **Module 928195 re-verified post-TVDesktop-3.2.0** (shape-search confirmed no rotation; saveNew still 752174). Bot-side was pre-wired 06-09 (INJ→INJUSDT in BINANCE_TOKENS, sizing override staged, label normalization verified) and already loaded by the running bot — no restart needed. `data/active_alerts.json` refreshed (22 alerts, 17 tokens). **Roster 21→22.** |
 | 2026-06-09 | **Alert Signal Heartbeat panel + `data/active_alerts.json` refreshed (21 alerts, 16 tokens).** Snapshot regenerated from a fresh MCP `alert_list` (the post-deploy refresh step missed earlier today) — entries now carry `strategy`, normalized `tf`, and TV-side `last_fired`. New dashboard endpoint `/api/signals/heartbeat` joins this roster against `signals_log` per alert: last webhook received, 7d/30d/executed counts, staleness status (TF-aware thresholds), and a **delivery-gap detector** — TV `last_fired` newer than the last webhook ⇒ status MISSED (ngrok/secret/webhook breakage, distinct from a quiet market). Also reports "unrostered" signal groups (labels still arriving that match no deployed alert). UI panel sits under the Webhook Disposition Log; live on browser refresh, endpoint needs the next bot restart. Note: `signals_log` history starts 2026-05-30 (DB recovery), so "SILENT" means no webhook since then — Donchian/EMA Ribbon's TV fire dates (05-11→05-26) all predate the window, consistent, no missed deliveries detected. TV Desktop upgraded to 3.2.0 this evening; `tv_launch`/`alert_list` verified working post-upgrade (write-path module IDs unverified since the upgrade — rediscover before next `modifyRestartAlert`). |
 | 2026-06-09 | **Donchian HTF v1.0 deployed + SOL/1D alert created (Tier-A promotion) + backtest engine realism upgrades.** The 06-09 HTF nightly's only passer — Donchian/SOL/1D with the 4×TF EMA(20) slope gate (PF 4.43, IS 4.46/OOS 4.24, DD 4.6%, Tier A) — was undeployed; the UNFILTERED Donchian/SOL/1D fails WF (OOS 0.60), so the filter is load-bearing. New script `USER;dd331ce7211f48df8a39b8be50ab30c6` (Donchian v1.1 + non-repainting `request.security([1] vs [2], lookahead_off)` HTF gate on entries only, matching `_apply_higher_tf_filter` semantics; CLOSE included; bar-close). Alert `4892549592` (BINANCE:SOLUSDT, 1D) created via `createAlert(928195)` + interceptor — gotcha: client-format `symbol` is an OBJECT (`{symbol, adjustment, session, currency-id}`), string-coercing it sends "[object Object]" → server `internal` error; mutate `.symbol.symbol` instead. Created inactive → activated via modifyRestartAlert; server-verified active with secret + ngrok webhook. **Roster 20→21.** Bot-side: `"donchian htf"→"Donchian"` alias added to `_STRATEGY_NAME_ALIASES` (restart needed; until then SOL signals size at suggested 15% instead of Tier-A 18% — TP/SL unaffected). Engine (offline, no restart): breakeven step added to `RiskConfig` + both long/short paths (validated: pop-then-dump synthetic flips -1.80%→+0.10%); mean-rev TP clamp 2.0 mirrored in `risk_for`; `atr_sl_mult` default 1.5→2.0 (live parity, lagged since 05-15); per-token slippage (`slippage_for`: memes 0.75%/side, majors 0.1%) wired into nightly. Tonight's nightly reprices everything under live-true geometry — expect FARTCOIN/MOODENG paper edges to shrink. KAVA/VWAP/4H passes WF but stays undeployed (Binance.US $2.56 market-order cap — needs limit orders). |
 | 2026-06-09 | **Batch 2 — CLOSE exits restored on the rest of the roster: Donchian v1.1 + EMA Ribbon v1.1 + FVG v1.2, 8 alerts repointed.** Git diff of `5182b0b` confirmed all three lost backtest-matching edge-triggered exits in the May 13 wholesale removal (Donchian: `ta.crossunder(close, ch_mid)`; EMA Ribbon: alignment-break one-shot; FVG v1.1: state/signal split — none were spammers). New slots via `saveNew(752174)`, 0 compile errors: Donchian Breakout v1.1 → `USER;46a673e6469040dda110bfa1ffd1039d`, EMA Ribbon v1.1 → `USER;979fa3396148450591d37fff241dd4aa`, FVG v1.2 → `USER;33f65a33cc544f53a324826578d3a8e2`. Repointed via `modifyRestartAlert(928195)` + interceptor: Donchian DOGE/1D `4665962753`, ETH/1D `4665962725`, BTC/1D `4665961105`, RENDER/4H `4640525994` (in_7 already bar-close); EMA Ribbon BTC/1D `4736445587` (in_8 true→false), SOL/1D `4665962741` + BONK/4H `4454015047` (already false, stale in_10 dropped); FVG NEAR/1D `4768403384` (in_6 true→false). **Full-roster audit: 20/20 active alerts on new scripts, all bar-close, zero problems.** New strategy labels verified to normalize correctly bot-side (sizing tiers + TP/SL profiles resolve; Donchian keeps trend TP 4.0, FVG gets 2-ATR mean-rev cap). No bot restart needed — labels are payload strings parsed at signal time. No open positions on these 3 strategies → zero CLOSE-label stragglers. |
