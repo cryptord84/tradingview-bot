@@ -202,6 +202,8 @@ database:
   path: "data/trades.db"
   csv_backup_dir: "data/csv_backups"
   csv_backup_daily: true
+  db_snapshot_dir: "data/db_snapshots"  # full-DB VACUUM INTO snapshots (14-day retention)
+  whales_keep_days: 7                   # kalshi_whales rolling retention (~52k rows/day); 0 disables pruning
 
 # --- Firecrawl ---
 firecrawl:
