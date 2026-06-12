@@ -1,6 +1,6 @@
 # Indicator & Alert Deployment Status
 
-**Last verified:** 2026-06-11 (Stoch RSI/INJ/1D deployed, alert `4906105516` — roster now 22 alerts. Write-path module 928195 re-verified on TVDesktop 3.2.0)
+**Last verified:** 2026-06-12 (Liq Sweep v1.1 un-retired + ATOM/1D deployed, alert `4916804469` — roster now 23 alerts)
 **Source of truth:** TradingView (`alert_list` MCP / webpack `getAlertsCollection()` — module rotated 560065 → **928195** as of 2026-06-09). This doc is a snapshot — always re-pull live state before acting.
 
 ## How to update this file
@@ -24,6 +24,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 3 | EMA Ribbon v1.1 | `USER;979fa3396148450591d37fff241dd4aa` | 1.0 | `staged/indicator_ema_ribbon_v1.1.pine` |
 | 4 | Donchian Breakout v1.1 | `USER;46a673e6469040dda110bfa1ffd1039d` | 1.0 | `staged/indicator_donchian_v1.1.pine` |
 | 1 | Donchian HTF v1.0 | `USER;dd331ce7211f48df8a39b8be50ab30c6` | 1.0 | `staged/indicator_donchian_htf_v1.0.pine` |
+| 1 | Liquidity Sweep v1.1 | `USER;f948fe650fb14796b5f961443ac6da64` | 1.0 | `staged/indicator_liq_sweep_v1.1.pine` |
 | 6 | Stochastic RSI v1.1 | `USER;452f801743764531b38407308ff41da6` | 1.0 | `staged/indicator_stoch_rsi_v1.1.pine` |
 | 6 | VWAP Deviation v1.2 | `USER;d8d3064dcdc74ff4a72f2183ae8e19a1` | 1.0 | `staged/indicator_vwap_dev_v1.2.pine` |
 | 0 | FVG v1.1 (retired 2026-06-09) | `USER;3156f00306a244688b2d8de21cd03dbe` | 2.0 | `staged/indicator_fvg_v1.1.pine` |
@@ -37,15 +38,15 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 0 | Donchian + ADX v1.0 (retired, old slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
 | 0 | EMA Ribbon + ADX v1.0 (retired) | `USER;c0ffe8e0dd034504a05de359eb6d41bd` | 2.0 | `staged/indicator_ema_ribbon_adx_v1.0.pine` |
 
-**Totals:** 22 alerts (all active), 6 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
+**Totals:** 23 alerts (all active), 7 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
 
 **Mean-rev exit restore (2026-06-09):** VWAP Dev v1.2 and Stoch RSI v1.1 re-add the edge-triggered CLOSE alerts removed 2026-05-13 (the backtests' actual exits) and default `realtimeTrig=false` (bar-close fires). All 12 alerts repointed in place via `modifyRestartAlert` + fetch-interceptor (pine_id re-inject) — webhook URLs, secrets, fire history preserved. Alert display *names* still read v1.0/v1.1 (cosmetic — payload `strategy` strings come from the script: "VWAP Deviation v1.2" / "Stoch RSI v1.1"). Rollout note: positions opened under the old strategy labels won't match new CLOSE labels; the bot's 2-ATR TP cap + 14d max-hold resolve those stragglers.
 
-**Per-wallet split:** Solana/Jupiter 9 · Binance.US 9 (INJ added 2026-06-11) · EVM/Arbitrum 3 (AAVE, LDO, LINK).
+**Per-wallet split:** Solana/Jupiter 9 · Binance.US 10 (INJ added 06-11, ATOM 06-12) · EVM/Arbitrum 3 (AAVE, LDO, LINK).
 
-**Timeframe split:** 14 alerts on 1D, 7 alerts on 4H.
+**Timeframe split:** 15 alerts on 1D, 7 alerts on 4H.
 
-**WF alignment:** 14/17 WF-validated passers. 3 live-performance keeps (RENDER/Donchian 4H 89% WR, PNUT/VWAP Dev 4H 100% WR, BONK/EMA Ribbon 4H +$1.24).
+**WF alignment:** 15/18 WF-validated passers. 3 live-performance keeps (RENDER/Donchian 4H 89% WR, PNUT/VWAP Dev 4H 100% WR, BONK/EMA Ribbon 4H +$1.24).
 
 **Note on FARTCOIN/MOODENG perp symbols:** These tokens have no Binance Spot listing — alerts use `BINANCE:<TOKEN>USDT.P` (perpetual). The trade engine's symbol normalization was patched 2026-05-02 to strip the `.P` suffix so webhook payloads route correctly.
 
@@ -80,13 +81,14 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 ---
 
-## Liquidity Sweep v1.0
+## Liquidity Sweep v1.1 (un-retired 2026-06-12)
 
-**Logic:** wick-rejection detection at swing highs/lows; edge-triggered sweep + reclaim. Same-bar bugfix Apr 19 (v1.0 → v3.0).
-**Slot:** `USER;12e465c59f0941d2a4fef70e58003c45` · script v4.0 · `staged/indicator_liq_sweep_v1.0.pine`
+**Logic:** wick-rejection detection at swing highs/lows; sweep + reclaim. v1.1 restores the backtest-matching CLOSE (opposite sweep, no volume gate — v1.0 wrongly volume-gated the exit), bar-close default. Same-bar bugfix Apr 19 (v1.0 → v3.0).
+**Slot:** `USER;f948fe650fb14796b5f961443ac6da64` · script v1.0 · `staged/indicator_liq_sweep_v1.1.pine` (v1.0 slot `USER;12e465c59f0941d2a4fef70e58003c45` stays retired)
 
 | status | symbol | TF | alert_id | notes |
 |---|---|---|---|---|
+| ✓ | ATOM | 1D | 4916804469 | **WF passer 3-night (06-10/11/12: PF 1.75, IS 1.86/OOS 1.55, WR 50%)** — added 2026-06-12, Binance.US lane (thin book ~$3.4k/day — limit-order flow required), Tier C 9% |
 | — | _culled 2026-05-15:_ SOL 4H (`4608026983`), UNI 4H (`4659629664`) — profitability overhaul |
 | — | _culled 2026-05-08:_ INJ.P (`4606986738`) — Phase 4 audit found Arbitrum INJ address invalid + zero Arbitrum liquidity for the canonical Injective token |
 | — | _culled 2026-05-02:_ ETH 1H (`4454017961`) PF 0.40, ETH 4H (`4454017945`) PF 0.93 |
@@ -200,6 +202,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 |---|---|---|---|---|
 | **AAVE** | — | — | **1D ✦** | — |
 | **ARB** | — | **1D ✦** | **1D ✦** | — |
+| **ATOM** | — | — | — | — (Liq Sweep **1D ✦**, no matrix column) |
 | **BONK** | 4H ▲ | — | — | — |
 | **BTC** | **1D ✦** | — | — | **1D ✦** |
 | **DOGE** | — | — | — | **1D ✦** |
@@ -232,6 +235,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 | Date | Event |
 |---|---|
+| 2026-06-12 | **Liq Sweep v1.1 un-retired + ATOM/1D deployed (Tier C 9%) — alert `4916804469`.** ATOM/1D passed WF three consecutive nightlies (06-10/11/12: PF 1.75, IS 1.86/OOS 1.55, WR 50.0%, DD 5.3%) — the last undeployed passer. **New script** Liquidity Sweep v1.1 → `USER;f948fe650fb14796b5f961443ac6da64` via `saveNew(752174)`, 0 compile errors: restores the backtest-matching CLOSE (opposite sweep — raw, NO volume gate; v1.0 wrongly gated the exit on volume; `strategy_liq_sweep` exits on raw `bear_sweep`), same-bar BUY/CLOSE guard, `realtimeTrig=false` default. Old v1.0 slot stays retired. Alert created via `createAlert(928195)` + interceptor (cloned ETH/1D Stoch template, inputs replaced wholesale to v1.1 layout: in_6=9 Tier C, in_7=false bar-close), created inactive → activated → server-verified active with webhook+secret. **Liquidity probe:** ATOMUSDT on Binance.US is TRADING but thin (~$3.4k/day 24h quote vol, 0.18%/side spread, no divergence vs CoinGecko global) — fills depend on the **limit-order flow** (live since 06-10); Tier-C size is well under touch depth (1,183 ATOM bid). Bot-side: `ATOM→ATOMUSDT` added to `BINANCE_TOKENS` — **needs bot restart**; label "Liquidity Sweep v1.1"→"Liq Sweep" normalization verified; sizing override (Tier C 9%) already staged 06-09. `data/active_alerts.json` refreshed (23 alerts, 18 tokens). **Roster 22→23.** |
 | 2026-06-11 | **Stoch RSI/INJ/1D deployed (Tier B 13%) — alert `4906105516`.** Two-consecutive-night WF passer under the new realism gates (06-10 + 06-11 nightlies: PF 2.59, IS 3.00/OOS 2.10, WR 59.5%, DD 3.4%) and the strongest undeployed combo on the board. INJ is tradeable again on Binance.US (06-09 probe: TRADING, ~$13k/day). Created via `getAlertsCollection(928195).createAlert()` + fetch-interceptor pine_id re-inject, cloned from the ETH/1D Stoch alert (`4765875052`): symbol object mutated to BINANCE:INJUSDT, `in_9` 9→13 (Tier B), `in_10=false` (bar-close) inherited. Created inactive → activated via `modifyRestartAlert`; server-verified active with correct pine_id v1.0, webhook + secret matching the working roster. **Module 928195 re-verified post-TVDesktop-3.2.0** (shape-search confirmed no rotation; saveNew still 752174). Bot-side was pre-wired 06-09 (INJ→INJUSDT in BINANCE_TOKENS, sizing override staged, label normalization verified) and already loaded by the running bot — no restart needed. `data/active_alerts.json` refreshed (22 alerts, 17 tokens). **Roster 21→22.** |
 | 2026-06-09 | **Alert Signal Heartbeat panel + `data/active_alerts.json` refreshed (21 alerts, 16 tokens).** Snapshot regenerated from a fresh MCP `alert_list` (the post-deploy refresh step missed earlier today) — entries now carry `strategy`, normalized `tf`, and TV-side `last_fired`. New dashboard endpoint `/api/signals/heartbeat` joins this roster against `signals_log` per alert: last webhook received, 7d/30d/executed counts, staleness status (TF-aware thresholds), and a **delivery-gap detector** — TV `last_fired` newer than the last webhook ⇒ status MISSED (ngrok/secret/webhook breakage, distinct from a quiet market). Also reports "unrostered" signal groups (labels still arriving that match no deployed alert). UI panel sits under the Webhook Disposition Log; live on browser refresh, endpoint needs the next bot restart. Note: `signals_log` history starts 2026-05-30 (DB recovery), so "SILENT" means no webhook since then — Donchian/EMA Ribbon's TV fire dates (05-11→05-26) all predate the window, consistent, no missed deliveries detected. TV Desktop upgraded to 3.2.0 this evening; `tv_launch`/`alert_list` verified working post-upgrade (write-path module IDs unverified since the upgrade — rediscover before next `modifyRestartAlert`). |
 | 2026-06-09 | **Donchian HTF v1.0 deployed + SOL/1D alert created (Tier-A promotion) + backtest engine realism upgrades.** The 06-09 HTF nightly's only passer — Donchian/SOL/1D with the 4×TF EMA(20) slope gate (PF 4.43, IS 4.46/OOS 4.24, DD 4.6%, Tier A) — was undeployed; the UNFILTERED Donchian/SOL/1D fails WF (OOS 0.60), so the filter is load-bearing. New script `USER;dd331ce7211f48df8a39b8be50ab30c6` (Donchian v1.1 + non-repainting `request.security([1] vs [2], lookahead_off)` HTF gate on entries only, matching `_apply_higher_tf_filter` semantics; CLOSE included; bar-close). Alert `4892549592` (BINANCE:SOLUSDT, 1D) created via `createAlert(928195)` + interceptor — gotcha: client-format `symbol` is an OBJECT (`{symbol, adjustment, session, currency-id}`), string-coercing it sends "[object Object]" → server `internal` error; mutate `.symbol.symbol` instead. Created inactive → activated via modifyRestartAlert; server-verified active with secret + ngrok webhook. **Roster 20→21.** Bot-side: `"donchian htf"→"Donchian"` alias added to `_STRATEGY_NAME_ALIASES` (restart needed; until then SOL signals size at suggested 15% instead of Tier-A 18% — TP/SL unaffected). Engine (offline, no restart): breakeven step added to `RiskConfig` + both long/short paths (validated: pop-then-dump synthetic flips -1.80%→+0.10%); mean-rev TP clamp 2.0 mirrored in `risk_for`; `atr_sl_mult` default 1.5→2.0 (live parity, lagged since 05-15); per-token slippage (`slippage_for`: memes 0.75%/side, majors 0.1%) wired into nightly. Tonight's nightly reprices everything under live-true geometry — expect FARTCOIN/MOODENG paper edges to shrink. KAVA/VWAP/4H passes WF but stays undeployed (Binance.US $2.56 market-order cap — needs limit orders). |

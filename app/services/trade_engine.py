@@ -517,6 +517,11 @@ class TradeEngine:
         # Pre-mapped so a future INJ alert doesn't silently drop (the 05-12
         # BTC/DOGE/OP lesson). No INJ alerts deployed yet.
         "INJ":   "INJUSDT",
+        # 2026-06-12: Liq Sweep/ATOM/1D deployed (3-night WF passer, PF 1.75).
+        # Thin book on .US (~$3.4k/day, probe: TRADING, spread 0.18%/side,
+        # no global-price divergence) — fills rely on the limit-order flow,
+        # NOT market orders. Tier C size keeps orders far under touch depth.
+        "ATOM":  "ATOMUSDT",
     }
 
     def _is_evm_symbol(self, symbol: str) -> bool:

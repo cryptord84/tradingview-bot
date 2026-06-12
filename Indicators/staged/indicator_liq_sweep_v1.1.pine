@@ -1,0 +1,103 @@
+//@version=6
+// Liquidity Sweep v1.1 — Alert Indicator
+// v1.0 → v1.1 changelog (2026-06-12, ATOM/1D deploy):
+//   - RESTORED CLOSE alert (opposite sweep). The 2026-05-13 CLOSE removal
+//     deleted the exit the backtest validates with (backtesting/strategies.py
+//     exits long when a bearish sweep forms). Without it a faded reversal
+//     sits until SL (-2 ATR) or 14d max-hold.
+//   - Volume filter now applies to ENTRIES only, matching the backtest:
+//     strategy_liq_sweep gates long_entry on vol_ok but exits on the raw
+//     bear_sweep (v1.0 wrongly required vol surge on the bear sweep too).
+//   - realtimeTrig default true → false (bar-close fires, roster standard).
+//
+// Original v1.0 backtest record:
+//   ETH    1H  PF=3.43  WR=75.0%  52 trades  DD=4.9%   NP=77.3%
+//   SOL    4H  PF=2.47  WR=71.1%  45 trades  DD=6.0%   NP=42.3%
+// Deploy basis (v1.1): ATOM/1D WF passer 3 consecutive nightlies
+//   (06-10/11/12: PF=1.75 WR=50.0% 32 trades DD=5.3% IS 1.86/OOS 1.55)
+//
+// Signal logic: ICT Liquidity Sweep — stop-hunt reversal
+//   BUY:   price wicks below swing low (10-bar) but closes above it + volume surge
+//   CLOSE: price wicks above swing high but closes below it (opposite sweep,
+//          no volume gate) — event-like, fires on the sweep bar only
+
+indicator("Liquidity Sweep v1.1 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_liq  = "Liquidity Settings"
+var grp_vol  = "Volume Filter"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+lookback       = input.int(10,   "Swing Lookback",     minval=3,    group=grp_liq)
+volLen         = input.int(20,   "Volume MA Length",    minval=5,    group=grp_vol)
+volMult        = input.float(1.2, "Min Volume (x MA)",  step=0.1,   group=grp_vol)
+confidence     = input.int(65,   "Confidence Score",   minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage",  minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %",  minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(false, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showLevels     = input.bool(true, "Show Swing Levels",  group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+swing_high = ta.highest(high, lookback)[1]  // prior bars only — no look-ahead
+swing_low  = ta.lowest(low,   lookback)[1]
+
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+vol_ok  = volume > ta.sma(volume, volLen) * volMult
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+// Raw sweeps (no volume gate) — backtest parity
+bull_sweep = low < swing_low and close > swing_low
+bear_sweep = high > swing_high and close < swing_high
+
+long_entry = bull_sweep and vol_ok
+// Exit on the opposite sweep — raw, ungated, matching strategy_liq_sweep's
+// long_exit = bear_sweep. Same-bar guard mirrors the rest of the roster.
+long_exit  = bear_sweep and not long_entry
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(showLevels ? swing_high : na, "Swing High", color=color.new(color.red, 50),   linewidth=1, style=plot.style_stepline)
+plot(showLevels ? swing_low  : na, "Swing Low",  color=color.new(color.green, 50), linewidth=1, style=plot.style_stepline)
+
+plotshape(long_entry, "Bullish Sweep", shape.triangleup, location.belowbar, color.green,  size=size.small, text="SWEEP")
+plotshape(long_exit,  "Exit Sweep",    shape.circle,     location.abovebar, color.yellow, size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "Liquidity Sweep v1.1"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+if long_exit
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"CLOSE"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":50' +
+          ',"suggested_leverage":1' +
+          ',"suggested_position_size_percent":100' +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
+alertcondition(long_entry, "Liq Sweep — BUY",   "Liq Sweep BUY")
+alertcondition(long_exit,  "Liq Sweep — CLOSE", "Liq Sweep CLOSE")
