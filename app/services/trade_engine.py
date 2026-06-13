@@ -644,12 +644,26 @@ class TradeEngine:
             # the only gate. Set risk.allow_pyramiding: true to disable.
             # dry_run preflights skip it — a live open position would false-fail
             # the pipeline validation they exist to run.
+            #
+            # Strategy is matched on its NORMALIZED name, not the raw label
+            # (2026-06-12): a Pine version bump changes the label ("Stoch RSI
+            # v1.0" → "v1.1") but not the strategy, and the old exact-string
+            # match let a v1.1 BUY stack on a v1.0 position (OP #33/#34).
+            # Symbol stays an exact match. Open set is tiny (<= max_open_positions),
+            # so the in-Python scan is cheaper than a second indexed query and
+            # keeps _normalize_strategy_name out of the DB layer (circular import).
             if (
                 signal.signal_type.value == "BUY"
                 and not getattr(signal, "dry_run", False)
                 and not (get("risk") or {}).get("allow_pyramiding", False)
             ):
-                dup_pos = get_open_position_for_signal(signal.symbol, strategy_label)
+                _norm_target = _normalize_strategy_name(strategy_label)
+                dup_pos = next(
+                    (p for p in get_open_positions()
+                     if p["symbol"] == signal.symbol
+                     and _normalize_strategy_name(p.get("strategy")) == _norm_target),
+                    None,
+                )
                 if dup_pos:
                     msg = (
                         f"Duplicate guard: open position #{dup_pos['id']} already exists "
