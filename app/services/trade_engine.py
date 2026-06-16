@@ -1113,7 +1113,21 @@ class TradeEngine:
                 # position record and stranded residual tokens in the wallet.
                 action_label = signal.signal_type.value
                 strategy_name = signal.strategy or ""
-                matched_pos = get_open_position_for_signal(signal.symbol, strategy_name)
+                # Match on NORMALIZED strategy (2026-06-16): a Pine version bump
+                # changes the label ("Stoch RSI v1.0" -> "v1.1") but not the
+                # strategy. The old exact-string match let a v1.1 CLOSE fail to
+                # find a position opened under the v1.0 label, so the exit silently
+                # no-op'd and the position rode to SL/max-hold instead of taking
+                # the strategy's real (backtested) exit — the edge leaks out right
+                # here. Mirrors the duplicate-guard fix; get_open_positions() is
+                # newest-first, so the first normalized match is the most recent.
+                _norm = _normalize_strategy_name(strategy_name)
+                matched_pos = next(
+                    (p for p in get_open_positions()
+                     if p["symbol"] == signal.symbol
+                     and _normalize_strategy_name(p.get("strategy")) == _norm),
+                    None,
+                )
 
                 if not matched_pos:
                     logger.debug(
