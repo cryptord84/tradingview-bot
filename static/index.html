@@ -1833,6 +1833,40 @@ footer a:hover { color: var(--green); }
     </div>
   </div>
 
+  <div class="card" data-label="// INCOME TEST" style="grid-column: 1 / -1;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <span class="section-title" style="margin:0">Income Test — Freeze 2026-06-16 → Decision 2026-06-30</span>
+      <button onclick="loadIncomeTest()" style="background:transparent;border:none;color:var(--green-dim);font-family:var(--mono);font-size:.65rem;letter-spacing:2px;cursor:pointer;">[ REFRESH ]</button>
+    </div>
+    <div id="it-note" style="color:var(--yellow);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;margin-bottom:12px;">freeze config (Kalshi pause, re-entry off) activates on the next bot restart — until then since-freeze P&L still includes pre-restart churn</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;">
+      <div style="text-align:center;">
+        <div id="it-combined" style="color:var(--green);font-family:var(--vt);font-size:1.3rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">COMBINED P&L SINCE FREEZE</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="it-crypto" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">CRYPTO LANE</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="it-kalshi" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">KALSHI LANE (paused @ restart)</div>
+      </div>
+      <div style="text-align:center;">
+        <div id="it-countdown" style="color:var(--green);font-family:var(--vt);font-size:1.1rem;">--</div>
+        <div style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;letter-spacing:1px;">DAYS TO DECISION</div>
+      </div>
+    </div>
+    <div style="color:var(--green-dim);font-family:var(--mono);font-size:.6rem;letter-spacing:2px;margin-bottom:6px;">DEPLOYED COMBOS — LIVE vs BACKTEST (since freeze)</div>
+    <table style="width:100%;font-family:var(--mono);font-size:.65rem;color:var(--green);border-collapse:collapse;" id="it-combo-table">
+      <thead><tr style="color:var(--green-dim);text-align:right;">
+        <th style="text-align:left;padding:2px 4px;">STRATEGY</th><th style="text-align:left;padding:2px 4px;">TOK</th><th style="padding:2px 4px;">TF</th><th style="padding:2px 4px;">LIVE N</th><th style="padding:2px 4px;">LIVE P&L</th><th style="padding:2px 4px;">LIVE PF</th><th style="padding:2px 4px;">BACKTEST PF</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="it-foot" style="color:var(--green-dim);font-family:var(--mono);font-size:.55rem;margin-top:8px;"></div>
+  </div>
+
   <div class="card" data-label="// SOL RISK MANAGER">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
       <span class="section-title" style="margin:0">SOL Trade Risk</span>
@@ -2961,6 +2995,45 @@ async function loadHeartbeat() {
     }
   } catch (e) {
     console.warn('loadHeartbeat failed', e);
+  }
+}
+
+// ── INCOME TEST (2026-06-16 freeze → 06-30 decision) ──
+async function loadIncomeTest() {
+  try {
+    const r = await fetch(`${API}/api/income-test`);
+    const noteEl = document.getElementById('it-note');
+    if (!r.ok) { if (noteEl) noteEl.textContent = 'endpoint live after next bot restart'; return; }
+    const d = await r.json();
+    const sf = d.since_freeze;
+    const money = v => (v >= 0 ? '+$' : '-$') + Math.abs(v).toFixed(2);
+    const col = v => v > 0 ? 'var(--green)' : (v < 0 ? 'var(--red)' : 'var(--green-dim)');
+    const set = (id, txt, color) => { const e = document.getElementById(id); if (e) { e.textContent = txt; if (color) e.style.color = color; } };
+    set('it-combined', money(sf.combined_pnl), col(sf.combined_pnl));
+    set('it-crypto', `${money(sf.crypto_pnl)} (${sf.crypto_trades})`, col(sf.crypto_pnl));
+    set('it-kalshi', `${money(sf.kalshi_pnl)} (${sf.kalshi_trades})`, col(sf.kalshi_pnl));
+    set('it-countdown', `${d.days_remaining}d`, 'var(--green)');
+    const tbody = document.querySelector('#it-combo-table tbody');
+    if (tbody) {
+      tbody.textContent = '';
+      (d.combos || []).forEach(c => {
+        const tr = document.createElement('tr');
+        const s = createCell(c.strategy); s.style.color = 'var(--yellow)'; s.style.fontSize = '.6rem'; tr.appendChild(s);
+        tr.appendChild(createCell(c.token));
+        tr.appendChild(createCell(c.tf || '--', 'dim'));
+        tr.appendChild(createCell(String(c.live_trades), c.live_trades > 0 ? '' : 'dim'));
+        const pnlC = createCell(c.live_trades ? money(c.live_pnl) : '--'); if (c.live_trades) pnlC.style.color = col(c.live_pnl); tr.appendChild(pnlC);
+        tr.appendChild(createCell(c.live_pf == null ? '--' : c.live_pf.toFixed(2), c.live_pf == null ? 'dim' : ''));
+        const btC = createCell(c.backtest_pf == null ? '--' : c.backtest_pf.toFixed(2));
+        if (c.backtest_pf != null) btC.style.color = c.backtest_pf >= 1.5 ? 'var(--green)' : (c.backtest_pf >= 1.0 ? 'var(--yellow)' : 'var(--red)');
+        tr.appendChild(btC);
+        tbody.appendChild(tr);
+      });
+    }
+    const foot = document.getElementById('it-foot');
+    if (foot) foot.textContent = `baseline at freeze: crypto $${d.baseline.crypto} · kalshi $${d.baseline.kalshi}  |  cost so far $${sf.cost_so_far} · net vs cost ${money(sf.net_vs_cost)}  |  day ${d.days_elapsed} of test`;
+  } catch (e) {
+    console.warn('loadIncomeTest failed', e);
   }
 }
 
@@ -6587,6 +6660,7 @@ loadPortfolio();
 loadEquityChart();
 loadStrategyPnl();
 loadExitQuality();
+loadIncomeTest();
 loadIndicatorPerf();
 loadBacktestMatrix();
 loadPriceFeedStatus();
@@ -6597,6 +6671,7 @@ setInterval(loadTodayActivity, 10000);   // every 10s — most live widget
 setInterval(loadEquityChart, 120000);
 setInterval(loadStrategyPnl, 120000);
 setInterval(loadExitQuality, 120000);
+setInterval(loadIncomeTest, 120000);
 setInterval(loadIndicatorPerf, 60000);
 setInterval(loadBacktestMatrix, 600000);  // 10min — config rarely changes
 setInterval(loadPriceFeedStatus, 30000);  // 30s — catches WS staleness within ~1min

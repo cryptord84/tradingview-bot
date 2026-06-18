@@ -1183,6 +1183,124 @@ async def get_exit_quality(days: int = 30):
     }
 
 
+@router.get("/income-test")
+async def get_income_test():
+    """Measurement view for the 2026-06-16 income-test freeze (decision 2026-06-30).
+
+    Read-only verdict instrument: realized P&L since the freeze vs the baseline
+    and the cost run-rate, plus per deployed-combo live realized P&L against the
+    latest nightly backtest PF. Headline is the combined since-freeze number; the
+    per-combo table fills slowly (1D combos trade ~weekly), so most rows start at
+    zero trades. NOTE: the freeze config (Kalshi pause, re-entry off) only goes
+    live on the first bot restart after 2026-06-16 — until then since-freeze P&L
+    still includes pre-restart churn (e.g. the BONK re-entry loop).
+    """
+    import re
+    import sqlite3
+    from datetime import date
+    from app.database import DB_PATH
+
+    FREEZE = "2026-06-16T00:00:00"
+    DECISION = date(2026, 6, 30)
+    MONTHLY_COST = 42.0
+
+    c = sqlite3.connect(DB_PATH)
+    c.row_factory = sqlite3.Row
+
+    def _sum(table, pnl_expr, where):
+        r = c.execute(f"SELECT COALESCE(ROUND(SUM({pnl_expr}),2),0) p, COUNT(*) n "
+                      f"FROM {table} WHERE {where}").fetchone()
+        return r["p"] or 0.0, r["n"] or 0
+
+    # Baseline (before freeze) and test window (since freeze) — disjoint, so
+    # baseline + since == lifetime; no double counting.
+    base_crypto, _ = _sum("positions", "pnl_usdc",
+                          f"status LIKE 'closed%' AND pnl_usdc IS NOT NULL AND closed_at < '{FREEZE}'")
+    base_kalshi, _ = _sum("kalshi_positions", "pnl_cents/100.0",
+                          f"pnl_cents IS NOT NULL AND closed_at < '{FREEZE}'")
+    crypto_pnl, crypto_n = _sum("positions", "pnl_usdc",
+                          f"status LIKE 'closed%' AND pnl_usdc IS NOT NULL AND closed_at >= '{FREEZE}'")
+    kalshi_pnl, kalshi_n = _sum("kalshi_positions", "pnl_cents/100.0",
+                          f"pnl_cents IS NOT NULL AND closed_at >= '{FREEZE}'")
+
+    ALIAS = {"vwap deviation": "vwap dev", "donchian breakout": "donchian",
+             "liquidity sweep": "liq sweep", "stochastic rsi": "stoch rsi"}
+
+    def norm_strat(s):
+        s = re.sub(r"\s+v\d+(\.\d+)*\s*$", "", (s or "").strip().lower())
+        return ALIAS.get(s, s)
+
+    def norm_sym(s):
+        s = (s or "").upper()
+        for suf in ("USDT.P", "USDT", "USD", ".P"):
+            s = s.replace(suf, "")
+        return s
+
+    # Latest non-HTF backtest PF per (strat, sym, tf) from the last few nightlies.
+    bt = {}
+    for r in c.execute("SELECT strategy_name, symbol, timeframe, profit_factor, created_at "
+                       "FROM backtests WHERE notes NOT LIKE '%htf%' "
+                       "AND created_at >= date('now','-4 days') ORDER BY created_at"):
+        bt[(norm_strat(r["strategy_name"]), norm_sym(r["symbol"]), (r["timeframe"] or "").upper())] = \
+            {"pf": r["profit_factor"], "at": (r["created_at"] or "")[:10]}
+
+    # Live closed positions since freeze, grouped by (norm strat, norm sym).
+    live = {}
+    for r in c.execute("SELECT strategy, symbol, pnl_usdc FROM positions "
+                       f"WHERE status LIKE 'closed%' AND pnl_usdc IS NOT NULL AND closed_at >= '{FREEZE}'"):
+        k = (norm_strat(r["strategy"]), norm_sym(r["symbol"]))
+        g = live.setdefault(k, {"n": 0, "pnl": 0.0, "gw": 0.0, "gl": 0.0})
+        p = r["pnl_usdc"] or 0.0
+        g["n"] += 1
+        g["pnl"] += p
+        if p >= 0:
+            g["gw"] += p
+        else:
+            g["gl"] += -p
+
+    roster = _load_active_alerts()
+    combos = []
+    for token, entries in (roster.get("by_token") or {}).items():
+        for a in entries:
+            ns = norm_strat(a.get("strategy"))
+            nt = norm_sym((a.get("tv_symbol") or "").split(":")[-1]) or token.upper()
+            tf = (a.get("tf") or "").upper()
+            lv = live.get((ns, nt))
+            b = bt.get((ns, nt, tf))
+            combos.append({
+                "strategy": a.get("strategy"), "token": nt, "tf": tf,
+                "live_trades": lv["n"] if lv else 0,
+                "live_pnl": round(lv["pnl"], 2) if lv else 0.0,
+                "live_pf": round(lv["gw"] / lv["gl"], 2) if lv and lv["gl"] > 0 else None,
+                "backtest_pf": b["pf"] if b else None,
+                "backtest_at": b["at"] if b else None,
+            })
+    c.close()
+
+    combos.sort(key=lambda x: (x["backtest_pf"] is None, -(x["backtest_pf"] or 0)))
+    combined = round(crypto_pnl + kalshi_pnl, 2)
+    today = date.today()
+    elapsed = max((today - date(2026, 6, 16)).days, 0)
+    remaining = max((DECISION - today).days, 0)
+    cost_so_far = round(MONTHLY_COST * elapsed / 30.0, 2)
+
+    return {
+        "freeze_date": "2026-06-16",
+        "decision_date": DECISION.isoformat(),
+        "days_elapsed": elapsed,
+        "days_remaining": remaining,
+        "baseline": {"crypto": round(base_crypto, 2), "kalshi": round(base_kalshi, 2)},
+        "since_freeze": {
+            "crypto_pnl": crypto_pnl, "crypto_trades": crypto_n,
+            "kalshi_pnl": kalshi_pnl, "kalshi_trades": kalshi_n,
+            "combined_pnl": combined,
+            "cost_so_far": cost_so_far,
+            "net_vs_cost": round(combined - cost_so_far, 2),
+        },
+        "combos": combos,
+    }
+
+
 @router.get("/trades")
 async def get_trade_history(limit: int = 100, offset: int = 0):
     """Get trade history."""
