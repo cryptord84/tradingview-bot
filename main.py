@@ -306,10 +306,21 @@ async def lifespan(app: FastAPI):
             wallet = WalletService()
             pos = await kamino.get_user_position(wallet.public_key)
             logger.info(f"Startup: Kamino balance cached — ${pos.get('deposited_usdc', 0):.2f} USDC")
-            await wallet.close()
+            # 2026-06-17: wrap teardown in a timeout. wallet/kamino client close()
+            # hung HERE on 3 consecutive restarts (06-12/16/17) — the log stops right
+            # after the line above and the lifespan never reaches `yield`, so uvicorn
+            # never binds the port (healthcheck then relaunches ~15min later). The
+            # close is non-critical cleanup; if it stalls, log and proceed to serving.
+            try:
+                await asyncio.wait_for(wallet.close(), timeout=10)
+            except Exception as e:
+                logger.warning(f"Startup: wallet.close() slow/failed ({type(e).__name__}) — proceeding")
         except Exception as e:
             logger.warning(f"Startup Kamino cache prime failed: {e}")
-    await kamino.close()
+    try:
+        await asyncio.wait_for(kamino.close(), timeout=10)
+    except Exception as e:
+        logger.warning(f"Startup: kamino.close() slow/failed ({type(e).__name__}) — proceeding")
 
     from app.database import sweep_stale_received
     sweep_stale_received()
