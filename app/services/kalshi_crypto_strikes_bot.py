@@ -120,6 +120,14 @@ class KalshiCryptoStrikesBot:
         # Tickers this bot has opened (live mode only). Kalshi has no bot attribution,
         # so we count bot-owned positions locally rather than against the account-wide total.
         self._bot_held_tickers: set[str] = set()
+        # Tickers the order API has declared 410 Gone (market closed for orders —
+        # these crypto dailies are can_close_early and Kalshi stops accepting
+        # orders while the markets-list still reports them "active"). Without a
+        # skip memory the bot re-selects the same dead strike every 5-min scan
+        # and hammers it (64 failed 410 orders, 0 fills, 2026-06-20→22). Session-
+        # scoped: cleared on restart, which is fine — a genuinely re-opened market
+        # is rare and will simply be retried then.
+        self._gone_tickers: set[str] = set()
         CALIBRATION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     def start(self) -> asyncio.Task:
@@ -223,6 +231,7 @@ class KalshiCryptoStrikesBot:
                 and self.no_min_yes_bid_cents <= s.yes_bid_cents <= self.no_max_yes_bid_cents
                 and 0 < s.hours_to_close <= self.max_days_to_close * 24
                 and s.ticker not in held_tickers
+                and s.ticker not in self._gone_tickers
             ]
             eligible.sort(key=lambda s: s.no_edge_cents, reverse=True)
         else:
@@ -233,6 +242,7 @@ class KalshiCryptoStrikesBot:
                 and self.min_yes_ask_cents <= s.yes_ask_cents <= self.max_yes_ask_cents
                 and 0 < s.hours_to_close <= self.max_days_to_close * 24
                 and s.ticker not in held_tickers
+                and s.ticker not in self._gone_tickers
             ]
         logger.info(
             f"{series}: spot=${spot:,.2f} vol={annual_vol:.2f} "
@@ -286,7 +296,17 @@ class KalshiCryptoStrikesBot:
                 f"(fair_yes={s.fair_prob:.3f} edge=+{edge:.1f}c)"
             )
         except Exception as e:
-            logger.error(f"Order failed for {s.ticker}: {e}")
+            # 410 Gone = market closed for orders (can_close_early) though still
+            # listed "active". Remember it so we stop re-selecting + re-hammering
+            # the same dead strike every scan; other live markets stay tradeable.
+            if "410" in str(e) or "Gone" in str(e):
+                self._gone_tickers.add(s.ticker)
+                logger.warning(
+                    f"Order 410 Gone for {s.ticker} — market closed for orders; "
+                    f"skipping it this session ({len(self._gone_tickers)} gone)"
+                )
+            else:
+                logger.error(f"Order failed for {s.ticker}: {e}")
 
     async def _scan_once(self):
         client = get_async_kalshi_client()
