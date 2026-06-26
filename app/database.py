@@ -1,12 +1,22 @@
 """SQLite database for trade logging and tax compliance."""
 
 import csv
+import logging
 import sqlite3
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
 from app.config import get
+
+# 2026-06-26: module logger was MISSING — `logger` was referenced in 6 places
+# (sweep_stale_received, update_signal_disposition, kalshi whale/settlement
+# helpers) but never defined, so any of those log calls raised
+# `NameError: name 'logger' is not defined`. In sweep_stale_received (run inline
+# during lifespan startup) that NameError propagated out and CRASHED startup
+# ("Application startup failed. Exiting.") — but only when there WAS a stale
+# signal to log (n>0), which is why restarts failed intermittently (06-12/16/25/26).
+logger = logging.getLogger("bot.database")
 
 DB_PATH = Path(get("database", "path", "data/trades.db"))
 CSV_DIR = Path(get("database", "csv_backup_dir", "data/csv_backups"))
