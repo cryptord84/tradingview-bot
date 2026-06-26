@@ -85,6 +85,13 @@ class KalshiCryptoStrikesBot:
         self.vol_lookback_hours = strikes_cfg.get("vol_lookback_hours", 72)
         self.vol_ewma_decay = strikes_cfg.get("vol_ewma_decay", 0.97)
         self.vol_floor = strikes_cfg.get("vol_floor", 0.35)
+        # Vol ceiling (2026-06-25): the 72h-EWMA realized vol overshoots after a
+        # violent selloff (spiked 0.4→0.9-1.1 in the 06-22→25 BTC drop) and lags
+        # the market's forward-looking implied vol. That inflated vol pushed the
+        # model's fair_prob ABOVE market prices on every strike → every NO edge
+        # went negative → 0 trades for 3 days. Capping the pricing vol keeps a
+        # transient realized spike from erasing all edges. 0/None disables the cap.
+        self.vol_cap = strikes_cfg.get("vol_cap", 0.60) or float("inf")
         self.max_cost_per_trade_cents = strikes_cfg.get("max_cost_per_trade_cents", 500)
         self.max_contracts_per_ticker = strikes_cfg.get("max_contracts_per_ticker", 10)
         self.max_open_positions = strikes_cfg.get("max_open_positions", 8)
@@ -167,11 +174,12 @@ class KalshiCryptoStrikesBot:
         symbol = {"BTCD": "BTCUSDT", "ETHD": "ETHUSDT", "SOLD": "SOLUSDT"}.get(underlying, "BTCUSDT")
         closes = await fetch_binance_hourly_closes(symbol, self.vol_lookback_hours)
         raw = ewma_realized_vol(closes, decay=self.vol_ewma_decay)
-        vol = max(raw, self.vol_floor)
+        vol = min(max(raw, self.vol_floor), self.vol_cap)
         self._vol_cache[underlying] = (now, vol)
+        capped = " CAPPED" if raw > self.vol_cap else ""
         logger.info(
-            f"Vol refresh {underlying}: ewma_hourly={raw:.3f} used={vol:.3f} "
-            f"(lookback={self.vol_lookback_hours}h decay={self.vol_ewma_decay})"
+            f"Vol refresh {underlying}: ewma_hourly={raw:.3f} used={vol:.3f}{capped} "
+            f"(lookback={self.vol_lookback_hours}h decay={self.vol_ewma_decay} cap={self.vol_cap})"
         )
         return vol
 
