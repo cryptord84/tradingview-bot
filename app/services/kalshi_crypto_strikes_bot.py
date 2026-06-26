@@ -101,6 +101,15 @@ class KalshiCryptoStrikesBot:
         self.no_min_yes_bid_cents = strikes_cfg.get("no_min_yes_bid_cents", 15)
         self.no_max_yes_bid_cents = strikes_cfg.get("no_max_yes_bid_cents", 50)
         self.max_days_to_close = strikes_cfg.get("max_days_to_close", 2)
+        # Minimum hours-to-close (2026-06-26): these daily crypto strikes are
+        # can_close_early — Kalshi stops accepting orders ~the final hour before
+        # settlement while the markets-list still reports them "active". The bot's
+        # edges currently materialize ONLY in that final-hour window (as time→0 the
+        # model gets confident on near-spot strikes), so every eligible market was
+        # un-orderable → 410 Gone (measured: a 13:00 ET market was already a dead/
+        # empty book at 59min out). Excluding the final-hour dead zone stops the bot
+        # wasting order attempts on markets it can never fill. 0 disables.
+        self.min_hours_to_close = strikes_cfg.get("min_hours_to_close", 1.5)
         # Empirical calibration (2026-05-11): isotonic-regressed pred→actual mapping
         # on top of the parametric model. Fixes the bidirectional overdispersion
         # documented in project_btcd_audit_20260511.md. Disable to use raw parametric
@@ -237,7 +246,7 @@ class KalshiCryptoStrikesBot:
                 if s.no_edge_cents >= self.min_edge_cents
                 and s.fair_prob <= (1.0 - self.min_fair_prob)  # YES prob low enough that NO has confidence
                 and self.no_min_yes_bid_cents <= s.yes_bid_cents <= self.no_max_yes_bid_cents
-                and 0 < s.hours_to_close <= self.max_days_to_close * 24
+                and self.min_hours_to_close <= s.hours_to_close <= self.max_days_to_close * 24
                 and s.ticker not in held_tickers
                 and s.ticker not in self._gone_tickers
             ]
@@ -248,7 +257,7 @@ class KalshiCryptoStrikesBot:
                 if s.edge_cents >= self.min_edge_cents
                 and s.fair_prob >= self.min_fair_prob
                 and self.min_yes_ask_cents <= s.yes_ask_cents <= self.max_yes_ask_cents
-                and 0 < s.hours_to_close <= self.max_days_to_close * 24
+                and self.min_hours_to_close <= s.hours_to_close <= self.max_days_to_close * 24
                 and s.ticker not in held_tickers
                 and s.ticker not in self._gone_tickers
             ]
