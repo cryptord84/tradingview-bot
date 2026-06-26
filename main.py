@@ -285,42 +285,46 @@ async def lifespan(app: FastAPI):
     # Start Kalshi positions sync loop (snapshot live positions into DB every 2 min)
     kalshi_sync_task = asyncio.create_task(_kalshi_positions_sync_loop())
 
-    # Auto-deposit idle USDC into Kamino on startup
-    kamino = KaminoClient()
-    if kamino.enabled and kamino.auto_deposit:
+    # Kamino startup (auto-deposit idle USDC + prime the balance cache) runs in
+    # the BACKGROUND so the lifespan reaches `yield` and binds port 8000 within
+    # seconds. 2026-06-26: doing this inline repeatedly STALLED or CRASHED startup
+    # BEFORE the port bound (06-12/16/25/26) — deposit_idle does an on-chain Solana
+    # tx via Helius RPC, the slowest+most-fragile step, and the log always froze/
+    # died right around "Kamino balance cached", leaving the bot down ~15min until
+    # the healthcheck relaunched it. None of this is needed to SERVE: dashboard,
+    # webhook, position monitor, price feed, and the Kalshi bots all run without
+    # it, and the balance cache is non-critical (re-fetched on first use). The
+    # per-step timeouts/guards below mean a hung RPC can't even wedge this task.
+    async def _kamino_startup():
         try:
-            wallet = WalletService()
-            usdc_balance = await wallet.get_usdc_balance()
-            result = await kamino.deposit_idle(wallet.get_keypair(), usdc_balance)
-            if result.get("success"):
-                logger.info(f"Startup: deposited {result['amount_usdc']:.2f} USDC into Kamino")
-            elif result.get("skipped"):
-                logger.info(f"Startup: Kamino deposit skipped — {result.get('reason')}")
-            await wallet.close()
-        except Exception as e:
-            logger.warning(f"Startup Kamino deposit failed: {e}")
-
-    # Prime Kamino balance cache so first trade decision has full purchasing power
-    if kamino.enabled:
-        try:
-            wallet = WalletService()
-            pos = await kamino.get_user_position(wallet.public_key)
-            logger.info(f"Startup: Kamino balance cached — ${pos.get('deposited_usdc', 0):.2f} USDC")
-            # 2026-06-17: wrap teardown in a timeout. wallet/kamino client close()
-            # hung HERE on 3 consecutive restarts (06-12/16/17) — the log stops right
-            # after the line above and the lifespan never reaches `yield`, so uvicorn
-            # never binds the port (healthcheck then relaunches ~15min later). The
-            # close is non-critical cleanup; if it stalls, log and proceed to serving.
+            kamino = KaminoClient()
+            if kamino.enabled and kamino.auto_deposit:
+                try:
+                    wallet = WalletService()
+                    usdc_balance = await wallet.get_usdc_balance()
+                    result = await kamino.deposit_idle(wallet.get_keypair(), usdc_balance)
+                    if result.get("success"):
+                        logger.info(f"Startup: deposited {result['amount_usdc']:.2f} USDC into Kamino")
+                    elif result.get("skipped"):
+                        logger.info(f"Startup: Kamino deposit skipped — {result.get('reason')}")
+                    await asyncio.wait_for(wallet.close(), timeout=10)
+                except Exception as e:
+                    logger.warning(f"Startup Kamino deposit failed: {e}")
+            if kamino.enabled:
+                try:
+                    wallet = WalletService()
+                    pos = await kamino.get_user_position(wallet.public_key)
+                    logger.info(f"Startup: Kamino balance cached — ${pos.get('deposited_usdc', 0):.2f} USDC")
+                    await asyncio.wait_for(wallet.close(), timeout=10)
+                except Exception as e:
+                    logger.warning(f"Startup Kamino cache prime failed: {e}")
             try:
-                await asyncio.wait_for(wallet.close(), timeout=10)
+                await asyncio.wait_for(kamino.close(), timeout=10)
             except Exception as e:
-                logger.warning(f"Startup: wallet.close() slow/failed ({type(e).__name__}) — proceeding")
+                logger.warning(f"Startup: kamino.close() slow/failed ({type(e).__name__}) — proceeding")
         except Exception as e:
-            logger.warning(f"Startup Kamino cache prime failed: {e}")
-    try:
-        await asyncio.wait_for(kamino.close(), timeout=10)
-    except Exception as e:
-        logger.warning(f"Startup: kamino.close() slow/failed ({type(e).__name__}) — proceeding")
+            logger.error(f"Kamino startup task failed: {e}")
+    kamino_startup_task = asyncio.create_task(_kamino_startup())
 
     from app.database import sweep_stale_received
     sweep_stale_received()
