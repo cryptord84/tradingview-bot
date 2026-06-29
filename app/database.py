@@ -312,6 +312,27 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_reentry_status ON reentry_watches(status);
 
+        CREATE TABLE IF NOT EXISTS whale_crypto_dryrun (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            series TEXT NOT NULL DEFAULT '',
+            whale_side TEXT NOT NULL,
+            whale_price_cents INTEGER,
+            entry_price_cents INTEGER,
+            slippage_cents INTEGER,
+            conviction REAL,
+            whale_contracts INTEGER,
+            hours_to_close REAL,
+            close_time TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            result TEXT,
+            won INTEGER,
+            realized_pnl_cents INTEGER,
+            settled_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_whale_dryrun_status ON whale_crypto_dryrun(status);
+
         """)
     # Migration: add trail_sl_price column if not exists
     try:
@@ -1686,6 +1707,49 @@ def get_whale_flow_by_ticker(series_prefixes: list[str], lookback_minutes: int =
     except Exception as e:
         logger.debug(f"get_whale_flow_by_ticker failed: {e}")
         return []
+
+
+# ── Whale-confirmed crypto DRY-RUN (2026-06-29 strategy validation) ──────────
+def insert_whale_dryrun(rec: dict) -> int:
+    """Log a paper (no-order) whale-confirmed crypto signal for edge/slippage
+    measurement. See kalshi_whale_crypto_dryrun.py."""
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO whale_crypto_dryrun
+           (created_at, ticker, series, whale_side, whale_price_cents,
+            entry_price_cents, slippage_cents, conviction, whale_contracts,
+            hours_to_close, close_time, status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,'open')""",
+        (datetime.utcnow().isoformat(), rec["ticker"], rec.get("series", ""),
+         rec["whale_side"], rec.get("whale_price_cents"), rec.get("entry_price_cents"),
+         rec.get("slippage_cents"), rec.get("conviction"), rec.get("whale_contracts"),
+         rec.get("hours_to_close"), rec.get("close_time", "")),
+    )
+    conn.commit()
+    rid = cur.lastrowid
+    conn.close()
+    return rid
+
+
+def get_open_whale_dryruns() -> list[dict]:
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM whale_crypto_dryrun WHERE status='open' ORDER BY created_at DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def settle_whale_dryrun(dryrun_id: int, result: str, won: int, realized_pnl_cents: int) -> None:
+    conn = get_db()
+    conn.execute(
+        """UPDATE whale_crypto_dryrun
+           SET status='settled', result=?, won=?, realized_pnl_cents=?, settled_at=?
+           WHERE id=?""",
+        (result, won, realized_pnl_cents, datetime.utcnow().isoformat(), dryrun_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def sync_kalshi_settlements(settlements: list[dict]) -> dict:

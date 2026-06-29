@@ -265,6 +265,15 @@ async def lifespan(app: FastAPI):
         strikes_bot.start()
         logger.info("Kalshi crypto-strikes bot started")
 
+    # Whale-confirmed crypto strikes — DRY-RUN (paper, no orders). Validates the
+    # 2026-06-29 backtested edge (whale-confirmed single-outcome crypto, mid-band)
+    # against real entry slippage before any live capital. See module docstring.
+    from app.services.kalshi_whale_crypto_dryrun import get_whale_crypto_dryrun
+    whale_dryrun = get_whale_crypto_dryrun()
+    if whale_dryrun.enabled:
+        whale_dryrun.start()
+        logger.info("Whale-crypto DRY-RUN started (paper, no orders)")
+
     # Start Kalshi risk manager (global circuit breaker)
     from app.services.kalshi_risk_manager import get_risk_manager
     risk_manager = get_risk_manager()
