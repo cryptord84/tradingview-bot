@@ -39,11 +39,20 @@ logger = logging.getLogger("bot.kalshi.whale_dryrun")
 
 _DEFAULTS = {
     "enabled": False,
-    "scan_interval_seconds": 300,
+    "scan_interval_seconds": 120,   # 2026-06-29: 300→120 so 15-min markets (15min life) get caught
     "series": ["KXBTCD", "KXBTC15M", "KXETHD", "KXETH15M"],
-    "whale_lookback_minutes": 30,   # fresh-conviction window
+    # Lookback must not outlive the market. 2026-06-29: a single 30m window
+    # outlived the 15-min markets entirely (they settled before conviction formed,
+    # killing the strongest-edge lane), so it's split by market life:
+    "whale_lookback_minutes": 30,   # daily strikes (BTCD/ETHD, ~24h life)
+    "lookback_15m_minutes": 8,      # 15-min strikes (BTC15M/ETH15M) — must be < their life
+    "min_15m_hours_to_close": 0.05, # 15M: need >=3 min left to "enter" before settle
     "min_whale_contracts": 100,     # ignore tiny flow
-    "min_conviction": 0.6,          # |yes-no|/total — how lopsided whale flow must be
+    # 2026-06-29: 0.6→0.4. The backtest followed NET whale side at any lean; 0.6
+    # logged ~1/609 tickers (too strict + a different subset than validated). 0.4
+    # (~60/40) is a meaningful lean with workable signal volume; conviction is
+    # recorded per signal so edge-by-conviction can be analyzed from the data.
+    "min_conviction": 0.4,
     "entry_band_lo_cents": 50,      # mid-band: the backtested edge zone
     "entry_band_hi_cents": 88,
 }
@@ -62,10 +71,15 @@ class WhaleCryptoDryRun:
         self.interval = float(c["scan_interval_seconds"])
         self.series = list(c["series"])
         self.lookback_min = int(c["whale_lookback_minutes"])
+        self.lookback_15m = int(c["lookback_15m_minutes"])
+        self.min_15m_hours = float(c["min_15m_hours_to_close"])
         self.min_contracts = int(c["min_whale_contracts"])
         self.min_conviction = float(c["min_conviction"])
         self.band_lo = int(c["entry_band_lo_cents"])
         self.band_hi = int(c["entry_band_hi_cents"])
+        # Partition series by market life: 15-min strikes need a short lookback.
+        self.series_15m = [s for s in self.series if "15M" in s]
+        self.series_daily = [s for s in self.series if "15M" not in s]
         self._task = None
         self._running = False
         self._scans = 0
@@ -97,14 +111,22 @@ class WhaleCryptoDryRun:
 
     async def _scan(self):
         self._scans += 1
-        # Net whale flow per crypto-strike ticker over the fresh window.
-        flow = get_whale_flow_by_ticker(self.series, lookback_minutes=self.lookback_min)
+        # Net whale flow per ticker, with a lookback matched to the market's life:
+        # daily strikes use a 30m window; 15-min strikes use a short window (a 30m
+        # window outlives them). Tag each row so the 15M time-left guard applies.
+        flow = []
+        if self.series_daily:
+            flow += [(f, False) for f in
+                     get_whale_flow_by_ticker(self.series_daily, lookback_minutes=self.lookback_min)]
+        if self.series_15m:
+            flow += [(f, True) for f in
+                     get_whale_flow_by_ticker(self.series_15m, lookback_minutes=self.lookback_15m)]
         if not flow:
             return
         client = get_async_kalshi_client()
         already = {(d["ticker"], d["whale_side"]) for d in get_open_whale_dryruns()}
 
-        for f in flow:
+        for f, is_15m in flow:
             yes_c = f.get("yes_contracts", 0) or 0
             no_c = f.get("no_contracts", 0) or 0
             total = yes_c + no_c
@@ -132,11 +154,14 @@ class WhaleCryptoDryRun:
                 continue
             if not m or (m.get("status") not in (None, "active", "open")):
                 continue
+            close_time = m.get("close_time") or ""
+            hours = self._hours_to_close(close_time)
+            # 15M guard: need enough time left to realistically enter before settle.
+            if is_15m and (hours is None or hours < self.min_15m_hours):
+                continue
             # buying YES → pay yes_ask; buying NO → pay no_ask (≈100-yes_bid)
             entry = m.get("yes_ask") if side == "yes" else m.get("no_ask")
             book_present = entry is not None and entry > 0
-            close_time = m.get("close_time") or ""
-            hours = self._hours_to_close(close_time)
 
             # Mid-band gate is on the ACHIEVABLE entry price (what we'd pay), not
             # the whale's price — that's the realistic test.
