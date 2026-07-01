@@ -932,6 +932,25 @@ class TradeEngine:
             leverage = min(leverage, risk_cfg.get("max_leverage", 5))
             size_pct = min(size_pct, risk_cfg.get("max_position_size_percent", 15))
 
+            # Liquidity-aware size cap (2026-07-01). High-slippage Solana memecoins
+            # (FARTCOIN/MOODENG et al) realized -4 to -7%/trade — Jupiter execution
+            # cost exceeds the edge, so they are the ENTIRE crypto-lane bleed while
+            # liquid majors (OP/ARB) are the only green. Cap those tokens near the
+            # floor: the alert still fires and a tiny position still opens (respects
+            # no-cull), but we stop feeding capital to a slippage sink. Liquid
+            # majors keep their full WF tier. Applied last so it also overrides a
+            # Claude MODIFY / tier that sized up. Token list + cap in config.
+            _illiq = {t.upper() for t in (risk_cfg.get("illiquid_tokens") or [])}
+            if _illiq:
+                _bare = signal.symbol.upper().replace("USDT", "").replace("USD", "").replace(".P", "")
+                _cap = float(risk_cfg.get("illiquid_size_cap_pct", 3.0))
+                if _bare in _illiq and size_pct > _cap:
+                    logger.info(
+                        f"Illiquid cap: {_bare} size {size_pct}% → {_cap}% "
+                        f"(high Jupiter slippage — execution cost > edge)"
+                    )
+                    size_pct = _cap
+
             # Calculate trade amount in USD (base currency is USDC, not SOL)
             trade_usd = tradeable_usd * (size_pct / 100)
             max_purchase_usd = risk_cfg.get("max_purchase_usd", 500.0)
