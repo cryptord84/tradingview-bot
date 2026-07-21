@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Automated Crypto Trading System — Reference &amp; Gap Analysis</title>
+<style>
+  @page { size: Letter; margin: 16mm 14mm; }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #1f2733; font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1 { font-size: 24pt; margin: 0 0 2pt; color: #0b3d63; letter-spacing: -0.4pt; }
+  h2 { font-size: 15pt; margin: 22pt 0 6pt; color: #0b3d63; border-bottom: 2px solid #0b3d63; padding-bottom: 3pt; }
+  h3 { font-size: 12pt; margin: 14pt 0 4pt; color: #134a75; }
+  h4 { font-size: 10.5pt; margin: 9pt 0 2pt; color: #2b3a4a; }
+  p { margin: 4pt 0; }
+  code { background: #eef2f6; padding: 0.5pt 3pt; border-radius: 3px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9pt; }
+  .sub { color: #5b6b7d; font-size: 10pt; margin-top: 0; }
+  .tag { display: inline-block; background: #0b3d63; color: #fff; font-size: 7.5pt; font-weight: 600; padding: 1pt 5pt; border-radius: 3px; vertical-align: middle; letter-spacing: 0.3pt; }
+  .tag.warn { background: #b4530a; }
+  .tag.ok { background: #1c7a4a; }
+  .tag.muted { background: #6b7787; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 10pt; font-size: 9pt; }
+  th { background: #0b3d63; color: #fff; text-align: left; padding: 4pt 6pt; font-weight: 600; }
+  td { border-bottom: 1px solid #d8e0e8; padding: 3.5pt 6pt; vertical-align: top; }
+  tr:nth-child(even) td { background: #f5f8fb; }
+  .matrix td, .matrix th { text-align: center; }
+  .matrix td:first-child, .matrix th:first-child { text-align: left; font-weight: 600; }
+  .yes { color: #1c7a4a; font-weight: 700; }
+  .callout { border-left: 4px solid #0b3d63; background: #f0f5fa; padding: 7pt 11pt; margin: 8pt 0; border-radius: 0 4px 4px 0; }
+  .callout.gap { border-left-color: #b4530a; background: #fdf3ea; }
+  .callout.good { border-left-color: #1c7a4a; background: #eef7f1; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4pt 16pt; }
+  ul { margin: 4pt 0 4pt 0; padding-left: 16pt; }
+  li { margin: 2pt 0; }
+  .lede { font-size: 11pt; color: #34424f; }
+  .rule { height: 3px; background: #0b3d63; border: 0; margin: 4pt 0 10pt; }
+  .foot { color: #8794a3; font-size: 8pt; margin-top: 4pt; }
+  .pageflow { page-break-inside: avoid; }
+  .newpage { page-break-before: always; }
+  .kpi { display: inline-block; border: 1px solid #cdd8e2; border-radius: 5px; padding: 5pt 10pt; margin: 3pt 6pt 3pt 0; }
+  .kpi b { display: block; font-size: 16pt; color: #0b3d63; }
+  .kpi span { font-size: 8.5pt; color: #5b6b7d; }
+  .small { font-size: 8.5pt; color: #5b6b7d; }
+</style>
+</head>
+<body>
+
+<h1>Automated Crypto Trading System</h1>
+<p class="sub">Strategy Reference &amp; Gap Analysis &nbsp;·&nbsp; Generated 2026-07-21 &nbsp;·&nbsp; Sanitized for sharing (no credentials, wallet addresses, or account identifiers)</p>
+<hr class="rule">
+
+<p class="lede">This document describes each deployed TradingView Pine Script strategy, the tokens and timeframes each one is alerting on, the position-sizing model, the Kalshi prediction-market side, and a prioritized list of gaps and improvement opportunities.</p>
+
+<div style="margin:8pt 0;">
+  <span class="kpi"><b>7</b><span>production indicators</span></span>
+  <span class="kpi"><b>23</b><span>live alerts</span></span>
+  <span class="kpi"><b>18</b><span>tokens covered</span></span>
+  <span class="kpi"><b>3</b><span>execution venues</span></span>
+  <span class="kpi"><b>1D / 4H</b><span>timeframes live</span></span>
+</div>
+
+<h2>1 · System Architecture</h2>
+<p>Signals originate as TradingView Pine Script alerts and flow through a decision-and-execution pipeline into one of three spot execution venues. A separate module trades Kalshi prediction markets.</p>
+
+<div class="callout">
+<b>Signal pipeline:</b> &nbsp; Pine <code>alert()</code> (bar close) → HTTPS webhook (JSON payload) → FastAPI receiver → signal log → AI decision layer (risk-scores each signal, may reject or resize) → position sizing (tier % of tradeable balance) → venue router → DEX/CEX swap → position monitor (TP / SL / trailing-stop).
+</div>
+
+<div class="grid2">
+<div>
+<h4>Execution venues (spot, long-only)</h4>
+<ul>
+<li><b>Solana / Jupiter</b> — DEX aggregator swaps; idle USDC parked in a lending market for yield.</li>
+<li><b>EVM / Arbitrum</b> — DEX swaps via an aggregator; idle USDC supplied to a money market.</li>
+<li><b>Binance.US</b> — centralized spot for tokens without deep on-chain liquidity.</li>
+</ul>
+</div>
+<div>
+<h4>Core safeguards</h4>
+<ul>
+<li>Price oracle for TP/SL matches the execution route (prevents phantom fills).</li>
+<li>Every BUY produces a tracked position with TP/SL (fallback ATR if the signal omits one).</li>
+<li>Illiquid-token size cap (high-slippage memecoins limited to a small fixed %).</li>
+<li>Bar-close-only firing across the roster (no intra-bar repaint).</li>
+</ul>
+</div>
+</div>
+
+<p class="small">Strategy naming: alerts fire on an "Any alert() function call" condition. The webhook payload's <code>strategy</code> string is emitted by the script itself, so the bot resolves sizing tiers and TP/SL profiles from the payload, not the alert's display name.</p>
+
+<h2>2 · Signal &amp; Webhook Schema</h2>
+<p>All seven indicators emit the same JSON webhook shape, so the bot parses any signal uniformly. Two signal types: <b>BUY</b> (open long) and <b>CLOSE</b> (exit). All fire on confirmed bar close by default (no intra-bar repaint).</p>
+<table>
+<thead><tr><th>Field</th><th>BUY value</th><th>CLOSE value</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>signal_type</code></td><td>"BUY"</td><td>"CLOSE"</td><td>Action</td></tr>
+<tr><td><code>symbol</code> / <code>timeframe</code> / <code>strategy</code></td><td>✓</td><td>✓</td><td>Venue routing + sizing-tier / TP-SL profile resolution</td></tr>
+<tr><td><code>entry_price_estimate</code></td><td>bar close</td><td>bar close</td><td>Reference price</td></tr>
+<tr><td><code>atr</code></td><td>ATR(14)</td><td>ATR(14)</td><td>Drives TP/SL geometry (fallback 2.5% if absent)</td></tr>
+<tr><td><code>rsi</code></td><td>RSI(14)</td><td>—</td><td>Context for the AI risk layer</td></tr>
+<tr><td><code>confidence_score</code></td><td>65 (EMA Ribbon 70)</td><td>50</td><td>Gate for the AI review layer</td></tr>
+<tr><td><code>suggested_position_size_percent</code></td><td>15</td><td>100</td><td>Advisory (bot overrides — see below)</td></tr>
+<tr><td><code>suggested_leverage</code></td><td>2</td><td>1</td><td>Advisory</td></tr>
+<tr><td><code>vwap_target</code></td><td>VWAP Dev only</td><td>—</td><td>Mean-reversion exit target</td></tr>
+<tr><td><code>secret</code></td><td>✓</td><td>✓</td><td>Webhook authentication (value not shown)</td></tr>
+</tbody>
+</table>
+<div class="callout gap"><b>Gap — the confidence score is a constant.</b> In every script, <code>confidence_score</code> and <code>suggested_position_size_percent</code> are <b>static user inputs</b>, not derived from signal strength — every BUY ships confidence 65 (70 for EMA Ribbon) and size 15%. The bot ignores the suggested size (it applies its own profit-factor tier model) but the AI risk layer still reads <code>confidence_score</code>, so today that input carries no information and never clears the auto-approve threshold. Emitting a <i>computed</i> per-signal confidence (from RSI depth, volume-surge magnitude, or distance past the band/channel) would give the risk layer and sizing something real to act on.</div>
+
+<h2>3 · Indicator Reference</h2>
+<p>All seven are <b>long-only</b> (SELL/short signals were removed in April 2026 to stop cross-strategy interference). Each pairs an edge-triggered BUY with an edge-triggered CLOSE that matches the exit the backtest was validated against.</p>
+
+<div class="pageflow">
+<h3>3.1 · FVG v1.2 — Fair Value Gap &nbsp;<span class="tag">trend / continuation</span></h3>
+<p><b>Concept:</b> trades the ICT "fair value gap" — a 3-candle price imbalance that signals momentum continuation.</p>
+<ul>
+<li><b>BUY:</b> a bullish gap forms (<code>low &gt; high[2]</code>), entered on the <i>next</i> bar, confirmed by a volume surge (&gt; 1.5× its 20-bar average).</li>
+<li><b>CLOSE:</b> edge-triggered when the gap fills (<code>close &lt; high[2]</code>) or an opposite gap forms — state/signal split so it fires once per fill (this split eliminated ~270 spurious CLOSE webhooks/day from v1.0).</li>
+<li><b>Key params:</b> volume MA 20, volume mult 1.5. &nbsp; <b>Live:</b> NEAR / 1D.</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.2 · EMA Ribbon v1.1 &nbsp;<span class="tag">trend</span></h3>
+<p><b>Concept:</b> trend-following on a stacked 3 / 8 / 21 / 55 EMA ribbon.</p>
+<ul>
+<li><b>BUY:</b> the first bar the full bullish stack forms (EMA3 &gt; EMA8 &gt; EMA21 &gt; EMA55). No volume or RSI filter on entry.</li>
+<li><b>CLOSE:</b> edge-triggered the first bar the stack breaks alignment.</li>
+<li><b>Key params:</b> EMA lengths 3/8/21/55; confidence input 70 (the only non-65). &nbsp; <b>Live:</b> BONK / 4H, SOL / 1D, BTC / 1D.</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.3 · Donchian Breakout v1.1 &nbsp;<span class="tag">trend / breakout</span></h3>
+<p><b>Concept:</b> classic Turtle-style breakout of a 20-bar Donchian channel.</p>
+<ul>
+<li><b>BUY:</b> close crosses above the prior-bar 20-bar high, with a volume surge (&gt; 1.5× average). Prior-bar channel avoids look-ahead.</li>
+<li><b>CLOSE:</b> edge-triggered close under the channel midline.</li>
+<li><b>Key params:</b> channel 20, volume mult 1.5. &nbsp; <b>Live:</b> BTC / 1D, ETH / 1D, DOGE / 1D, RENDER / 4H.</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.4 · Donchian HTF v1.0 &nbsp;<span class="tag">trend + regime filter</span></h3>
+<p><b>Concept:</b> the same breakout, gated on a higher-timeframe trend filter (built specifically for the SOL/1D Tier-A passer, where the filter is load-bearing — the unfiltered version fails walk-forward).</p>
+<ul>
+<li><b>BUY:</b> Donchian breakout + volume <i>and</i> a 4×-timeframe EMA(20) that is rising (measured on closed HTF bars, no repaint).</li>
+<li><b>CLOSE:</b> close under the channel midline (the HTF filter applies to entries only).</li>
+<li><b>Key params:</b> channel 20, HTF EMA 20, HTF multiplier ×4. &nbsp; <b>Live:</b> SOL / 1D.</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.5 · Liquidity Sweep v1.1 &nbsp;<span class="tag">reversal</span></h3>
+<p><b>Concept:</b> ICT stop-hunt reversal — a wick that sweeps liquidity below a swing low, then closes back above it.</p>
+<ul>
+<li><b>BUY:</b> bar's low pierces the prior swing low but its close is back above it, with a volume surge (&gt; 1.2×, a looser gate than the others).</li>
+<li><b>CLOSE:</b> the opposite (bearish) sweep — raw, with <i>no</i> volume gate (v1.0 wrongly gated the exit on volume; v1.1 restored the backtest-matching raw exit).</li>
+<li><b>Key params:</b> swing lookback 10, volume mult 1.2. &nbsp; <b>Live:</b> ATOM / 1D (thin book — depends on limit-order flow).</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.6 · Stochastic RSI v1.1 &nbsp;<span class="tag">mean-reversion / oversold</span></h3>
+<p><b>Concept:</b> oversold-reversal momentum — a Stochastic-RSI K/D crossover in the oversold zone with an RSI trend filter.</p>
+<ul>
+<li><b>BUY:</b> %K crosses above %D while %K &lt; 20 (oversold) <i>and</i> RSI &lt; 50.</li>
+<li><b>CLOSE:</b> %K crosses below %D while %K &gt; 80 (overbought). Entry and exit zones are mutually exclusive, so no same-bar conflict.</li>
+<li><b>Key params:</b> RSI 14, Stoch 14, K/D smoothing 3/3, OB/OS 80/20. &nbsp; <b>Live:</b> FARTCOIN / 4H, OP / 1D, ARB / 1D, ETH / 1D, TIA / 4H, INJ / 1D, LINK / 1D (7 tokens — the widest-deployed indicator).</li>
+</ul>
+</div>
+
+<div class="pageflow">
+<h3>3.7 · VWAP Deviation v1.2 &nbsp;<span class="tag">mean-reversion</span></h3>
+<p><b>Concept:</b> mean reversion off a rolling VWAP with ±σ deviation bands — buys reclaims of the lower band and targets the VWAP.</p>
+<ul>
+<li><b>BUY:</b> close crosses back above the lower band (VWAP − 2.5σ) <i>and</i> RSI &lt; 40 (an optional volume filter is off by default).</li>
+<li><b>CLOSE:</b> edge-triggered when close crosses back above the VWAP (the reversion target). Emits <code>vwap_target</code> so the bot can cap its take-profit at the mean rather than chasing a breakout.</li>
+<li><b>Key params:</b> VWAP period 20, band mult 2.5σ, RSI threshold 40. &nbsp; <b>Live:</b> FARTCOIN / 4H, MOODENG / 4H, PNUT / 4H, AAVE / 1D, LDO / 1D, ARB / 1D.</li>
+</ul>
+</div>
+
+<div class="callout"><b>Design pattern across the roster:</b> trend strategies (Donchian, EMA Ribbon, FVG) enter on breakout/continuation with a volume gate and exit on structure breaking; mean-reversion strategies (VWAP Dev, Stoch RSI) enter on oversold reclaims and exit at the mean/overbought. Every CLOSE is edge-triggered (one signal per event) — the June 2026 fix that restored these exits is what re-aligned live behavior with the backtests.</div>
+
+
+
+<h2 class="newpage">4 · Token Coverage Matrix</h2>
+<p>Which strategy is alerting on which token and timeframe. <span class="yes">✦</span> = walk-forward-validated backtest passer; <b>▲</b> = live-performance keeper (retained on real-trade results without a WF pass). FVG (NEAR/1D) and Liquidity Sweep (ATOM/1D) each run a single token and are omitted from the grid below for width.</p>
+
+<table class="matrix">
+<thead><tr><th>Token</th><th>Venue</th><th>EMA Ribbon</th><th>Stoch RSI</th><th>VWAP Dev</th><th>Donchian</th></tr></thead>
+<tbody>
+<tr><td>AAVE</td><td>EVM</td><td>—</td><td>—</td><td>1D ✦</td><td>—</td></tr>
+<tr><td>ARB</td><td>Binance / EVM</td><td>—</td><td>1D ✦</td><td>1D ✦</td><td>—</td></tr>
+<tr><td>BONK</td><td>Solana</td><td>4H ▲</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>BTC</td><td>Binance</td><td>1D ✦</td><td>—</td><td>—</td><td>1D ✦</td></tr>
+<tr><td>DOGE</td><td>Binance</td><td>—</td><td>—</td><td>—</td><td>1D ✦</td></tr>
+<tr><td>ETH</td><td>Solana</td><td>—</td><td>1D ✦</td><td>—</td><td>1D ✦</td></tr>
+<tr><td>FARTCOIN</td><td>Solana (perp sym)</td><td>—</td><td>4H ✦</td><td>4H ✦</td><td>—</td></tr>
+<tr><td>INJ</td><td>Binance</td><td>—</td><td>1D ✦</td><td>—</td><td>—</td></tr>
+<tr><td>LDO</td><td>Binance</td><td>—</td><td>—</td><td>1D ✦</td><td>—</td></tr>
+<tr><td>LINK</td><td>EVM</td><td>—</td><td>1D ▲</td><td>—</td><td>—</td></tr>
+<tr><td>MOODENG</td><td>Solana (perp sym)</td><td>—</td><td>—</td><td>4H ✦</td><td>—</td></tr>
+<tr><td>OP</td><td>Binance</td><td>—</td><td>1D ✦</td><td>—</td><td>—</td></tr>
+<tr><td>PNUT</td><td>Solana</td><td>—</td><td>—</td><td>4H ▲</td><td>—</td></tr>
+<tr><td>RENDER</td><td>Binance</td><td>—</td><td>—</td><td>—</td><td>4H ▲</td></tr>
+<tr><td>SOL</td><td>Solana</td><td>1D ✦</td><td>—</td><td>—</td><td>1D ✦ (HTF)</td></tr>
+<tr><td>TIA</td><td>Binance</td><td>—</td><td>4H ✦</td><td>—</td><td>—</td></tr>
+</tbody>
+</table>
+<p class="small">Also live: <b>FVG</b> — NEAR/1D ✦ (Fair Value Gap). <b>Liquidity Sweep</b> — ATOM/1D ✦ (thin book; relies on limit-order flow). Perp symbols (FARTCOIN/MOODENG) are used only because those tokens have no spot listing on the CEX; the engine strips the suffix so routing resolves to the on-chain spot market.</p>
+
+<p><b>Venue split:</b> Solana 9 alerts · Binance.US 10 · EVM/Arbitrum 3. &nbsp; <b>Timeframe split:</b> 1D 15 alerts · 4H 7 (plus the two single-token indicators). &nbsp; <b>Validation:</b> 15 of 18 combos are WF-validated; 3 are live-performance keepers.</p>
+
+<h2 class="newpage">5 · Position Sizing Model</h2>
+<p>Every alert is sized as a percentage of the currently-tradeable balance on its venue. Percentages come from backtested profit-factor (PF) tiers, auto-regenerated nightly and overridable manually.</p>
+
+<table>
+<thead><tr><th>Tier</th><th>Qualifying backtest PF</th><th>Size (% of tradeable)</th><th>Typical use</th></tr></thead>
+<tbody>
+<tr><td><b>A</b></td><td>PF ≥ 3.0</td><td>28%</td><td>Highest-conviction, deepest-sample combos</td></tr>
+<tr><td><b>B</b></td><td>PF ≥ 2.0</td><td>20%</td><td>Strong validated combos</td></tr>
+<tr><td><b>C</b></td><td>PF ≥ 1.5</td><td>15%</td><td>Baseline validated / near-miss watches</td></tr>
+</tbody>
+</table>
+
+<div class="grid2">
+<div>
+<h4>Guardrails</h4>
+<ul>
+<li><b>Illiquid-token cap:</b> a defined list of high-slippage memecoins is capped to a small fixed % regardless of tier — they realized −4% to −7% per trade to slippage before the cap.</li>
+<li><b>Hard ceiling:</b> no single position exceeds a fixed maximum % of the venue balance.</li>
+<li><b>Minimum trade floor</b> avoids fee-heavy dust trades.</li>
+<li><b>Self-throttle:</b> as positions stack, tradeable balance shrinks, so new sizes auto-shrink.</li>
+</ul>
+</div>
+<div>
+<h4>Exit model (bot-side)</h4>
+<ul>
+<li><b>Trend strategies</b> (Donchian, EMA Ribbon): wider take-profit target.</li>
+<li><b>Mean-reversion</b> (VWAP Dev, Stoch RSI): take-profit clamped near the mean; wider stop for oscillation room.</li>
+<li><b>Trailing stop</b> with an ATR offset tuned to avoid clipping normal pullbacks.</li>
+<li><b>Max-hold</b> cap resolves stragglers that neither TP nor SL catch.</li>
+</ul>
+</div>
+</div>
+<div class="callout good"><b>Recent tuning (July 2026):</b> tier sizes were raised (A 18→28, B 13→20, C 9→15) and the venue cash reserve lowered, to let the validated liquid-major combos compound — earlier average trade size was too small to generate meaningful income. Memecoins remain capped.</div>
+
+<h2 class="newpage">6 · Kalshi Prediction-Market Side</h2>
+<p>A separate subsystem trades Kalshi event contracts, isolated from the crypto lanes with its own capital budget and daily loss breaker. Its history is one of repeated strategy failure, and it is currently near-dormant.</p>
+
+<h3>Active / configured strategies</h3>
+<table>
+<thead><tr><th>Module</th><th>State</th><th>What it does</th></tr></thead>
+<tbody>
+<tr><td>Crypto strikes (BTC/ETH daily)</td><td><span class="tag warn">enabled · not filling</span></td><td>Sells "NO" on out-of-the-money daily BTC/ETH strike contracts the model judges over-priced (a short-upside-volatility bet). Uses a nightly-retrained empirical calibrator on top of a parametric option-style pricer.</td></tr>
+<tr><td>Whale-confirmed dry-run</td><td><span class="tag muted">paper only</span></td><td>Logs paper signals when large "whale" order flow agrees with a mid-band strike. Zero risk; used purely to measure real entry slippage.</td></tr>
+<tr><td>Spread bot / market maker</td><td><span class="tag muted">disabled</span></td><td>Two-sided quoting for spread capture. Disabled — was the primary bleeder.</td></tr>
+<tr><td>Arbitrage / momentum / sports</td><td><span class="tag muted">disabled</span></td><td>Various. All disabled after unprofitable runs.</td></tr>
+<tr><td>Whale tracker</td><td><span class="tag ok">read-only</span></td><td>Streams and records large trades for research; places no orders.</td></tr>
+</tbody>
+</table>
+
+<h3>Crypto-strikes eligibility gates</h3>
+<p>A strike must clear all of: model edge ≥ 7¢ · model YES-probability ≤ 0.55 · YES-bid in the 30–55¢ band (so NO costs 45–70¢) · realized-vol within a floor/cap band · time-to-settle between 1.5h and 48h · not already held or session-blacklisted.</p>
+
+<div class="callout gap">
+<b>Root-cause finding (July 2026):</b> the drought of Kalshi trades is <b>not</b> "no edge" and <b>not</b> a config regression. Eligible strikes keep appearing (1,000+ scans since mid-June), but when the bot places the order, the exchange returns <code>410 Gone</code> — the strike's order book is <b>empty</b>. These are illiquid out-of-the-money daily strikes (~1–2 days from settling, not near-expiry) that no market-maker quotes; the "edge" is computed off a stale snapshot. The bot correctly blacklists them and moves on. <b>The liquid strikes have no edge; the strikes with edge have no liquidity.</b> Real Kalshi liquidity lives in the 15-minute crypto markets and non-crypto series — a structural dead-end for this product, not a lull.
+</div>
+
+<h2 class="newpage">7 · Gap Analysis &amp; Recommendations</h2>
+<p>Ordered roughly by expected impact.</p>
+
+<h3><span class="tag warn">HIGH</span> &nbsp;Kalshi crypto-strikes is a structural dead-end</h3>
+<p>The daily-strike product cannot fill (empty books; 82 rejected orders in the visible logs). The allocated Kalshi cash has sat idle since mid-June. <b>Recommendation:</b> retire the live crypto-strikes module and redeploy that capital to the only lane with proven, fillable edge (the validated liquid-major crypto combos), <i>or</i> re-point the strategy at a genuinely liquid Kalshi market (15-minute crypto or a non-crypto series) and re-validate before risking capital. A liquidity pre-filter would stop the wasted order attempts but would not by itself create a single fill.</p>
+
+<h3><span class="tag warn">HIGH</span> &nbsp;Signal cadence is too low to scale income</h3>
+<p>Only 1D and 4H timeframes are deployed (faster timeframes were dropped for near-zero backtest PF), and the profitable combos are slow (roughly weekly). Realized cadence is only a handful of executions per two weeks. <b>Recommendation:</b> broaden the validated universe (more tokens per strategy) rather than faster timeframes, and concentrate size on the liquid majors that actually carry edge; income is currently constrained by both trade frequency and capital scale.</p>
+
+<h3><span class="tag warn">MED</span> &nbsp;Indicator utilization is uneven</h3>
+<ul>
+<li><b>FVG and Liquidity Sweep each run a single token</b> (NEAR, ATOM) — two whole indicators contributing one alert apiece. Either expand them to more validated tokens or accept they are marginal.</li>
+<li><b>BTC carries only trend strategies</b> (EMA Ribbon + Donchian) and no mean-reversion; several liquid majors are single-strategy. Diversifying strategy type per token would smooth the equity curve.</li>
+<li><b>Mean-reversion clusters on memecoins</b> (which are size-capped for slippage) while trend clusters on majors — the highest-size-allowed names and the highest-signal names don't fully overlap.</li>
+</ul>
+
+<h3><span class="tag warn">MED</span> &nbsp;Three combos run without backtest validation</h3>
+<p>BONK/EMA-Ribbon, RENDER/Donchian, and PNUT/VWAP are retained on live results alone (▲ keepers) with no walk-forward pass. They are profitable now but carry decay risk. <b>Recommendation:</b> keep the existing live-vs-backtest comparison discipline and define an explicit cull trigger for each.</p>
+
+<h3><span class="tag muted">MED</span> &nbsp;Execution-liquidity constraints limit the roster</h3>
+<p>Several validated combos are undeployable because their token lacks a deep venue: some are blocked by centralized-exchange market-order size caps, others by thin on-chain liquidity (one deployed token trades only a few thousand dollars/day and depends on limit-order flow). <b>Recommendation:</b> add limit-order support on the CEX lane to unlock the size-capped passers, and formalize a minimum-liquidity gate before deploying any new token.</p>
+
+<h3><span class="tag muted">LOW</span> &nbsp;Long-only; no downside or hedge capture</h3>
+<p>The system only expresses long views on spot. In sideways or bear regimes it can only sit out. A leverage/short lane was scoped but shelved for tier-stability reasons. <b>Recommendation:</b> revisit a small, gated short/hedge capability once the long side is reliably profitable — not before.</p>
+
+<h3><span class="tag muted">LOW</span> &nbsp;Monitoring completeness</h3>
+<p>Delivery monitoring (a webhook-vs-fire heartbeat and reconciliation cron) exists, but end-to-end signal history only goes back to a database rebuild in late May, and the live-vs-backtest profit-factor panel that would close the verdict loop is only partially built. <b>Recommendation:</b> finish the per-combo live-vs-backtest panel so retention/cull decisions are data-driven rather than manual.</p>
+
+<hr class="rule">
+<h2>Appendix · Roster Summary</h2>
+<div class="grid2">
+<div>
+<ul>
+<li>7 indicators in production; 23 active alerts across 18 tokens.</li>
+<li>Entire roster fires bar-close only, with edge-triggered CLOSE exits restored (June 2026) to match the backtested exits.</li>
+<li>Long-only since an April 2026 refactor (SELL/short signals removed to prevent cross-strategy interference).</li>
+</ul>
+</div>
+<div>
+<ul>
+<li>Sizing tiers auto-regenerate from nightly walk-forward PF; manual promotions supported.</li>
+<li>A bull-regime detector can auto-size-up a pre-staged trend-following roster when a bull market confirms.</li>
+<li>Kalshi runs on an isolated capital budget with a daily loss breaker.</li>
+</ul>
+</div>
+</div>
+
+<p class="foot">Generated for the system owner. Contains no API keys, wallet addresses, webhook URLs, account identifiers, or balances. Strategy performance figures are backtest metrics, not investment advice.</p>
+
+</body>
+</html>
