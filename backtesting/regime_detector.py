@@ -54,19 +54,19 @@ LOG_DIR = "backtesting/results"
 # PFs are from backtesting/results/bull_period_20260508_1529.txt.
 BULL_ROSTER_OVERRIDES = [
     {"strategy": "Donch+ADX", "token": "SOL", "tf": "4H",
-     "pf": 1.36, "size_pct": 9.0,  "tier": "C",
+     "pf": 1.36, "size_pct": 15.0, "tier": "C",
      "note": "Bull-window 2023-Q4 PF 1.36 (multi-strat SOL strength). Auto-applied on BULL_CONFIRMED."},
     {"strategy": "EMA+ADX",   "token": "SOL", "tf": "4H",
-     "pf": 1.88, "size_pct": 13.0, "tier": "B",
+     "pf": 1.88, "size_pct": 20.0, "tier": "B",
      "note": "Bull-window 2023-Q4 PF 1.88 (Δ +0.94). Auto-applied on BULL_CONFIRMED."},
     {"strategy": "EMA+ADX",   "token": "UNI", "tf": "4H",
-     "pf": 1.88, "size_pct": 13.0, "tier": "B",
+     "pf": 1.88, "size_pct": 20.0, "tier": "B",
      "note": "Bull-window 2024-Q4 PF 1.88 (Δ +1.48 — biggest in family). Auto-applied on BULL_CONFIRMED."},
     {"strategy": "EMA+ADX",   "token": "ARB", "tf": "4H",
-     "pf": 1.71, "size_pct": 13.0, "tier": "B",
+     "pf": 1.71, "size_pct": 20.0, "tier": "B",
      "note": "Bull-window 2023-Q4 PF 1.71 (Δ +0.77). Auto-applied on BULL_CONFIRMED."},
     {"strategy": "Liq Sweep", "token": "UNI", "tf": "4H",
-     "pf": 2.74, "size_pct": 18.0, "tier": "A",
+     "pf": 2.74, "size_pct": 28.0, "tier": "A",
      "note": "Bull-window 2024-Q4 PF 2.74 — highest absolute in family. Auto-applied on BULL_CONFIRMED."},
 ]
 

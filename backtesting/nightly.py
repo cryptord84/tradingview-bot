@@ -310,9 +310,9 @@ def run_nightly(
 # /C=10) combined with kamino.reserve_usdc 150→250 should ~3× per-trade size
 # without changing max_position_size_percent (50%) or correlation caps.
 SIZING_TIERS = [
-    (3.0, "A", 18.0),
-    (2.0, "B", 13.0),
-    (1.5, "C",  9.0),
+    (3.0, "A", 28.0),
+    (2.0, "B", 20.0),
+    (1.5, "C", 15.0),
 ]
 
 
