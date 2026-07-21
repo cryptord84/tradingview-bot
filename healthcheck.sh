@@ -29,40 +29,45 @@ if [ -f "$LOG_FILE" ] && [ "$(wc -l < "$LOG_FILE")" -gt "$MAX_LOG_LINES" ]; then
     tail -n "$MAX_LOG_LINES" "$LOG_FILE" > "$LOG_FILE.tmp" && mv "$LOG_FILE.tmp" "$LOG_FILE"
 fi
 
-# Check if bot is responding
-health_response=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$HEALTH_URL" 2>/dev/null)
+# Check if bot is responding — RETRY to avoid false-positive restarts.
+# A single transient timeout (e.g. the event loop briefly blocked by a slow
+# Claude-CLI decision) must NOT trigger a kill+restart of a healthy bot.
+# Require 3 consecutive failures (~20s) before deciding it's actually down.
+healthy=""
+for attempt in 1 2 3; do
+    health_response=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 "$HEALTH_URL" 2>/dev/null)
+    if [ "$health_response" = "200" ]; then healthy="yes"; break; fi
+    log "WARN - health check $attempt/3 failed (HTTP $health_response)"
+    [ "$attempt" -lt 3 ] && sleep 5
+done
 
-if [ "$health_response" = "200" ]; then
-    log "OK - Bot healthy (HTTP $health_response)"
+if [ -n "$healthy" ]; then
+    log "OK - Bot healthy (HTTP 200)"
     exit 0
 fi
 
-log "WARN - Bot not responding (HTTP $health_response), checking process..."
+log "WARN - Bot failed 3 consecutive health checks, stopping any running instance(s)..."
 
-# Check if process is running
-bot_pid=""
-if [ -f "$PID_FILE" ]; then
-    bot_pid=$(cat "$PID_FILE")
-    if ! kill -0 "$bot_pid" 2>/dev/null; then
-        log "WARN - Stale PID file (pid=$bot_pid not running)"
-        bot_pid=""
-    fi
+# SINGLE-INSTANCE GUARANTEE: stop EVERY bot process (the port holder AND any
+# stray uvicorn), then confirm both the process list AND port $PORT are clean
+# BEFORE starting a new one. If we cannot fully clear them, ABORT the start —
+# better to stay down and retry next tick than to risk two bots trading.
+BOT_PATTERN="venv/bin/uvicorn main:app"
+pkill -f "$BOT_PATTERN" 2>/dev/null
+[ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE")" 2>/dev/null
+for i in $(seq 1 8); do
+    pgrep -f "$BOT_PATTERN" >/dev/null 2>&1 || lsof -ti :$PORT >/dev/null 2>&1 || break
+    pkill -9 -f "$BOT_PATTERN" 2>/dev/null
+    port_pid=$(lsof -ti :$PORT 2>/dev/null)
+    [ -n "$port_pid" ] && kill -9 $port_pid 2>/dev/null
+    sleep 1
+done
+
+if pgrep -f "$BOT_PATTERN" >/dev/null 2>&1 || lsof -ti :$PORT >/dev/null 2>&1; then
+    log "ERROR - could not fully stop existing bot / free port $PORT; ABORTING start to avoid a second instance. Will retry next tick."
+    exit 1
 fi
-
-# Also check by port
-port_pid=$(lsof -ti :$PORT 2>/dev/null | head -1)
-
-if [ -n "$port_pid" ]; then
-    log "WARN - Process on port $PORT (pid=$port_pid) not responding to health check, killing..."
-    kill "$port_pid" 2>/dev/null
-    sleep 2
-    kill -9 "$port_pid" 2>/dev/null
-elif [ -n "$bot_pid" ]; then
-    log "WARN - Bot process (pid=$bot_pid) exists but port $PORT not open, killing..."
-    kill "$bot_pid" 2>/dev/null
-    sleep 2
-    kill -9 "$bot_pid" 2>/dev/null
-fi
+log "Confirmed: no bot process running and port $PORT is free."
 
 # Start the bot in a visible Terminal window
 log "ACTION - Starting bot in Terminal window..."

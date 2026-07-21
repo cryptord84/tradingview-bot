@@ -35,7 +35,7 @@ Dashboard: http://localhost:8000  · API docs: `/docs`  · Webhook: `POST /webho
 
 ## Hard rules (do NOT violate)
 
-1. **Never restart the bot in the background.** Always run uvicorn in an active terminal the user can watch. Backgrounded restarts have hidden failures the user can't see.
+1. **You may restart the bot yourself (updated 2026-07-12).** The user no longer watches the terminal, so a backgrounded / launchd relaunch is fine. BUT because no human is watching, you MUST verify a clean startup after every restart: poll `/health` for `200` **and** scan `logs/bot.log` for the known failures (`NameError`, `Application startup failed`, a stall right after the Kamino-balance step) before you call it done — then report the outcome. Mind open positions: a restart pauses TP/SL monitoring for ~15–20s. Sanctioned visible-Terminal path still exists if wanted: `launchctl kickstart -k gui/$(id -u)/com.clawbot.tradingview-bot-healthcheck` (after freeing port 8000).
 
 2. **Never `pine_save` or `pine_smart_compile` without first verifying the editor's active slot.** TV Pine editor has a known bug where `pine_open` by name loads source into Monaco but does not always update the binding — saves then overwrite the *wrong* script slot. Flow: open via nameButton → "Open script…" dialog → verify `nameButton h2` matches target → only then `pine_set_source` + compile. See `.claude/memory/feedback_pine_slot_overwrite.md`.
 
