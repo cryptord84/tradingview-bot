@@ -7,6 +7,7 @@ import time
 from typing import Optional
 
 import httpx
+from app.utils.errors import describe
 from solders.keypair import Keypair
 from solders.transaction import VersionedTransaction
 
@@ -62,8 +63,11 @@ class KaminoClient:
             logger.warning("USDC reserve not found in Kamino market data")
             return {"available": False, "error": "USDC reserve not found"}
         except Exception as e:
-            logger.error(f"Failed to get Kamino metrics: {e}")
-            return {"available": False, "error": str(e)}
+            # describe(): Kamino calls fail on timeouts, whose str() is empty —
+            # this logged "Failed to get Kamino metrics: " 31 times with no cause.
+            desc = describe(e)
+            logger.error(f"Failed to get Kamino metrics: {desc}")
+            return {"available": False, "error": desc}
 
     async def get_user_position(self, wallet_address: str) -> dict:
         """Get user's deposited USDC balance in Kamino.
@@ -115,7 +119,8 @@ class KaminoClient:
         cached = _kamino_balance_cache["value"]
         if cached > 0:
             logger.warning(
-                f"Kamino API failed ({last_error}), using last known balance: ${cached:.2f}"
+                f"Kamino API failed ({describe(last_error) if last_error else 'unknown'}), "
+                f"using last known balance: ${cached:.2f}"
             )
             return {"deposited_usdc": cached, "has_position": True, "stale": True}
 

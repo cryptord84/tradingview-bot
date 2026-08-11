@@ -112,11 +112,16 @@ async def test_lane_sizing(client: httpx.AsyncClient) -> list[TestResult]:
             continue
 
         # Tail bot.log for the DRY-RUN pass line for this symbol
-        match = await _wait_for_dryrun_line(sym, since_ts=ts0, timeout_s=120)
+        # 2026-08-10: was 120s. The Solana/Binance lanes answer in 7-9s, but the
+        # EVM lane's OpenOcean quote can take far longer — UNIUSDT came back at
+        # 129s on 08-10 and failed purely on the deadline, contributing a false
+        # FAIL to the nightly Telegram. 240s still catches a genuine stall (the
+        # bug class this guards is a pipeline that never responds at all).
+        match = await _wait_for_dryrun_line(sym, since_ts=ts0, timeout_s=240)
         if match is None:
             results.append(TestResult(
                 f"lane_sizing[{sym}]", False,
-                "no DRY-RUN pass line within 120s — pipeline may have stalled",
+                "no DRY-RUN pass line within 240s — pipeline may have stalled",
             ))
             continue
 
@@ -448,23 +453,41 @@ async def test_calibrator_integrity() -> list[TestResult]:
 # different size_pct, either the auto-tier shifted or the override file was
 # wiped — both are actionable.
 #
-# To add a new known slot: append (strategy_label, symbol, timeframe, expected_pct).
+# To add a new known slot: append (strategy_label, symbol, timeframe, tier_letter).
 # Strategy label matches what Pine writes into webhook.strategy (e.g.
 # "Stoch RSI v1.0", not "Stoch RSI"). get_sizing_override normalizes both.
+#
+# 2026-08-10: these were hardcoded PERCENTAGES (A=18/B=13/C=9) — a second copy
+# of numbers whose only real home is nightly.SIZING_TIERS. The 07-21 bump to
+# A28/B20/C15 moved the source but not this copy, so the suite failed 10/23
+# every night for 20 nights on a purely stale assertion, and the daily FAIL
+# Telegram trained everyone to ignore it. Now we assert the tier LETTER and
+# resolve the percentage from SIZING_TIERS at runtime, so retuning tier sizes
+# can never re-break this test. A genuine demotion (A→C) still fails, which is
+# the thing worth alerting on.
 _EXPECTED_TIERS = [
     # FARTCOIN — both strategies hit A on combined PF alone (high-PF auto-passers)
-    ("Stoch RSI v1.0",      "FARTCOINUSDT.P",  "4H", 18.0),  # PF 4.79 → A auto
-    ("VWAP Deviation v1.0", "FARTCOINUSDT.P",  "4H", 18.0),  # PF 4.18 → A auto
+    ("Stoch RSI v1.0",      "FARTCOINUSDT.P",  "4H", "A"),  # PF 4.79 → A auto
+    ("VWAP Deviation v1.0", "FARTCOINUSDT.P",  "4H", "A"),  # PF 4.18 → A auto
     # Manual promotions — preserve `source: manual_promotion` across nightly regens
-    ("VWAP Deviation v1.0", "MOODENGUSDT",     "4H", 18.0),  # PF 2.13 → A manual (OOS 4.94)
-    ("Stoch RSI v1.0",      "OPUSDT",          "1D", 18.0),  # PF 2.03 → A manual (OOS 3.87) — added 2026-05-12
-    ("VWAP Deviation v1.0", "JUPUSDT",         "4H", 18.0),  # PF 2.51 → A manual (OOS 4.14) — added 2026-05-12
-    ("VWAP Deviation v1.0", "LDOUSDT",         "1D", 13.0),  # PF 1.96 → B manual (OOS 2.22) — added 2026-05-12
-    ("VWAP Deviation v1.0", "PNUTUSDT",        "4H", 13.0),  # PF 1.52 → B manual (OOS 2.21)
-    # Auto-tier sanity baselines — should sit at C (9%) on combined PF alone
-    ("Stoch RSI v1.0",      "ARBUSDT",         "1D", 9.0),   # PF 1.59 → C auto
-    ("Donchian Breakout v1.0", "DOGEUSDT",     "1D", 9.0),   # PF 1.78 → C auto
+    ("VWAP Deviation v1.0", "MOODENGUSDT",     "4H", "A"),  # PF 2.13 → A manual (OOS 4.94)
+    ("Stoch RSI v1.0",      "OPUSDT",          "1D", "A"),  # PF 2.03 → A manual (OOS 3.87) — added 2026-05-12
+    ("VWAP Deviation v1.0", "JUPUSDT",         "4H", "A"),  # PF 2.51 → A manual (OOS 4.14) — added 2026-05-12
+    ("VWAP Deviation v1.0", "LDOUSDT",         "1D", "B"),  # PF 1.96 → B manual (OOS 2.22) — added 2026-05-12
+    ("VWAP Deviation v1.0", "PNUTUSDT",        "4H", "B"),  # PF 1.52 → B manual (OOS 2.21)
+    # Auto-tier sanity baselines — should sit at C on combined PF alone
+    ("Stoch RSI v1.0",      "ARBUSDT",         "1D", "C"),  # PF 1.59 → C auto
+    ("Donchian Breakout v1.0", "DOGEUSDT",     "1D", "C"),  # PF 1.78 → C auto
 ]
+
+
+def _expected_pct_for_tier(tier_letter: str) -> Optional[float]:
+    """Resolve a tier letter to its current size_pct from the canonical table."""
+    from backtesting.nightly import SIZING_TIERS
+    for _min_pf, letter, size_pct in SIZING_TIERS:
+        if letter == tier_letter:
+            return size_pct
+    return None
 
 
 async def test_tier_assertions() -> list[TestResult]:
@@ -477,19 +500,26 @@ async def test_tier_assertions() -> list[TestResult]:
     from app.services.trade_engine import get_sizing_override
     results: list[TestResult] = []
 
-    for strat, sym, tf, expected_pct in _EXPECTED_TIERS:
+    for strat, sym, tf, expected_tier in _EXPECTED_TIERS:
+        expected_pct = _expected_pct_for_tier(expected_tier)
+        if expected_pct is None:
+            results.append(TestResult(
+                f"tier[{strat}/{sym}/{tf}]", False,
+                f"tier '{expected_tier}' not defined in nightly.SIZING_TIERS",
+            ))
+            continue
         slot = get_sizing_override(strat, sym, tf)
         if slot is None:
             results.append(TestResult(
                 f"tier[{strat}/{sym}/{tf}]", False,
-                f"override missing entirely — expected size_pct={expected_pct}",
+                f"override missing entirely — expected tier {expected_tier} ({expected_pct}%)",
             ))
             continue
         got = slot.get("size_pct")
         if got != expected_pct:
             results.append(TestResult(
                 f"tier[{strat}/{sym}/{tf}]", False,
-                f"size_pct={got}, expected={expected_pct}; "
+                f"size_pct={got}, expected {expected_tier}={expected_pct}; "
                 f"tier={slot.get('tier')} source={slot.get('source')}",
             ))
         else:

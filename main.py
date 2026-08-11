@@ -176,8 +176,17 @@ async def lifespan(app: FastAPI):
     ngrok = get_ngrok_monitor()
     ngrok_task = ngrok.start()
 
-    # Start daily scout scheduler (3:30 AM X.com scan)
-    scout_task = asyncio.create_task(scout_scheduler())
+    # Start daily scout scheduler (3:30 AM X.com scan) — the "Daily TradingView
+    # Bot Intelligence" Telegram. Off by default since 2026-08-10: it fired every
+    # day regardless of whether it found anything actionable, and became noise the
+    # user filtered past. Re-enable with scout.enabled: true once it has a bar for
+    # "worth sending" rather than a fixed daily slot.
+    scout_task = None
+    if (get("scout") or {}).get("enabled", False):
+        scout_task = asyncio.create_task(scout_scheduler())
+        logger.info("Scout scheduler started (daily 3:30 AM intelligence scan)")
+    else:
+        logger.info("Scout scheduler disabled (scout.enabled=false)")
 
     # Start funding rate scanner (every 4 hours)
     from app.services.funding_rate_scanner import run_loop as funding_scan_loop
