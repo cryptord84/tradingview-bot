@@ -3,6 +3,16 @@
 Supports two modes:
   - "cli": Shells out to the `claude` CLI (Claude Code). No API key needed.
   - "api": Calls the Anthropic API directly. Requires api_key in config.
+
+Failure handling distinguishes "Claude said no" from "Claude didn't answer":
+
+  - said no        -> a parsed REJECT, or an unparseable response that might
+                      have contained one. Always rejects.
+  - misconfigured  -> ClaudeConfigError. Always rejects, loudly; an operator
+                      has to fix it and the gate must not vanish quietly.
+  - didn't answer  -> timeout / non-zero exit / API overload. Falls through to
+                      the confidence bypass (claude.unavailable_bypass_confidence),
+                      because an outage is not a risk assessment.
 """
 
 import asyncio
@@ -15,6 +25,18 @@ from app.config import get
 from app.models import ClaudeResponse, ClaudeDecision, WebhookSignal
 
 logger = logging.getLogger("bot.claude")
+
+
+class ClaudeConfigError(Exception):
+    """Claude can never answer until an operator fixes something (CLI not
+    installed, api_key missing in api mode).
+
+    Kept distinct from transient failures on purpose: a transient outage is
+    allowed to fall through to the confidence bypass below, but a config error
+    is not. Bypassing a permanent misconfiguration would silently disable the
+    risk gate for every future trade with nothing in the logs to say the gate
+    was gone — the failure has to stay loud.
+    """
 
 SYSTEM_PROMPT = """You are a professional crypto trading risk manager and decision engine for a Solana (SOL) trading bot. Your job is to review every incoming trade signal and make a final decision: EXECUTE, REJECT, or MODIFY.
 
@@ -169,7 +191,7 @@ async def _call_cli(context: str) -> str:
     # Verify claude CLI is installed
     resolved = shutil.which(cli_path)
     if not resolved:
-        raise FileNotFoundError(
+        raise ClaudeConfigError(
             f"Claude CLI not found at '{cli_path}'. "
             "Install Claude Code (npm install -g @anthropic-ai/claude-code) "
             "or set claude.cli_path in config.yaml."
@@ -206,7 +228,7 @@ async def _call_api(context: str) -> str:
     cfg = get("claude")
     api_key = cfg.get("api_key", "")
     if not api_key:
-        raise ValueError(
+        raise ClaudeConfigError(
             "claude.api_key not set in config.yaml. "
             "Either set it or switch to mode: 'cli' to use Claude Code instead."
         )
@@ -254,39 +276,93 @@ async def get_claude_decision(
         return _parse_response(response_text)
 
     except json.JSONDecodeError as e:
+        # Claude answered, we just couldn't read it. The unreadable text may
+        # well have been a REJECT, so this must not bypass — see the module
+        # note on "said no" vs "didn't answer".
         logger.error(f"Failed to parse Claude response: {e}")
         return ClaudeResponse(
             decision=ClaudeDecision.REJECT,
             reasoning="Failed to parse Claude response. Rejecting for safety.",
             risk_score=8,
         )
+    except ClaudeConfigError as e:
+        logger.error(
+            f"Claude misconfigured ({mode} mode) — risk gate cannot run, rejecting "
+            f"{signal.signal_type.value if signal else '?'} "
+            f"{signal.symbol if signal else '?'}: {e}"
+        )
+        return ClaudeResponse(
+            decision=ClaudeDecision.REJECT,
+            reasoning=(
+                f"Claude {mode} misconfigured: {str(e)}. Rejecting until fixed — "
+                f"a config error must not silently disable the risk gate."
+            ),
+            risk_score=10,
+        )
     except Exception as e:
-        logger.error(f"Claude decision error ({mode} mode): {e}")
-        # Confidence-based failover: auto-execute high-conviction signals when Claude is unavailable.
-        # This prevents missed trades during API overload (exit code 1 / usage limit).
+        # Transient failure: timeout, non-zero CLI exit, API overload. Claude
+        # never rendered a decision, so treating this as a REJECT is not "risk
+        # management" — it is an infrastructure outage masquerading as one.
+        #
+        # 2026-08-10: the old threshold was a hardcoded 80, but Pine emits
+        # confidence 65 (111 signals) and 70 (4 signals) and has never once
+        # produced an 80. The bypass could therefore never fire, so every CLI
+        # hiccup became a silently-killed trade — 31 of them Jun–Jul, at which
+        # point CLI errors outnumbered genuine rejects 31:15. Threshold is now
+        # config-driven and defaults to 60 so real signals can actually clear it.
         conf = signal.confidence_score if signal else 0
-        if conf >= 80:
+        threshold = int(cfg.get("unavailable_bypass_confidence", 60))
+
+        # EXITS ARE NEVER GATED BY AN OUTAGE. Pine stamps every CLOSE with
+        # confidence 50 (all 192 on record) while BUYs carry 65-70, so a
+        # threshold of 60 sits exactly between them: the 08-10 fix restored
+        # entries during an outage but left exits rejected, which is backwards
+        # — the bot could open positions it could not close on signal. Two real
+        # exits (BTC, ETH) were lost to this on 08-11 before it was caught; 35
+        # CLOSEs have been blocked by this gate all-time.
+        #
+        # An exit is risk-reducing by construction, so an unavailable risk
+        # manager is never a reason to block one. Same rule the loss budget
+        # uses. Note this only covers the UNAVAILABLE path — an explicit REJECT
+        # that Claude actually rendered on a CLOSE is still honoured above.
+        is_exit = signal and str(signal.signal_type.value).upper() in ("CLOSE", "SELL")
+        if is_exit:
             logger.warning(
-                f"Claude unavailable — auto-executing {signal.signal_type.value} {signal.symbol} "
-                f"(confidence={conf} >= 80, bypassing Claude)"
+                f"Claude unavailable ({e}) — allowing exit {signal.signal_type.value} "
+                f"{signal.symbol} regardless of confidence ({conf}): exits are never "
+                f"blocked by an outage"
             )
             return ClaudeResponse(
                 decision=ClaudeDecision.EXECUTE,
                 reasoning=(
-                    f"Claude API unavailable ({str(e)}). "
-                    f"Auto-executing: confidence {conf}/100 meets ≥80 bypass threshold."
+                    f"Claude unavailable ({str(e)}). Exit signal allowed through: "
+                    f"an outage must not strand an open position."
+                ),
+                risk_score=3,
+            )
+
+        if conf >= threshold:
+            logger.warning(
+                f"Claude unavailable ({e}) — auto-executing {signal.signal_type.value} "
+                f"{signal.symbol} (confidence={conf} >= {threshold}, bypassing Claude)"
+            )
+            return ClaudeResponse(
+                decision=ClaudeDecision.EXECUTE,
+                reasoning=(
+                    f"Claude unavailable ({str(e)}). "
+                    f"Auto-executing: confidence {conf}/100 meets ≥{threshold} bypass threshold."
                 ),
                 risk_score=5,
             )
         logger.warning(
-            f"Claude unavailable — skipping {signal.signal_type.value} {signal.symbol} "
-            f"(confidence={conf} < 80, no bypass)"
+            f"Claude unavailable ({e}) — skipping {signal.signal_type.value} "
+            f"{signal.symbol} (confidence={conf} < {threshold}, no bypass)"
         )
         return ClaudeResponse(
             decision=ClaudeDecision.REJECT,
             reasoning=(
                 f"Claude {mode} error: {str(e)}. "
-                f"Confidence {conf}/100 below 80 bypass threshold — rejecting for safety."
+                f"Confidence {conf}/100 below {threshold} bypass threshold — rejecting for safety."
             ),
             risk_score=10,
         )

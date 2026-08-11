@@ -26,6 +26,10 @@ claude:
   temperature: 0.3                            # Only used in API mode
   timeout_seconds: 60                         # CLI can be slower than API
   cli_path: "claude"                          # Path to claude binary (or full path e.g. /usr/local/bin/claude)
+  unavailable_bypass_confidence: 60           # When Claude times out / errors (NOT when it rejects), execute
+                                              # anyway if the signal's confidence is >= this. Pine emits 65-70,
+                                              # so 60 lets real signals through an outage; raise above 70 to
+                                              # make every outage a rejected trade instead.
 
 # --- Solana Wallet ---
 wallet:
@@ -419,6 +423,22 @@ rebalancer:
     RENDER: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof"
     W: "85VBFQZC9TZkfaptBWjvUw7YbZjy52A6mjtPGjstQAmQ"
     DOG: "dog1viwbb2vWDpER5FrJ4YFG6gq6XuyFohUe9TXN65u"
+
+# --- Rolling loss budget (hard stop across all lanes) ---
+loss_budget:
+  enabled: true                       # Blocks new BUY entries when the window's realized
+                                      # loss exceeds max_loss_usd. Exits are never blocked.
+  window_days: 7                      # Rolling lookback over closed positions, all lanes
+  max_loss_usd: 25.0                  # Halt new entries at -$25 realized in the window.
+                                      # Recomputed from the DB each check, so a restart
+                                      # cannot clear the halt (unlike the older breakers).
+
+# --- Scout (daily intelligence Telegram) ---
+scout:
+  enabled: false                      # 3:30 AM multi-source scan -> "Daily TradingView Bot
+                                      # Intelligence" Telegram. Off by default: it sends on a
+                                      # fixed schedule regardless of whether it found anything,
+                                      # which reads as noise. Set true to resume.
 
 # --- Paper Trading (simulation mode) ---
 paper_trading:

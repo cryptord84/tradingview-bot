@@ -21,6 +21,8 @@ from app.services.kamino_client import KaminoClient
 from app.services.confluence_filter import get_confluence_filter
 from app.services.dry_run_manager import get_dry_run_manager
 from app.services.sol_risk_manager import get_sol_risk_manager
+from app.services.loss_budget import get_loss_budget
+from app.utils.errors import describe
 from app.services.paper_trading import get_paper_trader
 from app.services.telegram_service import TelegramService
 from app.services.wallet_service import WalletService
@@ -955,6 +957,42 @@ class TradeEngine:
             trade_usd = tradeable_usd * (size_pct / 100)
             max_purchase_usd = risk_cfg.get("max_purchase_usd", 500.0)
             trade_usd = min(trade_usd, max_purchase_usd)
+            # ── ROLLING LOSS BUDGET (all lanes) ──
+            # Runs ahead of the Solana-only breaker because this one governs
+            # Binance.US and EVM entries too. Stateless + restart-proof; see
+            # loss_budget.py. Exits are exempt inside check().
+            budget = get_loss_budget()
+            budget_check = budget.check(signal.signal_type.value)
+            if not budget_check["allowed"]:
+                result["status"] = "loss_budget_blocked"
+                result["error"] = budget_check["reason"]
+                update_signal_disposition(
+                    signal.signal_log_id, "rejected_loss_budget",
+                    reason=budget_check["reason"][:200],
+                )
+                await self.telegram.send_message(
+                    f"🛑 <b>LOSS BUDGET HALT</b>\n"
+                    f"Blocked {signal.signal_type.value} {signal.symbol}\n"
+                    f"Realized: ${budget_check['realized']:.2f} over {budget.window_days}d\n"
+                    f"Limit: -${budget_check['budget']:.2f}\n"
+                    f"New entries are halted until the window rolls off. "
+                    f"Exits and TP/SL still run."
+                )
+                insert_trade({
+                    "signal_type": signal.signal_type.value,
+                    "symbol": signal.symbol,
+                    "action": "REJECT",
+                    "amount_sol": 0,
+                    "price_usd": token_price,
+                    "confidence_score": signal.confidence_score,
+                    "claude_reasoning": claude_resp.reasoning,
+                    "wallet_address": self.wallet.public_key,
+                    "notes": f"Loss budget: {budget_check['reason']}",
+                    "strategy": strategy_label,
+                    "reason": TradeReason.RISK_REJECT,
+                })
+                return result
+
             # ── SOL RISK MANAGER PRE-TRADE CHECK ──
             sol_rm = get_sol_risk_manager()
             risk_check = sol_rm.check_order(token_symbol, trade_usd, signal.signal_type.value)
@@ -1157,6 +1195,10 @@ class TradeEngine:
                     result["error"] = (
                         f"No open position for {signal.symbol} from strategy '{strategy_name}'"
                     )
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_no_position",
+                        reason=f"no open {signal.symbol} position for strategy '{strategy_name}'",
+                    )
                     return result
 
                 logger.info(
@@ -1188,6 +1230,13 @@ class TradeEngine:
                         f"only {age_seconds:.0f}s old (min {min_hold_seconds}s) — likely whipsaw"
                     )
                     result["status"] = "close_rejected_too_new"
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_close_too_new",
+                        reason=(
+                            f"pos #{matched_pos['id']} only {age_seconds:.0f}s old "
+                            f"(min {min_hold_seconds}s) — likely whipsaw"
+                        ),
+                    )
                     return result
 
                 move_pct = abs(token_price - entry_price) / entry_price if entry_price else 0
@@ -1198,6 +1247,13 @@ class TradeEngine:
                         f"${entry_price:.6f} → ${token_price:.6f} (need {min_move_pct*100:.2f}% to clear fees)"
                     )
                     result["status"] = "close_rejected_below_fee_threshold"
+                    update_signal_disposition(
+                        signal.signal_log_id, "skipped_close_below_fee",
+                        reason=(
+                            f"pos #{matched_pos['id']} moved {move_pct*100:.2f}% from entry "
+                            f"(need {min_move_pct*100:.2f}% to clear fees)"
+                        ),
+                    )
                     return result
 
                 # Close via position monitor for proper swap execution
@@ -1206,7 +1262,7 @@ class TradeEngine:
                 await monitor._close_position(matched_pos, token_price, "signal", jupiter=None)
 
                 result["status"] = "closed"
-                insert_trade({
+                close_trade_id = insert_trade({
                     "signal_type": action_label,
                     "symbol": signal.symbol,
                     "action": "EXECUTE",
@@ -1220,6 +1276,11 @@ class TradeEngine:
                     "strategy": strategy_label,
                     "reason": TradeReason.SIGNAL_CLOSE,
                 })
+                update_signal_disposition(
+                    signal.signal_log_id, "executed",
+                    reason=f"closed pos #{matched_pos['id']} ({signal.symbol} via {strategy_name})",
+                    trade_id=close_trade_id,
+                )
                 return result
 
             # Skip Solana-specific pre-trade ops (Kamino + mint resolution) for EVM symbols
@@ -1755,13 +1816,22 @@ class TradeEngine:
                     reason=f"swap rejected: {reason[:200]}",
                 )
             else:
-                # Non-swap engine error — fall back to the generic notifier
+                # Non-swap engine error — fall back to the generic notifier.
+                # describe() rather than str(e): the timeout family has an empty
+                # message, which is exactly how the 2026-08-06 LDO failure
+                # recorded a blank reason and became undiagnosable once the logs
+                # rotated. See app/utils/errors.py.
+                _desc = describe(e)
+                logger.error(
+                    f"Engine error on {signal.signal_type.value} {signal.symbol}: {_desc}",
+                    exc_info=True,
+                )
                 await self.telegram.notify_error(
-                    str(e), f"Signal: {signal.signal_type.value} {signal.symbol}"
+                    _desc, f"Signal: {signal.signal_type.value} {signal.symbol}"
                 )
                 update_signal_disposition(
                     signal.signal_log_id, "failed_engine_error",
-                    reason=str(e)[:200],
+                    reason=_desc,
                 )
             return result
 

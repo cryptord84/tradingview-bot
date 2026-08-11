@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from app.config import get
@@ -691,8 +692,11 @@ class PositionMonitor:
             # Resolve EVM contract + decimals
             evm_token_addr, evm_token_decimals = TradeEngine.EVM_TOKENS[token_symbol]
 
-            # Pre-flight balance check via on-chain ERC20 balanceOf
-            on_chain_amt = await wallet.get_erc20_balance(evm_token_addr, decimals=evm_token_decimals)
+            # Pre-flight balance check via on-chain ERC20 balanceOf.
+            # Keep the RAW wei alongside the human value: the sell amount below
+            # must come from the integer, never from the float (see there).
+            on_chain_wei = await wallet.get_erc20_balance_wei(evm_token_addr)
+            on_chain_amt = on_chain_wei / (10 ** evm_token_decimals)
             recorded_amt = float(pos.get("amount_sol") or 0)
 
             if recorded_amt > 0 and on_chain_amt < recorded_amt * 0.01:
@@ -712,9 +716,27 @@ class PositionMonitor:
                 )
                 return
 
-            # Use min(recorded, on_chain) so we don't try to sell more than we hold
-            sell_amount = min(recorded_amt, on_chain_amt) if recorded_amt > 0 else on_chain_amt
-            sell_wei = int(sell_amount * (10 ** evm_token_decimals))
+            # Use min(recorded, on_chain) so we don't try to sell more than we hold.
+            #
+            # Computed in WEI, not in float units. The old form was
+            #   sell_wei = int(sell_amount * (10 ** decimals))
+            # on a float balance, and float64 cannot hold 18 significant digits.
+            # Measured against the real Arbitrum balances on 2026-08-11:
+            #   LDO   true 15782115818431751244 -> float round-trip +948 wei
+            #   AAVE  true   250734454003807655 -> float round-trip  +25 wei
+            # Both ask for MORE than the wallet owns, so the router's transferFrom
+            # reverts with "transfer amount exceeds balance" and the position
+            # cannot exit at all. Same defect that bit
+            # full-balance sells on 2026-05-30; the Decimal fix landed in
+            # evm_swap_executor but never here. Integers round-trip exactly.
+            if recorded_amt > 0:
+                recorded_wei = int(
+                    Decimal(str(recorded_amt)) * (Decimal(10) ** evm_token_decimals)
+                )
+                sell_wei = min(recorded_wei, on_chain_wei)
+            else:
+                sell_wei = on_chain_wei
+            sell_amount = sell_wei / (10 ** evm_token_decimals)  # logging/display only
 
             # Execute SELL: token → USDC
             try:

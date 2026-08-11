@@ -155,9 +155,15 @@ class EVMWalletService:
         self._set_cached("eth", eth)
         return eth
 
-    async def get_erc20_balance(self, contract_addr: str, decimals: int = 18) -> float:
-        """Read ERC20 balanceOf(address) for the wallet via eth_call."""
-        # Build calldata: balanceOf selector + 32-byte zero-padded address
+    async def get_erc20_balance_wei(self, contract_addr: str) -> int:
+        """Read ERC20 balanceOf(address) as the RAW integer, no decimal scaling.
+
+        Use this for anything that feeds an amount back on-chain — above all
+        full-balance sells. Going through the float form and multiplying back
+        by 10**decimals can round UP, so the router tries to pull more than the
+        wallet holds and transferFrom reverts with "transfer amount exceeds
+        balance" (bit us 2026-05-30). The exact integer round-trips safely.
+        """
         addr_clean = self.address.lower().removeprefix("0x").rjust(64, "0")
         calldata = ERC20_BALANCE_OF_SELECTOR + addr_clean
         data = await self._rpc("eth_call", [
@@ -165,8 +171,15 @@ class EVMWalletService:
         ])
         result_hex = data.get("result", "0x0")
         if not result_hex or result_hex == "0x":
-            return 0.0
-        raw = int(result_hex, 16)
+            return 0
+        return int(result_hex, 16)
+
+    async def get_erc20_balance(self, contract_addr: str, decimals: int = 18) -> float:
+        """Read ERC20 balanceOf(address) for the wallet, scaled to human units.
+
+        Display/valuation only — see get_erc20_balance_wei() for on-chain amounts.
+        """
+        raw = await self.get_erc20_balance_wei(contract_addr)
         return raw / (10 ** decimals)
 
     async def get_allowance(self, token_addr: str, spender: str) -> int:
