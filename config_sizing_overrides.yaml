@@ -47,7 +47,7 @@ strategy_token_tf_sizes:
         tier: A
     ZEC:
       4H:
-        pf: 1.64
+        pf: 1.69
         size_pct: 15.0
         source: main
         tier: C
