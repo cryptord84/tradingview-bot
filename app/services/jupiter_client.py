@@ -11,6 +11,8 @@ from solders.transaction import VersionedTransaction
 
 from app.config import get
 from app.database import log_wallet_tx
+from app.utils.errors import describe
+from app.utils.retry import retry_async
 
 logger = logging.getLogger("bot.jupiter")
 
@@ -233,12 +235,23 @@ class JupiterClient:
     }
 
     async def get_sol_price(self) -> float:
-        """Get SOL/USD price. Tries Binance first (no key, no rate limit), then CoinGecko."""
+        """Get SOL/USD price. Tries Binance first (no key, no rate limit), then CoinGecko.
+
+        Each source is retried on transient transport faults. Two independent
+        sources are not the same thing as resilience: on 2026-08-12 Binance
+        failed, CoinGecko raised a single ConnectTimeout, and the whole BUY
+        signal was discarded (`failed_engine_error` on SOLUSDT at 04:01). A
+        momentary connect failure to a price API should not cost a trade.
+        """
         try:
-            return await self._get_sol_price_binance()
+            return await retry_async(
+                self._get_sol_price_binance, label="SOL price (Binance)"
+            )
         except Exception as e:
-            logger.warning(f"Binance price failed, trying CoinGecko: {e}")
-            return await self._get_sol_price_coingecko()
+            logger.warning(f"Binance price failed, trying CoinGecko: {describe(e)}")
+            return await retry_async(
+                self._get_sol_price_coingecko, label="SOL price (CoinGecko)"
+            )
 
     async def _get_sol_price_binance(self) -> float:
         """Get SOL price from Binance US public API (no key required)."""
@@ -309,9 +322,14 @@ class JupiterClient:
 
         # Primary: Jupiter aggregator (1 token → USDC quote)
         token_info = self.JUPITER_PRICE_TOKENS.get(symbol)
+        # Both sources are retried on transient transport faults. This feeds
+        # position_monitor's TP/SL decisions (CLAUDE.md rule 8), so a dropped
+        # price is not a harmless miss — it is a poll where an open position
+        # went unmonitored.
         if token_info:
             mint, decimals = token_info
-            try:
+
+            async def _jupiter_quote() -> float:
                 in_amount = 10 ** decimals  # 1 token in atomic units
                 resp = await self._client.get(
                     "https://lite-api.jup.ag/swap/v1/quote",
@@ -323,20 +341,25 @@ class JupiterClient:
                     },
                 )
                 resp.raise_for_status()
-                out_amount = int(resp.json()["outAmount"])
-                return out_amount / 1e6  # USDC has 6 decimals
+                return int(resp.json()["outAmount"]) / 1e6  # USDC has 6 decimals
+
+            try:
+                return await retry_async(_jupiter_quote, label=f"Jupiter price {symbol}")
             except Exception as e:
-                logger.debug(f"Jupiter price quote failed for {symbol}: {e}")
+                logger.debug(f"Jupiter price quote failed for {symbol}: {describe(e)}")
 
         # Fallback: CoinGecko
         cg_id = self.COINGECKO_IDS.get(symbol)
         if cg_id:
-            resp = await self._client.get(
-                "https://api.coingecko.com/api/v3/simple/price",
-                params={"ids": cg_id, "vs_currencies": "usd"},
-            )
-            resp.raise_for_status()
-            return float(resp.json()[cg_id]["usd"])
+            async def _coingecko_price() -> float:
+                resp = await self._client.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={"ids": cg_id, "vs_currencies": "usd"},
+                )
+                resp.raise_for_status()
+                return float(resp.json()[cg_id]["usd"])
+
+            return await retry_async(_coingecko_price, label=f"CoinGecko price {symbol}")
 
         raise ValueError(f"Unknown token: {symbol}")
 

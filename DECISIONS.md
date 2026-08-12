@@ -15,6 +15,39 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-12 — Retry transient network failures in the price path
+
+**What:** Added `app/utils/retry.py::retry_async` (3 attempts, 0.4s exponential
+backoff, ~1.2s worst case). Applied to `jupiter_client.get_sol_price` (both
+Binance and CoinGecko sources) and `get_token_price` (Jupiter quote + CoinGecko
+fallback). Retries transient transport faults and 5xx only — 4xx, ValueError
+and KeyError raise immediately, verified by test.
+
+**Why:** A single CoinGecko `ConnectTimeout` discarded a whole BUY signal at
+04:01 on 08-12. The traceback (visible only because of the 08-11 `describe()` +
+`exc_info` work) pinned it exactly: `trade_engine.py:713` →
+`jupiter_client.py:241` → `httpx.ConnectTimeout`. `get_sol_price` already fell
+back Binance → CoinGecko, but *neither source was retried*, so one blip on each
+killed the signal. Two sources is not the same as resilience. This also
+surfaced as the smoke test's `lane_sizing[SOLUSDT]` failure — same event — and
+is the same failure class that killed the 08-06 LDO signal, our best
+walk-forward combo. Kamino logged 92 timeouts in 24h, so the upstream flakiness
+is real and ongoing.
+
+**Risk:** Adds up to ~1.2s latency to a signal when the network is failing;
+nil on the happy path (measured 0.24s for SOL). A retry cannot mask a bad
+price — each attempt re-fetches and the final failure still propagates, so
+existing error handling is unchanged.
+
+**Deliberately NOT applied** to `price_router.get_monitor_price`, the TP/SL
+price source (CLAUDE.md rule 8). It already has a WS → Binance-REST fallback
+chain and polls every 30s, so a single miss is cheap, whereas a signal is
+one-shot. Not changing the most safety-critical path without a demonstrated
+failure there.
+
+**Reversible:** Yes — the `retry_async` wrappers are a thin layer; unwrap to
+restore the direct calls.
+
 ## 2026-08-11 — Sold $26.67 of orphaned EVM tokens on Arbitrum
 
 **What:** Sold the entire untracked LDO (15.782116) and AAVE (0.250734) balances
