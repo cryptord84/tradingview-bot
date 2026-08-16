@@ -159,13 +159,19 @@ async def sweep_solana(tracked, min_usd, execute) -> list[str]:
             out.append(note + f"   [WOULD SWAP {lamports} lamports -> USDC]")
             continue
         try:
+            # jupiter_client.execute_swap returns {tx_signature, input_amount,
+            # output_amount, ...} and RAISES on failure — there is no "success"
+            # key. Probing for one made a completed swap print "FAILED: None"
+            # on 2026-08-16, and the follow-up retries then hit Jupiter 0x1788
+            # (empty source account) because the tokens were already sold. Trust
+            # the exception for failure and tx_signature for success.
             res = await j.execute_swap(
                 keypair=w.get_keypair(), input_mint=mint,
                 output_mint=j.usdc_mint, amount_lamports=lamports,
             )
-            ok = res.get("success")
-            out.append(note + f"   [SWAPPED tx={res.get('tx_id') or res.get('signature')} "
-                              f"{'OK' if ok else 'FAILED: ' + str(res.get('error'))}]")
+            sig = res.get("tx_signature")
+            got = (res.get("output_amount") or 0) / 1e6  # USDC has 6 decimals
+            out.append(note + f"   [SWAPPED {sig} -> {got:.6f} USDC]")
         except Exception as e:
             out.append(note + f"   [SWAP FAILED: {describe(e)}]")
     return out

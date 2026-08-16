@@ -15,11 +15,11 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
-## 2026-08-16 — Swept Binance orphans (+$32.75); Solana blocked by a Jupiter error
+## 2026-08-16 — Swept Binance + Solana orphans (+~$43.3 recovered)
 
 **What:** Added `scripts/sweep_orphans.py` (dry-run default) and ran it. Binance:
 sold 395.0 surplus ARB (order 125435582) and 46.29 OP (order 113506944).
-USDT 163.13 → **195.88, +$32.75**. Solana: **not completed** — see below.
+USDT 163.13 → **195.88, +$32.75**. Solana: PNUT + BONK also sold, ~$10.59 (see correction below). **Total recovered ~$43.3.**
 
 **Why:** Same class as the EVM orphans, but bigger. The wallet held 502.58 ARB
 while open position #84 accounted for only 107.5 — so the surplus had no TP, no
@@ -33,13 +33,28 @@ position. The sweep computes surplus = on-chain − sum(open position qty) per
 asset and sells only that. Verified after: ARB 502.58 → 107.58, position #84's
 107.5 intact.
 
-**Solana FAILED — open issue.** BONK (~$2.28) and PNUT (~$8.31) both fail with
-Jupiter program error `0x1788` (6024) at simulation. The quote succeeds
-(205773950 PNUT → 8310069 USDC) but the swap will not execute. **Not slippage**
-— reproduced identically at 100, 500 and 1500 bps. Note `jupiter_client`
-auto-retries only `0x1771` (SlippageToleranceExceeded), so this class gets no
-retry. Left in the wallet; ~$10.59 still untracked. Worth a look when the same
-error next blocks a real close, since it would hit a live Solana exit the same way.
+**Solana — CORRECTED 2026-08-16.** Originally logged here as failed with Jupiter
+error `0x1788`. **That was wrong: both swaps succeeded.** PNUT
+(`5G49tA9Zy4q5u14hB2UmFKZLXSwUru5Y7i924ioHShRgCeNfLqU8SVpZ8muRsbiShnaZJAGE`) and
+BONK (`bqod9PZiBUWiRBYAitun37v7dQBhTn4tGeGoULsqGks2gv8ipysbTbZxLWJZ4PhMcX7p7AsA`)
+both landed at 22:55:13 and are in `wallet_transactions` (ids 353/354). On-chain
+balances for both mints are now 0. **~$10.59 recovered, not stranded** — total
+across both lanes is ~$43.3, not $32.75.
+
+Two errors compounded into the false report:
+1. `sweep_orphans.py` probed `res.get("success")`, but `execute_swap` returns
+   `{tx_signature, output_amount, ...}` and RAISES on failure. A completed swap
+   printed `FAILED: None`. Fixed — it now reads `tx_signature`.
+2. The follow-up balance check read before the RPC reflected the swap, so
+   "balances unchanged" appeared to confirm the failure. **Verification of an
+   on-chain write must be a fresh read after settlement, not an immediate one.**
+
+The `0x1788` (6024) errors were self-inflicted: retrying a swap whose source
+account was already emptied. That is the diagnosis — **empty/insufficient source
+account**, consistent with failing after only 1324 of 1,399,700 compute units
+(an account-validation bail, not a swap-execution failure). Slippage was never
+involved, which is why 100/500/1500 bps all behaved identically. No Jupiter bug,
+and nothing here threatens a live Solana close.
 
 **Risk:** Low. Sold at market; realized proceeds were within 1.4% of the quoted
 ~$33.23, consistent with market-order slippage.
