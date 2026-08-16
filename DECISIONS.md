@@ -15,6 +15,41 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-16 — Swept Binance orphans (+$32.75); Solana blocked by a Jupiter error
+
+**What:** Added `scripts/sweep_orphans.py` (dry-run default) and ran it. Binance:
+sold 395.0 surplus ARB (order 125435582) and 46.29 OP (order 113506944).
+USDT 163.13 → **195.88, +$32.75**. Solana: **not completed** — see below.
+
+**Why:** Same class as the EVM orphans, but bigger. The wallet held 502.58 ARB
+while open position #84 accounted for only 107.5 — so the surplus had no TP, no
+SL and no exit path. BONK's 1,139,635 tokens match abandoned position #60's
+recorded 1,139,641 almost exactly: marked abandoned, never sold.
+
+**The important subtlety: orphans can be PARTIAL.** Treating "has an open
+position" as "don't touch" (what `sell_evm_orphans.py` does) would have missed
+the $29 of ARB entirely; selling the whole balance would have liquidated a live
+position. The sweep computes surplus = on-chain − sum(open position qty) per
+asset and sells only that. Verified after: ARB 502.58 → 107.58, position #84's
+107.5 intact.
+
+**Solana FAILED — open issue.** BONK (~$2.28) and PNUT (~$8.31) both fail with
+Jupiter program error `0x1788` (6024) at simulation. The quote succeeds
+(205773950 PNUT → 8310069 USDC) but the swap will not execute. **Not slippage**
+— reproduced identically at 100, 500 and 1500 bps. Note `jupiter_client`
+auto-retries only `0x1771` (SlippageToleranceExceeded), so this class gets no
+retry. Left in the wallet; ~$10.59 still untracked. Worth a look when the same
+error next blocks a real close, since it would hit a live Solana exit the same way.
+
+**Risk:** Low. Sold at market; realized proceeds were within 1.4% of the quoted
+~$33.23, consistent with market-order slippage.
+
+**Reversible:** No — trades are final. These were untracked strays.
+
+**Left alone deliberately:** ATOM $0.01, FLOKI ~$0, TIA ~$0, FARTCOIN $0.11,
+PENGU $0.08 — all under the $1 floor and under venue min-notional. Unsellable;
+attempting only burns fees on rejected orders.
+
 ## 2026-08-12 — Retry transient network failures in the price path
 
 **What:** Added `app/utils/retry.py::retry_async` (3 attempts, 0.4s exponential
