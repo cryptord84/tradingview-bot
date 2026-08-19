@@ -35,7 +35,8 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | 0 | Liquidity Sweep v1.0 (retired) | `USER;12e465c59f0941d2a4fef70e58003c45` | 4.0 | `staged/indicator_liq_sweep_v1.0.pine` |
 | 0 | VWAP Deviation v1.0 (retired) | `USER;53163d00de3843f1a78c67bfc88dbf6d` | 11.0 | `staged/indicator_vwap_dev_v1.0.pine` |
 | 0 | FVG v1.0 (retired) | `USER;4852215f50f54cbdad7d6ae82fb4ff07` | 5.0 | `staged/indicator_fvg_v1.0.pine` |
-| 0 | Donchian + ADX v1.0 (retired, old slot reused by VWAP Dev v1.1) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
+| 0 | Donchian + ADX v1.0 (**DESTROYED** — slot `bf538897…` overwritten by VWAP Dev v1.1; kept for history) | — | — | `staged/indicator_donchian_adx_v1.0.pine` |
+| 0 | **Donchian + ADX v1.1 (recreated 2026-08-19, bull-roster, no alerts yet)** | `USER;19990b656a724d1da67d8ff124d70bf3` | 1.0 | `staged/indicator_donchian_adx_v1.1.pine` |
 | 0 | EMA Ribbon + ADX v1.0 (retired) | `USER;c0ffe8e0dd034504a05de359eb6d41bd` | 2.0 | `staged/indicator_ema_ribbon_adx_v1.0.pine` |
 
 **Totals:** 23 alerts (all active), 7 indicators in production (FVG v1.2, VWAP Dev v1.2, Stoch RSI v1.1, EMA Ribbon v1.1, Donchian v1.1, Donchian HTF v1.0). **As of 2026-06-09 the ENTIRE roster has edge-triggered CLOSE exits restored and fires on bar close only** — full-roster audit via `list_alerts` confirmed all on new pine_ids v1.0 with realtimeTrig=false.
@@ -158,7 +159,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 - Replaced by FVG v1.1; all 9 alerts repointed via `modifyRestartAlert`
 - Source kept at `staged/indicator_fvg_v1.0.pine` for reference
 
-## Donchian + ADX v1.0 (bull-roster — deployed 2026-05-08 evening)
+## Donchian + ADX v1.1 (bull-roster — script recreated 2026-08-19, NO ALERTS DEPLOYED)
 
 **Logic:** Donchian Breakout v1.0 with regime gate: `ADX(14) > 25 AND not in BB squeeze`. Designed to suppress entries in chop and only fire during sustained trend regimes.
 **Slot:** `USER;bf538897546a48519a83e588ff562e72` · script v1.0 · `staged/indicator_donchian_adx_v1.0.pine`
@@ -171,7 +172,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 
 ---
 
-## EMA Ribbon + ADX v1.0 (bull-roster — deployed 2026-05-08 evening)
+## EMA Ribbon + ADX v1.0 (bull-roster — script staged, NO ALERTS DEPLOYED)
 
 **Logic:** EMA Ribbon v1.0 with same regime gate: `ADX(14) > 25 AND not in BB squeeze`. Highest WIN-RATE family in bull-window backtest (18% of combos passed PF≥1.4).
 **Slot:** `USER;c0ffe8e0dd034504a05de359eb6d41bd` · script v1.0 · `staged/indicator_ema_ribbon_adx_v1.0.pine`

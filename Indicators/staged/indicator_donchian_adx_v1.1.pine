@@ -1,0 +1,103 @@
+//@version=6
+// Donchian + ADX v1.1 — Alert Indicator (recreated 2026-08-19)
+// Mirror of Donchian Breakout v1.0 with a regime confirmation gate.
+//
+// Bull-period backtest (2026-05-08):
+//   FLOKI 4H  PF=2.31  WR=44.4%  18 trades  (Δ +1.27 vs full-period baseline)
+//   SOL   4H  PF=1.36  WR=40.9%  22 trades  (multi-strat SOL bull strength)
+//   MATIC 4H  PF=1.16  WR=35.3%  17 trades
+//
+// Signal logic: 20-bar Donchian breakout + volume surge + regime gate
+//   Regime gate: ADX(14) > 25 AND not in Bollinger squeeze (BB inside Keltner)
+//   BUY:   close breaks above prior-bar channel high + volume surge + trend regime
+//   (CLOSE removed — bot manages exits via TP/SL monitor)
+//
+// Mirrors backtesting/strategies.py:strategy_donchian_regime → _apply_regime_filter(regime="trend").
+
+indicator("Donchian + ADX v1.1 — Alerts", overlay=true, max_bars_back=500)
+
+// ── Inputs ────────────────────────────────────────────────────────────────────
+var grp_wh   = "Webhook"
+var grp_ch   = "Channel"
+var grp_vol  = "Volume Filter"
+var grp_reg  = "Regime Filter"
+var grp_risk = "Risk"
+var grp_disp = "Display"
+
+webhook_secret = input.string("CHANGE_ME", "Webhook Secret",        group=grp_wh)
+chPeriod       = input.int(20,   "Channel Period",     minval=5,    group=grp_ch)
+volLen         = input.int(20,   "Volume MA Length",   minval=5,    group=grp_vol)
+volMult        = input.float(1.5, "Min Volume (× MA)", step=0.1,    group=grp_vol)
+adxLen         = input.int(14,   "ADX Length",         minval=5,    group=grp_reg)
+adxThresh      = input.float(25.0, "ADX Threshold",    step=1.0,    group=grp_reg)
+useSqueezeBlock= input.bool(true, "Block during BB squeeze",        group=grp_reg)
+bbLen          = input.int(20,   "BB/KC Length",       minval=5,    group=grp_reg)
+kcMult         = input.float(1.5, "Keltner Mult",      step=0.1,    group=grp_reg)
+confidence     = input.int(70,   "Confidence Score",   minval=1, maxval=100, group=grp_risk)
+leverage       = input.int(2,    "Suggested Leverage", minval=1, maxval=10,  group=grp_risk)
+pos_size       = input.float(15.0, "Position Size %",  minval=1.0, maxval=100.0, step=1.0, group=grp_risk)
+realtimeTrig   = input.bool(false, "Real-time Trigger (vs Bar Close)", group=grp_risk)
+showCh         = input.bool(true, "Show Channel",      group=grp_disp)
+
+// ── Calculations ──────────────────────────────────────────────────────────────
+ch_upper = ta.highest(high, chPeriod)[1]
+ch_lower = ta.lowest(low,   chPeriod)[1]
+ch_mid   = (ch_upper + ch_lower) / 2
+
+volOk   = volume > ta.sma(volume, volLen) * volMult
+atr_val = ta.atr(14)
+rsi_val = ta.rsi(close, 14)
+
+// ── Regime gate: ADX > threshold AND not in BB squeeze ───────────────────────
+[_diPlus, _diMinus, adx_val] = ta.dmi(adxLen, adxLen)
+
+bb_mid   = ta.sma(close, bbLen)
+bb_std   = ta.stdev(close, bbLen)
+bb_upper = bb_mid + 2 * bb_std
+bb_lower = bb_mid - 2 * bb_std
+
+// Mirror backtesting/indicators.py: rolling mean of |close - close[1]| as KC width
+hlr      = ta.sma(math.abs(close - close[1]), bbLen)
+kc_upper = bb_mid + kcMult * hlr
+kc_lower = bb_mid - kcMult * hlr
+
+in_squeeze = bb_lower > kc_lower and bb_upper < kc_upper
+regime_ok  = adx_val > adxThresh and (not useSqueezeBlock or not in_squeeze)
+
+// ── Signals ───────────────────────────────────────────────────────────────────
+long_entry  = ta.crossover(close, ch_upper) and volOk and regime_ok
+
+// ── Plots ─────────────────────────────────────────────────────────────────────
+plot(showCh ? ch_upper : na, "Channel High", color=color.new(color.green, 50), linewidth=1)
+plot(showCh ? ch_lower : na, "Channel Low",  color=color.new(color.red, 50),   linewidth=1)
+plot(showCh ? ch_mid   : na, "Channel Mid",  color=color.new(color.gray, 60),  linewidth=1)
+
+plotshape(long_entry,  "Long Entry",  shape.triangleup,   location.belowbar, color.green,  size=size.small)
+
+
+// Optional regime status indicator (small dot above bar when regime allows entries)
+plotshape(regime_ok and not long_entry, "Regime OK", shape.circle, location.bottom, color.new(color.aqua, 70), size=size.tiny)
+
+// ── Webhook Alerts ────────────────────────────────────────────────────────────
+_sym   = syminfo.ticker
+_tf    = timeframe.period
+_strat = "Donchian + ADX v1.1"
+_freq  = realtimeTrig ? alert.freq_once_per_bar : alert.freq_once_per_bar_close
+
+if long_entry
+    alert('{"secret":"' + webhook_secret + '"' +
+          ',"signal_type":"BUY"' +
+          ',"symbol":"' + _sym + '"' +
+          ',"entry_price_estimate":' + str.tostring(close) +
+          ',"confidence_score":' + str.tostring(confidence) +
+          ',"suggested_leverage":' + str.tostring(leverage) +
+          ',"suggested_position_size_percent":' + str.tostring(pos_size) +
+          ',"rsi":' + str.tostring(math.round(rsi_val, 2)) +
+          ',"atr":' + str.tostring(atr_val) +
+          ',"adx":' + str.tostring(math.round(adx_val, 2)) +
+          ',"timeframe":"' + _tf + '"' +
+          ',"strategy":"' + _strat + '"' +
+          '}', _freq)
+
+// ── Alert Conditions (for manual alert setup in TV UI) ────────────────────────
+alertcondition(long_entry, "Donch+ADX — BUY",   "Donch+ADX BUY")

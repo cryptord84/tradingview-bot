@@ -15,6 +15,43 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-19 — Recreated the Donchian + ADX bull-roster script
+
+**What:** New TV slot `USER;19990b656a724d1da67d8ff124d70bf3` — "Donchian + ADX
+v1.1 — Alerts", 0 errors / 0 warnings, 14 inputs, `in_12` (realtimeTrig) =
+false so it fires on bar close. Source saved to
+`staged/indicator_donchian_adx_v1.1.pine`. **No alerts created** — script only.
+
+**Why:** The original v1.0 slot `bf538897…` still carries the name "Donchian +
+ADX v1.0" but its title is "VWAP Deviation v1.1" — it was overwritten by the
+slot-overwrite bug and the indicator no longer existed. It is 1 of the 7
+bull-roster combos, so the roster would have deployed with a hole in it. BTC
+moved $64,369 → $69,284 today and the regime went from 1/4 to **2/4** factors
+(ADX slope flipped positive; the EMA200 gap closed from +11.7% to +3.8%), so
+this stopped being hypothetical.
+
+**Version bumped v1.0 → v1.1 deliberately.** The slot name, the `indicator()`
+title and the `_strat` payload string now all read v1.1. Leaving it at v1.0
+would have recreated the exact name/title mismatch that made the old slot so
+confusing to diagnose. `_normalize_strategy_name` strips version suffixes, so
+sizing overrides still resolve.
+
+**Method:** `saveNew()` from webpack module **957019** — the old 752174 is gone.
+Signature is `saveNew({scriptSource, scriptName, allowOverwrite, currentVersion})`
+POSTing to `save/new`. `allowOverwrite` was omitted, so it defaults false and
+**cannot clobber an existing slot** — the safeguard that was missing when v1.0
+was destroyed. No editor binding involved, so CLAUDE.md rules 2/3 do not apply.
+
+**Risk:** Low. Verified after the write that all three slots are intact and
+distinct: `bf538897…` still holds VWAP Dev v1.1, `c0ffe8e0…` still holds EMA
+Ribbon + ADX v1.0, and the new slot holds the recreated script.
+
+**Reversible:** Yes — delete the new slot; nothing references it yet.
+
+**Still outstanding:** no bull-roster alerts exist, by design — the regime is
+NOT bull (needs ADX > 25, currently 15.0, and close above EMA200). Alert
+creation is also blocked on the alerts-API rotation logged in review_list.
+
 ## 2026-08-19 — Disabled Kalshi whale tracker; added job/resource checks to the health report
 
 **What:** `kalshi.whale_tracker.enabled: false`. Added a SCHEDULED JOBS section to
