@@ -309,46 +309,69 @@ class SignalQueue:
             )
             await engine.shutdown()
 
-        # Process in priority order
-        for signal, source_ip in batch:
-            engine = TradeEngine()
-            try:
-                # Check position limit before processing
-                risk_cfg = get("risk")
-                max_positions = risk_cfg.get("max_open_positions", 3)
-                open_count = get_position_count("open")
-                if open_count >= max_positions and signal.signal_type.value == "BUY":
-                    logger.warning(
-                        f"Skipping {signal.symbol} (conf:{signal.confidence_score}) — "
-                        f"max positions reached after higher-priority trades"
+        # Process in priority order.
+        #
+        # Wrapped in try/finally so the re-arm below ALWAYS runs: a signal that
+        # arrives while this drain is processing would otherwise be stranded in
+        # self._queue indefinitely. enqueue() only schedules a new drain when
+        # `self._drain_task.done()`, and this task is not done until every
+        # signal in the batch has been processed — which takes ~45s+ per signal
+        # once a Claude decision and a swap are involved.
+        #
+        # Observed 2026-08-19: a PNUT CLOSE drained at 12:00:33, a RENDER BUY
+        # arrived at 12:00:40 mid-processing, and it was still sitting at
+        # disposition='received' 4.5 hours later — it would have waited for the
+        # next unrelated webhook to sweep it up. Silent, and it loses trades.
+        try:
+            for signal, source_ip in batch:
+                engine = TradeEngine()
+                try:
+                    # Check position limit before processing
+                    risk_cfg = get("risk")
+                    max_positions = risk_cfg.get("max_open_positions", 3)
+                    open_count = get_position_count("open")
+                    if open_count >= max_positions and signal.signal_type.value == "BUY":
+                        logger.warning(
+                            f"Skipping {signal.symbol} (conf:{signal.confidence_score}) — "
+                            f"max positions reached after higher-priority trades"
+                        )
+                        update_signal_disposition(
+                            signal.signal_log_id, "skipped_max_positions",
+                            reason=f"{open_count}/{max_positions} open positions cap reached",
+                        )
+                        await engine.telegram.send_message(
+                            f"Signal Queue: SKIPPED {signal.symbol} {signal.timeframe or ''} "
+                            f"(conf:{signal.confidence_score}) — max positions reached"
+                        )
+                    elif signal.signal_type.value == "BUY" and (corr := correlation_check(signal.symbol)):
+                        logger.warning(
+                            f"Skipping {signal.symbol} — correlation cap ({corr['group']} "
+                            f"{len(corr['held'])}/{corr['limit']})"
+                        )
+                        update_signal_disposition(
+                            signal.signal_log_id, "skipped_correlation",
+                            reason=f"{corr['group']} cap {len(corr['held'])}/{corr['limit']} (held: {','.join(corr['held'][:3])})",
+                        )
+                        await engine.telegram.send_message(
+                            f"Signal Queue: SKIPPED {signal.symbol} — correlation cap "
+                            f"({corr['group']} {len(corr['held'])}/{corr['limit']})"
+                        )
+                    else:
+                        await engine.process_signal(signal, source_ip)
+                except Exception as e:
+                    logger.error(f"Signal queue processing error for {signal.symbol}: {e}")
+                finally:
+                    await engine.shutdown()
+        finally:
+            # Re-arm if anything landed while we were processing. Must be in a
+            # finally so a crash mid-batch cannot strand the remainder either.
+            async with self._lock:
+                if self._queue:
+                    logger.info(
+                        f"Signal queue: {len(self._queue)} signal(s) arrived during "
+                        f"processing — re-arming drain"
                     )
-                    update_signal_disposition(
-                        signal.signal_log_id, "skipped_max_positions",
-                        reason=f"{open_count}/{max_positions} open positions cap reached",
-                    )
-                    await engine.telegram.send_message(
-                        f"Signal Queue: SKIPPED {signal.symbol} {signal.timeframe or ''} "
-                        f"(conf:{signal.confidence_score}) — max positions reached"
-                    )
-                elif signal.signal_type.value == "BUY" and (corr := correlation_check(signal.symbol)):
-                    logger.warning(
-                        f"Skipping {signal.symbol} — correlation cap ({corr['group']} "
-                        f"{len(corr['held'])}/{corr['limit']})"
-                    )
-                    update_signal_disposition(
-                        signal.signal_log_id, "skipped_correlation",
-                        reason=f"{corr['group']} cap {len(corr['held'])}/{corr['limit']} (held: {','.join(corr['held'][:3])})",
-                    )
-                    await engine.telegram.send_message(
-                        f"Signal Queue: SKIPPED {signal.symbol} — correlation cap "
-                        f"({corr['group']} {len(corr['held'])}/{corr['limit']})"
-                    )
-                else:
-                    await engine.process_signal(signal, source_ip)
-            except Exception as e:
-                logger.error(f"Signal queue processing error for {signal.symbol}: {e}")
-            finally:
-                await engine.shutdown()
+                    self._drain_task = asyncio.create_task(self._drain_after(delay))
 
 
 # Singleton queue

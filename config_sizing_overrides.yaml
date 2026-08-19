@@ -151,7 +151,7 @@ strategy_token_tf_sizes:
         tier: A
     INJ:
       1D:
-        pf: 2.72
+        pf: 2.79
         size_pct: 20.0
         source: main
         tier: B

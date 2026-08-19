@@ -15,6 +15,35 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-19 — Fixed a race that stranded signals in the queue
+
+**What:** `SignalQueue._drain_after` now re-arms in a `finally` if anything
+landed while it was processing. Added a regression test that fails on the old
+code and passes on the new.
+
+**Why:** A signal arriving *during* a drain was orphaned indefinitely.
+`enqueue()` only schedules a drain when `self._drain_task.done()`, but the task
+is not done until the whole batch is processed — ~45s+ per signal once a Claude
+decision and a swap are involved. The drain had already snapshotted and cleared
+the queue, so the new arrival had nobody to collect it. Caught live: a PNUT
+CLOSE drained at 12:00:33, a RENDER BUY arrived at 12:00:40, and it was still
+`disposition='received'` **4.5 hours later**. It would have sat there until some
+unrelated webhook happened to arrive and sweep it up.
+
+Silent, and it loses trades — the stranded signal never reaches the engine, so
+none of the existing rejection/disposition paths ever report it.
+
+**Risk:** Low. The re-arm is in a `finally`, so a crash mid-batch cannot strand
+the remainder either. Worst case is one extra drain cycle on an empty queue,
+which returns immediately.
+
+**Reversible:** Yes — drop the `finally` block.
+
+**Not carried over:** the stranded RENDER signal itself was 4.5h stale by the
+time it was found; the restart's startup sweep marked it `dropped_restart`
+(accurate). Executing a stale breakout signal at a moved price would have been
+worse than dropping it.
+
 ## 2026-08-16 — Swept Binance + Solana orphans (+~$43.3 recovered)
 
 **What:** Added `scripts/sweep_orphans.py` (dry-run default) and ran it. Binance:
