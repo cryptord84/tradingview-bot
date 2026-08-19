@@ -15,6 +15,43 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-19 — Disabled Kalshi whale tracker; added job/resource checks to the health report
+
+**What:** `kalshi.whale_tracker.enabled: false`. Added a SCHEDULED JOBS section to
+`health_report.py` covering launchd exit codes, output freshness, and bot CPU/RSS.
+
+**Why (whale tracker):** Kalshi has not traded in 30+ days with $143.18 idle, yet
+this scanned 30 markets every 60s — 874 log lines and ~1900 httpx calls per 10
+minutes, with the bot averaging 76% CPU over a 7-day run. It feeds a dashboard
+panel and a dry-run gate for a lane that is not running. After the change: 3
+whale lines per restart window.
+
+**Why (health checks):** the user asked why the nightly checks had not surfaced
+this. They hadn't because the report only ever inspected trading DATA — P&L,
+positions, signals — and never the machine or the jobs producing that data. Two
+things were consequently invisible for weeks: this CPU burn, and
+`com.tradingbot.price-source-audit` exiting 1 with 4-6 failing checks **every day
+for 12+ days**. Nothing read launchd exit codes. The new section catches both,
+and flags job output that goes stale.
+
+**Risk:** Losing whale data breaks the whale-gate backtest idea in review_list,
+which needs a rolling history. Accepted — that idea is gated behind a Kalshi
+restart that has no date. Re-enable together with any Kalshi revival.
+
+**Reversible:** Yes — `enabled: true`.
+
+**Also established (no change made):** the "no live combo is a WF passer" finding
+is a CONVERSION problem, not a deployment one. VWAP Dev/LDO/1D — the most stable
+passer, 7 of 7 nightlies, PF 2.01, OOS 3.58 — is already deployed and firing on
+alert `4665962153`. It has produced exactly 2 BUYs in 3 months and **both died to
+infrastructure**: 2026-06-05 `rejected_min_size` ($2.37 < $3.00, lane starved)
+and 2026-08-06 `failed_engine_error` (the blank-reason network timeout). Both
+causes are now fixed — the lane holds $48.49 after the orphan sweep, sizing LDO
+at $9.70 against a $5 floor, and retry_async landed 08-12. The remaining
+constraint is signal rarity on a 1D timeframe, not plumbing. Stoch RSI/COMP/4H
+(6 of 7) has no live alert — culled 2026-05-15 — and is the one real deployment
+candidate.
+
 ## 2026-08-19 — Fixed a race that stranded signals in the queue
 
 **What:** `SignalQueue._drain_after` now re-arms in a `finally` if anything

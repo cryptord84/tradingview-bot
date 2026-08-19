@@ -22,6 +22,7 @@ import glob
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -260,6 +261,77 @@ def section_errors(hours: int = 24) -> None:
         flag(f"{total} ERROR/CRITICAL log lines in the last {hours}h")
 
 
+def section_jobs() -> None:
+    """Scheduled-job health: exit codes, output freshness, bot CPU.
+
+    Added 2026-08-19 after the user asked why the nightly checks had not caught
+    two live problems. They hadn't because nothing here looked at the machine:
+      * kalshi whale_tracker had the bot pinned at 76% CPU scanning for a lane
+        that has not traded in 30+ days — no resource check existed.
+      * com.tradingbot.price-source-audit had exited 1 (4-6 failing checks)
+        every day for 12+ days — nothing read launchd exit codes.
+    Both were invisible because the report only ever inspected trading DATA,
+    never the jobs producing it.
+    """
+    hdr("SCHEDULED JOBS")
+
+    # launchd exit codes
+    try:
+        out = subprocess.run(["launchctl", "list"], capture_output=True,
+                             text=True, timeout=30).stdout
+        bad = []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 3 and parts[2].startswith(("com.tradingbot", "com.clawbot")):
+                status = parts[1]
+                if status not in ("0", "-"):
+                    bad.append((parts[2], status))
+        if bad:
+            for name, status in bad:
+                print(f"  FAILING  {name}  (last exit {status})")
+                flag(f"scheduled job {name} last exited {status}")
+        else:
+            print("  all tradingbot jobs last exited 0")
+    except Exception as e:
+        print(f"  launchctl unavailable ({type(e).__name__})")
+
+    # Output freshness — a job can be "registered" and silently not producing.
+    expected = {
+        "integration_smoke_*.log": 36,
+        "nightly_*_summary.txt": 36,
+        "kalshi_nightly_*_summary.txt": 36,
+    }
+    now = datetime.now().timestamp()
+    for pattern, max_age_h in expected.items():
+        files = sorted(glob.glob(os.path.join(RESULTS, pattern)), key=os.path.getmtime)
+        if not files:
+            print(f"  {pattern:34} NO OUTPUT EVER")
+            flag(f"no output ever produced for {pattern}")
+            continue
+        age_h = (now - os.path.getmtime(files[-1])) / 3600
+        state = "ok" if age_h <= max_age_h else "STALE"
+        print(f"  {pattern:34} {age_h:5.1f}h old  [{state}]")
+        if age_h > max_age_h:
+            flag(f"{pattern} output is {age_h:.0f}h old (expected within {max_age_h}h)")
+
+    # Bot CPU — cheap proxy for a runaway background loop.
+    try:
+        pid = subprocess.run(["pgrep", "-f", "venv/bin/uvicorn main:app"],
+                             capture_output=True, text=True, timeout=15).stdout.split()
+        if pid:
+            ps = subprocess.run(["ps", "-o", "%cpu=,rss=,etime=", "-p", pid[0]],
+                                capture_output=True, text=True, timeout=15).stdout.split()
+            cpu, rss, et = float(ps[0]), int(ps[1]) / 1024, ps[2]
+            print(f"  bot pid {pid[0]}: {cpu:.0f}% CPU, {rss:.0f}MB RSS, up {et}")
+            if cpu > 50:
+                flag(f"bot at {cpu:.0f}% CPU — check for a runaway background loop")
+        else:
+            print("  bot process NOT RUNNING")
+            flag("bot process not running")
+    except Exception as e:
+        print(f"  cpu check unavailable ({type(e).__name__})")
+
+
 def section_capital() -> None:
     hdr("CAPITAL")
     rows = q("SELECT timestamp, sol_usd, usdc_usd, tokens_usd, kamino_usd, kalshi_usd, total_usd "
@@ -302,6 +374,7 @@ def main() -> int:
     section_open()
     section_signals(a.days)
     section_roster()
+    section_jobs()
     section_errors(a.hours)
     section_capital()
 
