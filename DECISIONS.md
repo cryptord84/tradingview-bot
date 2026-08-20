@@ -15,6 +15,41 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-20 — Deployed the COMP alert (roster 23 -> 24)
+
+**What:** Created alert **`5417513312`** — `BINANCE:COMPUSDT`, resolution 240
+(4H), pineId `USER;452f801743764531b38407308ff41da6` (Stoch RSI v1.1). Verified
+after activation: `active: true`, 64-char webhook secret intact, `in_10=false`
+(bar close, no repaints), webhook URL correct. Tier C 9% — deployed as a watch,
+matching the LINK precedent.
+
+**Why:** Stoch RSI/COMP/4H passed walk-forward on 6 of the last 7 nightlies
+(PF 1.48, OOS 1.76, 35 trades) and had no live alert — it was culled 2026-05-15
+for stacking. It was the one genuine deployment candidate from the roster-gap
+analysis. Liquidity was verified first: $7.27 USDC -> 0.396087 COMP at **0.94%**
+implied cost on Arbitrum. That check is exactly what was skipped for INJ in May,
+which shipped an alert for a token with no execution lane and had to be culled.
+
+**Method:** deep-cloned the TIA/4H Stoch RSI alert `4816316288`, stripped the
+server-generated fields (`alertId`, `createTime`, `lastFireTime`,
+`lastFireBarTime`, `lastStopReason`, `lastError`, `complexity`), swapped
+`symbol`/`proSymbol` to COMP, then `createAlert` + `restartAlerts`. Cloning
+preserves `pineId`/`pineVersion` in `conditions[0].series[0]`, side-stepping the
+wrapper's field-stripping problem entirely — no interceptor needed.
+
+**Unblocking note:** the alerts API had blocked this since 2026-08-19. Root cause
+was NOT an empty collection — `coll._alerts` is a populated Map. Two schema
+changes broke every lookup: the id field is **`alertId`** (not `id`), and
+**`symbol` is an object** (`a.symbol.symbol`), so string matching silently
+matched nothing. Module also rotated to **951706**. All recorded in
+[[reference_tv_alerts_rest_api]].
+
+**Risk:** Low. Tier C is the smallest size band; the loss budget ($25/7d) still
+bounds it. COMP routes to the EVM/Arbitrum lane, which holds ~$48 USDC.
+
+**Reversible:** Yes — deactivate or delete alert `5417513312`. Nothing else
+references it.
+
 ## 2026-08-19 — Recreated the Donchian + ADX bull-roster script
 
 **What:** New TV slot `USER;19990b656a724d1da67d8ff124d70bf3` — "Donchian + ADX

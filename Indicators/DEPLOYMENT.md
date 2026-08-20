@@ -128,6 +128,7 @@ Update the **Changelog** at the bottom for any deployment event (script save, al
 | ✓ | MOODENG.P | 4H | 4606125675 | **WF passer (PF 2.13, Tier A 18%)** — repointed 2026-05-27 |
 | ✓ | PNUT | 4H | 4606392921 | **WF passer (PF 1.52, Tier B 13%)** — repointed 2026-05-27 |
 | ✓ | AAVE | 1D | 4665962766 | **WF passer** — repointed 2026-05-27; **routing moved Binance.US→EVM/Arbitrum 2026-05-30** (coins held on Arbitrum) |
+| ✓ | COMP | 4H | 5417513312 | **WF passer (Tier C 9% — deployed as a watch 2026-08-20)** — Stoch RSI v1.1, EVM/Arbitrum lane, liquidity verified 0.94% |
 | ✓ | LDO | 1D | 4665962153 | **WF passer (Tier B 13%)** — repointed 2026-05-27, Binance.US lane |
 | ✓ | ARB | 1D | 4736423474 | **WF passer (PF 2.40, OOS 2.27)** — repointed 2026-05-27, Binance.US lane |
 | — | _culled 2026-05-15:_ JUP 4H (`4606092343`) -$1.00, LDO 4H (`4659627111`) dup of 1D, COMP 4H (`4659627481`) stacking |
