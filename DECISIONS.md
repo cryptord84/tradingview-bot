@@ -15,6 +15,46 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-20 — Built the autonomous nightly agent (closes the report-vs-act gap)
+
+**What:** `scripts/autonomous_nightly.sh` + launchd `com.tradingbot.autonomous-nightly`,
+07:15 daily. Runs `health_report.py --quiet`; if findings exist AND the finding
+set changed since last run, invokes `claude -p` headless with a scoped prompt to
+investigate and fix, then Telegrams the summary. First job in this system that
+actually invokes Claude — everything else only reports.
+
+**Why:** The user asked whether they were still babysitting. They were. Full
+autonomy was granted 2026-08-11, but nothing ever triggered me, so it was
+theoretical: the roster gap sat 9 days in the digest unchanged, price-source-audit
+failed 12+ days, the whale tracker burned CPU for weeks, a signal sat stranded
+4.5 hours. Every one was found only when a session was opened. Reporting is not
+fixing.
+
+**Spend control — the binding constraint is the weekly allowance.** It fires only
+on a *changed* finding set. Digits are normalised first (`3 signals` and
+`4 signals` hash the same) so a ticking counter cannot re-fire it. The CPU line
+is excluded from the hash entirely: `ps -o %cpu` is a lifetime average on macOS
+and read 89% then 20.9% seconds apart on 2026-08-20, so it flickers in and out on
+its own and would have re-fired the agent most days. Verified: run 1 acts, runs
+2 and 3 skip silently.
+
+**Scope handed to the unattended agent** — bug/test fixes, observability, config
+that does not raise capital at risk, bot restarts, backtests, docs. Explicitly
+OUT: raising sizing tiers / max positions / leverage, deleting or deactivating
+alerts, moving funds, and raising `loss_budget.max_loss_usd`. It is told to log
+those to DECISIONS.md as "deferred, needs a human" instead. That is narrower than
+the standing grant on purpose — the grant assumes someone can react, and at 07:15
+nobody can.
+
+**Risk:** It can edit code and restart the bot with nobody watching. Bounded by:
+the out-of-scope list, the code-enforced `$25/7d` loss budget it cannot raise,
+`--allowed-tools` limited to Bash/Read/Edit/Write/Grep/Glob, and a Telegram
+summary every time it acts. Untested against a real finding set — the plumbing
+was verified with a stubbed binary, and headless `claude -p` was confirmed
+working from this environment, but its first genuine run is tomorrow 07:15.
+
+**Reversible:** Yes — `launchctl unload com.tradingbot.autonomous-nightly`.
+
 ## 2026-08-20 — Deployed the COMP alert (roster 23 -> 24)
 
 **What:** Created alert **`5417513312`** — `BINANCE:COMPUSDT`, resolution 240
