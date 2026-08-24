@@ -120,19 +120,33 @@ EOF
 # actually enforced: an unrelated command under Bash(git status:*) was refused
 # and wrote nothing. Bare "Bash" would have been unrestricted shell on a host
 # holding wallet keys and exchange credentials, with nobody watching.
-# Deliberately absent: Edit (no code changes), git push, bot restart, and
-# `python -c` / `python -` (arbitrary code execution, equivalent to a shell).
+# Deliberately absent: git push, bot restart, and `python -c` / `python -`
+# (arbitrary code execution, equivalent to a shell).
+#
+# 2026-08-23 incident: `Bash(grep:*)` was unqualified, so a malformed command of
+# the agent's own ("grep -c \"\"" with no path) swept the entire repo and
+# captured `.env` — wallet password and Binance.US key — into a task output file.
+# Local only, nothing committed or sent off-host, and the read-only grant meant
+# the agent could not even delete its own mess; it self-reported instead. grep is
+# now scoped to logs/, backtesting/results/, app/ and scripts/, so that command
+# fails instead of succeeding.
+#
+# Also fixed: the write grant was `Write(PROPOSALS.md)`, which never matched —
+# file-permission rules key off Edit(path), and Edit was in disallowed-tools. The
+# agent's analysis was silently discarded for three consecutive nights.
 OUT=$("$CLAUDE" -p "$(cat "$PROMPT_FILE")" \
         --allowed-tools \
           "Read Grep Glob" \
-          "Write(PROPOSALS.md)" \
+          "Edit(PROPOSALS.md)" \
           "Bash(venv/bin/python scripts/health_report.py:*)" \
           "Bash(git status:*)" "Bash(git diff:*)" "Bash(git log:*)" "Bash(git show:*)" \
           "Bash(sqlite3 data/trades.db:*)" \
           "Bash(curl -s http://localhost:8000/health:*)" \
           "Bash(launchctl list:*)" "Bash(ps:*)" "Bash(pgrep:*)" \
-          "Bash(tail:*)" "Bash(head:*)" "Bash(grep:*)" "Bash(wc:*)" "Bash(ls:*)" \
-          --disallowed-tools "Edit NotebookEdit WebFetch WebSearch Task" \
+          "Bash(tail:*)" "Bash(head:*)" "Bash(wc:*)" "Bash(ls:*)" \
+          "Bash(grep:*logs/*)" "Bash(grep:*backtesting/results/*)" \
+          "Bash(grep:*app/*)" "Bash(grep:*scripts/*)" \
+          --disallowed-tools "NotebookEdit WebFetch WebSearch Task" \
         2>&1)
 RC=$?
 

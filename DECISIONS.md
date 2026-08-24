@@ -15,6 +15,44 @@ digest parses these headers, so keep the `## YYYY-MM-DD — Title` shape exact.
 
 ---
 
+## 2026-08-24 — Nightly agent: fixed a secret leak and a silently-dead write grant
+
+**What:** Scoped `Bash(grep:*)` down to `logs/`, `backtesting/results/`, `app/`,
+`scripts/`. Swapped the broken `Write(PROPOSALS.md)` grant for
+`Edit(PROPOSALS.md)` and removed `Edit` from `--disallowed-tools`. Deleted the
+leaked temp file.
+
+**Why — two real defects, both mine:**
+
+1. **`.env` was captured into a task output file (2026-08-23).** `Bash(grep:*)`
+   was unqualified. RTK's `PreToolUse` hook rewrites `grep`, and a malformed
+   command from the agent (empty pattern, no path) swept the whole repo —
+   29M matches across 41,322 files — capturing the wallet encryption password
+   and Binance.US API key/secret. **Local only: never committed, never pushed,
+   never left the host** (verified `git log --all -S`: only `.env.example` and
+   `SETUP.md` placeholders are tracked). The read-only design worked as intended
+   for containment — the agent could not delete its own mess and self-reported
+   instead. File deleted; `/private/tmp` now clean.
+
+2. **The agent's output was discarded for three straight nights.**
+   `Write(PROPOSALS.md)` never matched, because file-permission rules key off
+   `Edit(path)` — and `Edit` was globally disallowed. So it ran, diagnosed
+   correctly, and had its conclusions dropped on 08-21, 08-22 and 08-23. Now
+   verified working end-to-end with a live probe.
+
+**Still exposed, needs a human decision:** real secret values persist in 4 local
+Claude transcript `.jsonl` files under `~/.claude/projects/` (Binance key in 2 of
+them). Not deleted — one is the live session and they are the user's history.
+Rotation is the durable fix; the Binance.US key is the one with reach since it
+can trade.
+
+**Root cause not yet fixed:** RTK's grep rewrite has no exclusion for `.env`,
+`keys/` or `config.yaml`. That is global hook config affecting every project, so
+it is left for the user. The project-level scope now makes the same command fail
+here regardless.
+
+**Risk:** Reduced. **Reversible:** Yes — git revert.
+
 ## 2026-08-20 — Built the autonomous nightly agent (closes the report-vs-act gap)
 
 **What:** `scripts/autonomous_nightly.sh` + launchd `com.tradingbot.autonomous-nightly`,
